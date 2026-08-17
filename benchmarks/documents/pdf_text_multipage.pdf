@@ -1,0 +1,746 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Length 2106 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 1. frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves) Tj T*
+(Section 2. three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the) Tj T*
+(Section 3. auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of) Tj T*
+(Section 4. coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed) Tj T*
+(Section 5. per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical) Tj T*
+(Section 6. engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The) Tj T*
+ET
+endstream
+endobj
+3 0 obj
+<< /Length 2625 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 7. Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File) Tj T*
+(Section 8. into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted) Tj T*
+(Section 9. pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman) Tj T*
+(Section 10. admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each) Tj T*
+(Section 11. three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file) Tj T*
+(Section 12. only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier) Tj T*
+ET
+endstream
+endobj
+4 0 obj
+<< /Length 2163 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 13. dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman) Tj T*
+(Section 14. the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of) Tj T*
+(Section 15. three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual) Tj T*
+(Section 16. patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman) Tj T*
+(Section 17. pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The) Tj T*
+(Section 18. Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Length 2062 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 19. coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and) Tj T*
+(Section 20. builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting) Tj T*
+(Section 21. coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself,) Tj T*
+(Section 22. coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol) Tj T*
+(Section 23. Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File) Tj T*
+(Section 24. three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file) Tj T*
+ET
+endstream
+endobj
+6 0 obj
+<< /Length 2529 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 25. into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it) Tj T*
+(Section 26. coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and) Tj T*
+(Section 27. against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself,) Tj T*
+(Section 28. auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine) Tj T*
+(Section 29. symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts,) Tj T*
+(Section 30. against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine) Tj T*
+ET
+endstream
+endobj
+7 0 obj
+<< /Length 2518 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 31. a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns) Tj T*
+(Section 32. coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for) Tj T*
+(Section 33. Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree.) Tj T*
+(Section 34. structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit) Tj T*
+(Section 35. accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit) Tj T*
+(Section 36. a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid) Tj T*
+ET
+endstream
+endobj
+8 0 obj
+<< /Length 2537 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 37. dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid) Tj T*
+(Section 38. Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan,) Tj T*
+(Section 39. and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks,) Tj T*
+(Section 40. patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting) Tj T*
+(Section 41. mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing) Tj T*
+(Section 42. a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The) Tj T*
+ET
+endstream
+endobj
+9 0 obj
+<< /Length 2510 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 43. blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into) Tj T*
+(Section 44. blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns) Tj T*
+(Section 45. Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through) Tj T*
+(Section 46. builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary) Tj T*
+(Section 47. counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision) Tj T*
+(Section 48. resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern) Tj T*
+ET
+endstream
+endobj
+10 0 obj
+<< /Length 2682 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 49. dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary) Tj T*
+(Section 50. frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman) Tj T*
+(Section 51. actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit) Tj T*
+(Section 52. proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only) Tj T*
+(Section 53. Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each) Tj T*
+(Section 54. itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted) Tj T*
+ET
+endstream
+endobj
+11 0 obj
+<< /Length 2328 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 55. each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan,) Tj T*
+(Section 56. blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each) Tj T*
+(Section 57. Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency) Tj T*
+(Section 58. three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file) Tj T*
+(Section 59. resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting) Tj T*
+(Section 60. against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a) Tj T*
+ET
+endstream
+endobj
+12 0 obj
+<< /Length 1859 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 61. blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only) Tj T*
+(Section 62. symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent) Tj T*
+(Section 63. auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns) Tj T*
+(Section 64. using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it) Tj T*
+(Section 65. accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for) Tj T*
+(Section 66. dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing) Tj T*
+ET
+endstream
+endobj
+13 0 obj
+<< /Length 2054 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 67. builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The) Tj T*
+(Section 68. the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a) Tj T*
+(Section 69. a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression) Tj T*
+(Section 70. a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream) Tj T*
+(Section 71. resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the) Tj T*
+(Section 72. pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed) Tj T*
+ET
+endstream
+endobj
+14 0 obj
+<< /Length 1599 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 73. using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost) Tj T*
+(Section 74. three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and) Tj T*
+(Section 75. a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and) Tj T*
+(Section 76. frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision) Tj T*
+(Section 77. multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for) Tj T*
+(Section 78. Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the) Tj T*
+ET
+endstream
+endobj
+15 0 obj
+<< /Length 1845 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 79. three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual) Tj T*
+(Section 80. a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual) Tj T*
+(Section 81. auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of) Tj T*
+(Section 82. Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency) Tj T*
+(Section 83. scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual) Tj T*
+(Section 84. Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive) Tj T*
+ET
+endstream
+endobj
+16 0 obj
+<< /Length 2071 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 85. hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual) Tj T*
+(Section 86. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when) Tj T*
+(Section 87. itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a) Tj T*
+(Section 88. auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the) Tj T*
+(Section 89. of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts,) Tj T*
+(Section 90. Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine) Tj T*
+ET
+endstream
+endobj
+17 0 obj
+<< /Length 2086 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 91. frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing) Tj T*
+(Section 92. proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan,) Tj T*
+(Section 93. auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks,) Tj T*
+(Section 94. mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns) Tj T*
+(Section 95. the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting) Tj T*
+(Section 96. the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted) Tj T*
+ET
+endstream
+endobj
+18 0 obj
+<< /Length 2203 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 97. structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural) Tj T*
+(Section 98. the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive) Tj T*
+(Section 99. frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks,) Tj T*
+(Section 100. into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks,) Tj T*
+(Section 101. and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine) Tj T*
+(Section 102. File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine) Tj T*
+ET
+endstream
+endobj
+19 0 obj
+<< /Length 2295 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 103. against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself,) Tj T*
+(Section 104. Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression) Tj T*
+(Section 105. dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing) Tj T*
+(Section 106. Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary) Tj T*
+(Section 107. patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine) Tj T*
+(Section 108. the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting) Tj T*
+ET
+endstream
+endobj
+20 0 obj
+<< /Length 2346 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 109. per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman) Tj T*
+(Section 110. for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a) Tj T*
+(Section 111. accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only) Tj T*
+(Section 112. larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis) Tj T*
+(Section 113. a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level) Tj T*
+(Section 114. using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis) Tj T*
+ET
+endstream
+endobj
+21 0 obj
+<< /Length 1852 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 115. Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural) Tj T*
+(Section 116. Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural) Tj T*
+(Section 117. analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into) Tj T*
+(Section 118. growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the) Tj T*
+(Section 119. Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and) Tj T*
+(Section 120. a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger) Tj T*
+ET
+endstream
+endobj
+22 0 obj
+<< /Length 2522 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 121. structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns) Tj T*
+(Section 122. multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream) Tj T*
+(Section 123. frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the) Tj T*
+(Section 124. builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The) Tj T*
+(Section 125. against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against) Tj T*
+(Section 126. structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural) Tj T*
+ET
+endstream
+endobj
+23 0 obj
+<< /Length 2072 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 127. per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive) Tj T*
+(Section 128. dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency) Tj T*
+(Section 129. the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns) Tj T*
+(Section 130. hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it) Tj T*
+(Section 131. scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and) Tj T*
+(Section 132. Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid) Tj T*
+ET
+endstream
+endobj
+24 0 obj
+<< /Length 1582 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 133. Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive) Tj T*
+(Section 134. a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing) Tj T*
+(Section 135. analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself,) Tj T*
+(Section 136. coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself,) Tj T*
+(Section 137. analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing) Tj T*
+(Section 138. File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted) Tj T*
+ET
+endstream
+endobj
+25 0 obj
+<< /Length 2369 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 139. patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it) Tj T*
+(Section 140. when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent) Tj T*
+(Section 141. Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds) Tj T*
+(Section 142. scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each) Tj T*
+(Section 143. into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary) Tj T*
+(Section 144. blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns) Tj T*
+ET
+endstream
+endobj
+26 0 obj
+<< /Length 2453 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 145. pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a) Tj T*
+(Section 146. File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with) Tj T*
+(Section 147. pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves) Tj T*
+(Section 148. resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns) Tj T*
+(Section 149. Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns) Tj T*
+(Section 150. coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid) Tj T*
+ET
+endstream
+endobj
+27 0 obj
+<< /Length 1981 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 151. patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid) Tj T*
+(Section 152. three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds) Tj T*
+(Section 153. Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one) Tj T*
+(Section 154. itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and) Tj T*
+(Section 155. of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression) Tj T*
+(Section 156. frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using) Tj T*
+ET
+endstream
+endobj
+28 0 obj
+<< /Length 1828 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 157. the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary) Tj T*
+(Section 158. analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream) Tj T*
+(Section 159. frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts,) Tj T*
+(Section 160. and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each) Tj T*
+(Section 161. actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine) Tj T*
+(Section 162. using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol) Tj T*
+ET
+endstream
+endobj
+29 0 obj
+<< /Length 2233 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 163. growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern) Tj T*
+(Section 164. when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through) Tj T*
+(Section 165. resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the) Tj T*
+(Section 166. itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays) Tj T*
+(Section 167. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit) Tj T*
+(Section 168. File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks,) Tj T*
+ET
+endstream
+endobj
+30 0 obj
+<< /Length 2128 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 169. frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using) Tj T*
+(Section 170. builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural) Tj T*
+(Section 171. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level) Tj T*
+(Section 172. it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level) Tj T*
+(Section 173. admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid) Tj T*
+(Section 174. a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman) Tj T*
+ET
+endstream
+endobj
+31 0 obj
+<< /Length 1939 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 175. admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a) Tj T*
+(Section 176. per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against) Tj T*
+(Section 177. and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted) Tj T*
+(Section 178. itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency) Tj T*
+(Section 179. accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier) Tj T*
+(Section 180. engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree.) Tj T*
+ET
+endstream
+endobj
+32 0 obj
+<< /Length 2221 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 181. File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine) Tj T*
+(Section 182. patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns) Tj T*
+(Section 183. dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing) Tj T*
+(Section 184. blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid) Tj T*
+(Section 185. of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman) Tj T*
+(Section 186. when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The) Tj T*
+ET
+endstream
+endobj
+33 0 obj
+<< /Length 2272 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 187. actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through) Tj T*
+(Section 188. dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File) Tj T*
+(Section 189. Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan,) Tj T*
+(Section 190. blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays) Tj T*
+(Section 191. Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of) Tj T*
+(Section 192. admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level) Tj T*
+ET
+endstream
+endobj
+34 0 obj
+<< /Length 2229 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 193. Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual) Tj T*
+(Section 194. for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the) Tj T*
+(Section 195. proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The) Tj T*
+(Section 196. larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost) Tj T*
+(Section 197. pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using) Tj T*
+(Section 198. analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using) Tj T*
+ET
+endstream
+endobj
+35 0 obj
+<< /Length 1738 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 199. a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and) Tj T*
+(Section 200. Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis) Tj T*
+(Section 201. actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through) Tj T*
+(Section 202. mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger) Tj T*
+(Section 203. actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file) Tj T*
+(Section 204. symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan,) Tj T*
+ET
+endstream
+endobj
+36 0 obj
+<< /Length 2356 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 205. Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level) Tj T*
+(Section 206. of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and) Tj T*
+(Section 207. builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree.) Tj T*
+(Section 208. resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream) Tj T*
+(Section 209. only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman) Tj T*
+(Section 210. Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency) Tj T*
+ET
+endstream
+endobj
+37 0 obj
+<< /Length 2177 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 211. and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts,) Tj T*
+(Section 212. Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level) Tj T*
+(Section 213. analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with) Tj T*
+(Section 214. Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a) Tj T*
+(Section 215. structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through) Tj T*
+(Section 216. per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid) Tj T*
+ET
+endstream
+endobj
+38 0 obj
+<< /Length 2006 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 217. mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only) Tj T*
+(Section 218. when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive) Tj T*
+(Section 219. admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File) Tj T*
+(Section 220. against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision) Tj T*
+(Section 221. blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into) Tj T*
+(Section 222. when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree.) Tj T*
+ET
+endstream
+endobj
+39 0 obj
+<< /Length 2284 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 223. blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves) Tj T*
+(Section 224. actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine) Tj T*
+(Section 225. scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier) Tj T*
+(Section 226. admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid) Tj T*
+(Section 227. using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical) Tj T*
+(Section 228. dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a) Tj T*
+ET
+endstream
+endobj
+40 0 obj
+<< /Length 2569 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 229. per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression) Tj T*
+(Section 230. structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost) Tj T*
+(Section 231. the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost) Tj T*
+(Section 232. proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent) Tj T*
+(Section 233. structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern) Tj T*
+(Section 234. frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a) Tj T*
+ET
+endstream
+endobj
+41 0 obj
+<< /Length 2418 >>
+stream
+BT /F1 11 Tf 60 760 Td 14 TL
+(Section 235. Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid) Tj T*
+(Section 236. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The) Tj T*
+(Section 237. counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for) Tj T*
+(Section 238. scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern) Tj T*
+(Section 239. symbol stream with one canonical hybrid Huffman tree. Adaptive File Compression using multi-level frequency analysis and a hybrid Huffman coder. The engine builds a per-file dictionary of frequent patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing the dictionary against actual counts, and coding the resulting mixed symbol stream) Tj T*
+(Section 240. patterns through a three-tier scan, admitting each pattern only when the Bit Cost Decision Engine proves it pays for itself, growing accepted patterns into larger structural blocks, auditing) Tj T*
+ET
+endstream
+endobj
+42 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 2 0 R >>
+endobj
+43 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 3 0 R >>
+endobj
+44 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 4 0 R >>
+endobj
+45 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 5 0 R >>
+endobj
+46 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 6 0 R >>
+endobj
+47 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 7 0 R >>
+endobj
+48 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 8 0 R >>
+endobj
+49 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 9 0 R >>
+endobj
+50 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 10 0 R >>
+endobj
+51 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 11 0 R >>
+endobj
+52 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 12 0 R >>
+endobj
+53 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 13 0 R >>
+endobj
+54 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 14 0 R >>
+endobj
+55 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 15 0 R >>
+endobj
+56 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 16 0 R >>
+endobj
+57 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 17 0 R >>
+endobj
+58 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 18 0 R >>
+endobj
+59 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 19 0 R >>
+endobj
+60 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 20 0 R >>
+endobj
+61 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 21 0 R >>
+endobj
+62 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 22 0 R >>
+endobj
+63 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 23 0 R >>
+endobj
+64 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 24 0 R >>
+endobj
+65 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 25 0 R >>
+endobj
+66 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 26 0 R >>
+endobj
+67 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 27 0 R >>
+endobj
+68 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 28 0 R >>
+endobj
+69 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 29 0 R >>
+endobj
+70 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 30 0 R >>
+endobj
+71 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 31 0 R >>
+endobj
+72 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 32 0 R >>
+endobj
+73 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 33 0 R >>
+endobj
+74 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 34 0 R >>
+endobj
+75 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 35 0 R >>
+endobj
+76 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 36 0 R >>
+endobj
+77 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 37 0 R >>
+endobj
+78 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 38 0 R >>
+endobj
+79 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 39 0 R >>
+endobj
+80 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 40 0 R >>
+endobj
+81 0 obj
+<< /Type /Page /Parent 82 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 41 0 R >>
+endobj
+82 0 obj
+<< /Type /Pages /Count 40 /Kids [42 0 R 43 0 R 44 0 R 45 0 R 46 0 R 47 0 R 48 0 R 49 0 R 50 0 R 51 0 R 52 0 R 53 0 R 54 0 R 55 0 R 56 0 R 57 0 R 58 0 R 59 0 R 60 0 R 61 0 R 62 0 R 63 0 R 64 0 R 65 0 R 66 0 R 67 0 R 68 0 R 69 0 R 70 0 R 71 0 R 72 0 R 73 0 R 74 0 R 75 0 R 76 0 R 77 0 R 78 0 R 79 0 R 80 0 R 81 0 R] >>
+endobj
+83 0 obj
+<< /Type /Catalog /Pages 82 0 R >>
+endobj
+84 0 obj
+<< /Title (AFC V7 test document) /Producer (afc-corpus) /CreationDate (D:20260101000000Z) >>
+endobj
+xref
+0 85
+0000000000 65535 f 
+0000000015 00000 n 
+0000000085 00000 n 
+0000002243 00000 n 
+0000004920 00000 n 
+0000007135 00000 n 
+0000009249 00000 n 
+0000011830 00000 n 
+0000014400 00000 n 
+0000016989 00000 n 
+0000019551 00000 n 
+0000022286 00000 n 
+0000024667 00000 n 
+0000026579 00000 n 
+0000028686 00000 n 
+0000030338 00000 n 
+0000032236 00000 n 
+0000034360 00000 n 
+0000036499 00000 n 
+0000038755 00000 n 
+0000041103 00000 n 
+0000043502 00000 n 
+0000045407 00000 n 
+0000047982 00000 n 
+0000050107 00000 n 
+0000051742 00000 n 
+0000054164 00000 n 
+0000056670 00000 n 
+0000058704 00000 n 
+0000060585 00000 n 
+0000062871 00000 n 
+0000065052 00000 n 
+0000067044 00000 n 
+0000069318 00000 n 
+0000071643 00000 n 
+0000073925 00000 n 
+0000075716 00000 n 
+0000078125 00000 n 
+0000080355 00000 n 
+0000082414 00000 n 
+0000084751 00000 n 
+0000087373 00000 n 
+0000089844 00000 n 
+0000089972 00000 n 
+0000090100 00000 n 
+0000090228 00000 n 
+0000090356 00000 n 
+0000090484 00000 n 
+0000090612 00000 n 
+0000090740 00000 n 
+0000090868 00000 n 
+0000090997 00000 n 
+0000091126 00000 n 
+0000091255 00000 n 
+0000091384 00000 n 
+0000091513 00000 n 
+0000091642 00000 n 
+0000091771 00000 n 
+0000091900 00000 n 
+0000092029 00000 n 
+0000092158 00000 n 
+0000092287 00000 n 
+0000092416 00000 n 
+0000092545 00000 n 
+0000092674 00000 n 
+0000092803 00000 n 
+0000092932 00000 n 
+0000093061 00000 n 
+0000093190 00000 n 
+0000093319 00000 n 
+0000093448 00000 n 
+0000093577 00000 n 
+0000093706 00000 n 
+0000093835 00000 n 
+0000093964 00000 n 
+0000094093 00000 n 
+0000094222 00000 n 
+0000094351 00000 n 
+0000094480 00000 n 
+0000094609 00000 n 
+0000094738 00000 n 
+0000094867 00000 n 
+0000094996 00000 n 
+0000095329 00000 n 
+0000095380 00000 n 
+trailer
+<< /Size 85 /Root 83 0 R /Info 84 0 R >>
+startxref
+95489
+%%EOF

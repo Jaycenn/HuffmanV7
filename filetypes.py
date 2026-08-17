@@ -59,6 +59,8 @@ _MAGIC = [
                    "application/octet-stream")),
     (b"AFC2", _hit(".afc", "AFC container (AFC2)", AFC,
                    "application/octet-stream")),
+    (b"AFC3", _hit(".afc", "AFC container (AFC3, component-aware)", AFC,
+                   "application/octet-stream")),
     (b"\x89PNG\r\n\x1a\n", _hit(".png", "PNG image", IMAGE, "image/png")),
     (b"\xff\xd8\xff", _hit(".jpg", "JPEG image", IMAGE, "image/jpeg")),
     (b"GIF87a", _hit(".gif", "GIF image", IMAGE, "image/gif")),

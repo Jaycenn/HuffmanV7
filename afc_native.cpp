@@ -653,8 +653,28 @@ static void build_lengths(const vector<uint32_t>& ids,
   package_merge(move(items), MAX_CODE_LEN, lengths);
 }
 
+// Tunables that the caller may vary per compression. These mirror EXACTLY the
+// four afc2.py module globals that presets.py assigns to, so the native core
+// can honour a preset instead of ignoring it:
+//
+//     dp          <- afc2.OPTS["dp"]
+//     dp_rounds   <- afc2.DP_ROUNDS
+//     merge_rounds<- afc2.MERGE_ROUNDS_V4
+//     min_freq    <- afc2.MIN_CANDIDATE_FREQ
+//
+// Defaults reproduce the historical compiled-in behaviour byte-for-byte, so
+// afc_compress() (the original ABI) is unchanged for existing callers.
+struct Params {
+  int dp = 1;
+  int dp_rounds = DP_ROUNDS;
+  int merge_rounds = MERGE_ROUNDS_V4;
+  int min_freq = MIN_CANDIDATE_FREQ;
+  int tune = 1;
+};
+
 static string compress_core(const uint8_t* data, uint32_t n, int fmt,
-                            int min_freq, int rounds, const int* lit_bits) {
+                            int min_freq, int rounds, const int* lit_bits,
+                            const Params& P) {
   vector<string> patterns;
   select_candidates(data, n, min_freq, lit_bits, patterns);
   PatIndex px;
@@ -665,13 +685,18 @@ static string compress_core(const uint8_t* data, uint32_t n, int fmt,
   final_audit(ids, patterns, lit_bits);
 
   unordered_map<uint32_t, int> lengths;
-  build_lengths(ids, lengths);
-  px.build(patterns);  // patterns are stable across the DP iterations
-  for (int r = 0; r < DP_ROUNDS; ++r) {
-    segment_optimal(data, n, px, patterns, lengths, ids);
+  // Mirrors afc2._compress_core: when OPTS["dp"] is false the DP loop AND the
+  // second final_audit are both skipped. Getting that wrong would change the
+  // output for the Fast preset, so the branch covers both statements.
+  if (P.dp) {
     build_lengths(ids, lengths);
+    px.build(patterns);  // patterns are stable across the DP iterations
+    for (int r = 0; r < P.dp_rounds; ++r) {
+      segment_optimal(data, n, px, patterns, lengths, ids);
+      build_lengths(ids, lengths);
+    }
+    final_audit(ids, patterns, lit_bits);
   }
-  final_audit(ids, patterns, lit_bits);
 
   build_lengths(ids, lengths);
   uint32_t max_id = 255 + (uint32_t)patterns.size();
@@ -687,8 +712,9 @@ static string compress_core(const uint8_t* data, uint32_t n, int fmt,
 extern "C" {
 
 // fmt: 0=auto, 1=afc1, 2=afc2;  adaptive: 0=baseline, 1=full pipeline
-int afc_compress(const uint8_t* data, uint32_t n, int adaptive, int fmt,
-                 void** out, uint32_t* outn) {
+static int afc_compress_impl(const uint8_t* data, uint32_t n, int adaptive,
+                             int fmt, const Params& P, void** out,
+                             uint32_t* outn) {
   string blob;
   if (n == 0) {
     blob = emit_raw_c(data, 0, fmt == 2);
@@ -719,29 +745,29 @@ int afc_compress(const uint8_t* data, uint32_t n, int adaptive, int fmt,
       for (uint32_t i = 0; i < n; ++i) ++freqs[data[i]];
       for (int b = 0; b < 256; ++b) lit_bits[b] = est_code_len(freqs[b], n);
     }
-    if (n < TUNE_SMALL) {
+    if (P.tune && n < TUNE_SMALL) {
       // per-file tuning by trial: both admission floors run (on parallel
       // threads where available); the smaller container wins, ties keep
       // the v3 floor
       string alt;
 #ifndef AFC_NO_THREADS
       thread t2([&] {
-        alt = compress_core(data, n, fmt, MIN_CANDIDATE_FREQ - 1,
-                            MERGE_ROUNDS_V4, lit_bits);
+        alt = compress_core(data, n, fmt, P.min_freq - 1,
+                            P.merge_rounds, lit_bits, P);
       });
-      blob = compress_core(data, n, fmt, MIN_CANDIDATE_FREQ,
-                           MERGE_ROUNDS_V4, lit_bits);
+      blob = compress_core(data, n, fmt, P.min_freq,
+                           P.merge_rounds, lit_bits, P);
       t2.join();
 #else
-      blob = compress_core(data, n, fmt, MIN_CANDIDATE_FREQ,
-                           MERGE_ROUNDS_V4, lit_bits);
-      alt = compress_core(data, n, fmt, MIN_CANDIDATE_FREQ - 1,
-                          MERGE_ROUNDS_V4, lit_bits);
+      blob = compress_core(data, n, fmt, P.min_freq,
+                           P.merge_rounds, lit_bits, P);
+      alt = compress_core(data, n, fmt, P.min_freq - 1,
+                          P.merge_rounds, lit_bits, P);
 #endif
       if (alt.size() < blob.size()) blob = move(alt);
     } else {
-      blob = compress_core(data, n, fmt, MIN_CANDIDATE_FREQ,
-                           MERGE_ROUNDS_V4, lit_bits);
+      blob = compress_core(data, n, fmt, P.min_freq,
+                           P.merge_rounds, lit_bits, P);
     }
   }
   *out = malloc(blob.size() ? blob.size() : 1);
@@ -749,6 +775,31 @@ int afc_compress(const uint8_t* data, uint32_t n, int adaptive, int fmt,
   memcpy(*out, blob.data(), blob.size());
   *outn = (uint32_t)blob.size();
   return 0;
+}
+
+// Original ABI, unchanged in signature and behaviour: engine defaults.
+// Existing callers and any prebuilt binary check keep working.
+int afc_compress(const uint8_t* data, uint32_t n, int adaptive, int fmt,
+                 void** out, uint32_t* outn) {
+  Params P;
+  return afc_compress_impl(data, n, adaptive, fmt, P, out, outn);
+}
+
+// Extended ABI: the same pipeline with the four preset-controlled tunables
+// supplied by the caller. This is what makes Fast and Maximum native-capable.
+// Passing the defaults reproduces afc_compress() byte-for-byte.
+int afc_compress_ex(const uint8_t* data, uint32_t n, int adaptive, int fmt,
+                    int dp, int dp_rounds, int merge_rounds, int min_freq,
+                    int tune, void** out, uint32_t* outn) {
+  Params P;
+  P.dp = dp;
+  P.dp_rounds = dp_rounds > 0 ? dp_rounds : 0;
+  P.merge_rounds = merge_rounds >= 0 ? merge_rounds : 0;
+  // min_freq must stay >= 2: the small-file trial also runs min_freq - 1, and
+  // a floor of 0 would admit every n-gram and blow up the candidate set.
+  P.min_freq = min_freq >= 2 ? min_freq : 2;
+  P.tune = tune;
+  return afc_compress_impl(data, n, adaptive, fmt, P, out, outn);
 }
 
 }  // extern "C"

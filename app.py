@@ -97,6 +97,10 @@ import db
 import filetypes   # content sniffing so restored files regain their real name
 import presets     # Part 2: Fast/Balanced/Maximum tunable presets
 
+# Every container version the engine can read. AFC3 is the [v7]
+# component-aware format; AFC1/AFC2 are unchanged and still decode.
+AFC_MAGICS = (b"AFC1", b"AFC2", b"AFC3")
+
 APP_STARTED_AT = time.time()
 
 main = Blueprint("main", __name__)
@@ -248,7 +252,7 @@ def _process_one(data, filename, fmt, adaptive, batch_id=None,
 
     This is the single code path used by /api/compress and /api/batch so the
     two can never drift apart."""
-    is_container = data[:4] in (b"AFC1", b"AFC2")
+    is_container = data[:4] in AFC_MAGICS
     t0 = time.perf_counter()
     if is_container:
         restored = engine.decompress_bytes(data)
@@ -341,7 +345,7 @@ def api_compress():
     adaptive = request.form.get("mode", "adaptive") != "baseline"
     preset = request.form.get("preset", presets.DEFAULT_PRESET)
     action = request.form.get("action", "auto")
-    is_container = data[:4] in (b"AFC1", b"AFC2")
+    is_container = data[:4] in AFC_MAGICS
     if action == "decompress" and not is_container:
         return jsonify(error="Decompress was selected, but this file is not an "
                              "AFC container."), 400
@@ -433,7 +437,7 @@ def api_decompress():
     if err:
         return jsonify(error=err), 400
 
-    if data[:4] not in (b"AFC1", b"AFC2"):
+    if data[:4] not in AFC_MAGICS:
         info = filetypes.sniff(data)
         if afcpak.is_archive(data):
             return jsonify(
@@ -451,12 +455,32 @@ def api_decompress():
     container = data[:4].decode("ascii", "replace")
     declared = None
     mode_name = ""
-    try:
-        meta = analysis.parse_container(data)
-        declared = meta.get("original_size")
-        mode_name = _MODE_NAMES.get(meta.get("mode"), "")
-    except Exception:
-        pass
+    component_note = ""
+    if container == "AFC3":
+        # [v7] Read the AFC3 header itself. analysis.parse_container()
+        # transparently unwraps to the INNER container, whose declared length
+        # covers only the pooled components — comparing that against the whole
+        # restored file would report a false integrity failure.
+        try:
+            import containers as _c
+            hi = _c.header_info(data)
+            declared = hi["original_length"]
+            mode_name = "component-aware (Hybrid-Huffman on %d of %d bytes)" % (
+                hi["pooled_bytes"], hi["pooled_bytes"] + hi["opaque_bytes"])
+            component_note = (
+                "%d components: %s B compressed with Hybrid-Huffman, %s B "
+                "already-compressed and preserved verbatim."
+                % (hi["segments"], f"{hi['pooled_bytes']:,}",
+                   f"{hi['opaque_bytes']:,}"))
+        except Exception:
+            pass
+    else:
+        try:
+            meta = analysis.parse_container(data)
+            declared = meta.get("original_size")
+            mode_name = _MODE_NAMES.get(meta.get("mode"), "")
+        except Exception:
+            pass
 
     t0 = time.perf_counter()
     try:
@@ -519,6 +543,7 @@ def api_decompress():
         sha256_status=sha_status, sha256_match=sha_match, sha256_note=sha_note,
         detected=kind["label"], family=kind["family"],
         container_aware=kind["container_aware"],
+        component_note=component_note,
         token=token)
 
 

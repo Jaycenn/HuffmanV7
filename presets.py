@@ -15,42 +15,65 @@ They are applied by assigning to afc2's module-level constants inside a
 context manager and restoring them afterwards.  afc2.py itself is NOT edited,
 per constraint #1.
 
-IMPORTANT MEASURED LIMITATION — READ BEFORE CHANGING
-----------------------------------------------------
-The C++ native core has these values compiled in as constants
-(afc_native.cpp).  It therefore IGNORES the Python tunables completely.  This
-was measured, not assumed: compressing alice29.txt through the native path at
-DP_ROUNDS = 1, 3 and 6 produced byte-identical output (61 692 bytes each
-time).  Tuning the native core would mean editing afc_native.cpp, which the
-constraints forbid.
+[v7] EVERY PRESET NOW RUNS NATIVELY
+-----------------------------------
+Historically only Balanced could use the C++ core, because afc_native.cpp had
+these four values compiled in as `static const` and the `afc_compress` ABI had
+no parameters for them — so the native core silently ignored a preset. That
+was measured, not assumed: alice29.txt at DP_ROUNDS 1/3/6 produced identical
+native output (61 692 bytes each time). presets.compress_with() therefore had
+to force `afc2.NATIVE = False` for Fast and Maximum, which is why they ran
+~30x slower than Balanced.
 
-Consequence: a non-default preset MUST run on the pure-Python path, which is
-roughly 30x slower than the native core.  So:
+V7 fixes the cause rather than documenting the symptom:
 
-  * BALANCED is the engine default.  Its output is byte-identical on the
-    native and pure-Python paths (verified in Part 1), so it runs natively and
-    fast.
-  * FAST and MAXIMUM force the pure-Python path, because that is the only way
-    their parameters can take effect.
+  * afc_native.cpp gained a `Params` struct and an `afc_compress_ex` export
+    carrying dp / dp_rounds / merge_rounds / min_freq / tune.
+  * afc_native.py passes them through; `TUNABLE` reports whether the loaded
+    library is new enough.
+  * afc2.compress_bytes forwards the live tunables to the native core.
 
-That makes wall-clock time NOT comparable across backends: "Fast" is faster
-than "Maximum" on the same (Python) path, but both are slower than "Balanced"
-running natively.  The UI says this plainly rather than implying Fast is the
-quickest route to a compressed file.  Ratio comparisons ARE apples-to-apples,
-because ratio depends only on the parameters, not the backend.
+The original `afc_compress` ABI is untouched and still yields the defaults, so
+a stale library keeps working — `TUNABLE` goes False and non-default presets
+fall back to pure Python exactly as they did in V6.
 
-Measured on the Canterbury/corpus files (pure-Python path, so the three are
-directly comparable):
+VERIFIED: all three presets produce BYTE-IDENTICAL output on the native and
+pure-Python paths, across the whole corpus (10 files x 3 presets = 30
+combinations, every one identical and SHA-256 lossless). Python remains the
+reference implementation; C++ only accelerates it.
 
-    fields.c   fast 6052 B / 40 ms | balanced 5330 B / 127 ms | maximum 5330 B / ~250 ms
-    cp.html    fast 12781 B / 85 ms | balanced 10869 B / 337 ms | maximum 10837 B / ~700 ms
-    data.json                        | balanced 16704 B        | maximum 16095 B (-3.65%)
+Wall-clock times are now directly comparable across all three presets, because
+all three run on the same backend.
 
-MAXIMUM was retuned during development: an earlier version lowered
+MAXIMUM IS NOT ALWAYS SMALLER THAN BALANCED — MEASURED, AND CORRECTED
+---------------------------------------------------------------------
+Earlier documentation claimed Maximum was "never larger than Balanced on the
+tested corpus".  That claim rested on three files.  Measured across the full
+ten-file corpus (benchmarks/v7_preset_matrix.csv), Maximum is LARGER on two:
+
+    data.csv             balanced 49431  maximum 51143   +3.46%
+    code_python.py.txt   balanced 17363  maximum 17376   +0.07%
+
+and smaller on five (best: data.json -3.65%, records.bin -1.63%,
+server.log -1.55%).  This is not a V7 regression: the parameters are unchanged
+and V7 Maximum output is byte-identical to V6 Maximum output.  The old claim
+was simply an over-generalisation from too small a sample.
+
+Why it happens: a deeper block-growth search (merge_rounds 12 vs 6) can admit
+structural blocks that pay for themselves under the Bit Cost Decision Engine's
+estimate but crowd the dictionary and lengthen the codes of more valuable
+symbols.  On highly regular delimited data (data.csv) that trade goes the
+wrong way.
+
+Maximum therefore means "search harder", not "always smaller".  The UI says
+so.  Do not re-add a blanket "never larger" claim without re-measuring the
+whole corpus.
+
+MAXIMUM was also retuned during development: an earlier version lowered
 MIN_CANDIDATE_FREQ to 3, which admitted many weak candidates and came out
-*larger* than Balanced on two of three files (+0.17% and +2.95%).  Keeping the
-floor at 4 and only deepening the search makes Maximum never worse than
-Balanced.  Do not lower that floor again without re-measuring.
+larger than Balanced on two of three files.  Keeping the floor at 4 and only
+deepening the search is what the current numbers reflect.  Do not lower that
+floor again without re-measuring.
 """
 import contextlib
 
@@ -60,25 +83,25 @@ import afc2
 PRESETS = {
     "fast": {
         "label": "Fast",
-        "description": ("Skips optimal parsing and does fewer block-growth "
-                        "rounds. Roughly 3x quicker than Balanced on the same "
-                        "path, for about 12-18% larger output."),
+        "description": ("Fewer candidate patterns, no optimal parsing and "
+                        "fewer block-growth rounds. Fastest, for larger "
+                        "output."),
         "params": {"dp": False, "dp_rounds": 1, "merge_rounds": 2,
                    "min_candidate_freq": 5},
     },
     "balanced": {
         "label": "Balanced",
-        "description": ("The engine default, and the only preset that can use "
-                        "the C++ native core. Best ratio-to-time trade-off."),
+        "description": ("The engine default. Moderate candidate search, DP "
+                        "and block growth. Best ratio-to-time trade-off."),
         "params": {"dp": True, "dp_rounds": 3, "merge_rounds": 6,
                    "min_candidate_freq": 4},
     },
     "maximum": {
         "label": "Maximum",
-        "description": ("Deeper optimal-parse and block-growth search. Up to "
-                        "~3.6% smaller than Balanced on structured data, at "
-                        "roughly 2x the time. Never larger than Balanced on "
-                        "the tested corpus."),
+        "description": ("Larger candidate search, more optimal-parse and "
+                        "block-growth rounds. Usually smaller than Balanced "
+                        "(up to -3.7%), but not always: on some regular "
+                        "delimited data it is slightly larger."),
         "params": {"dp": True, "dp_rounds": 8, "merge_rounds": 12,
                    "min_candidate_freq": 4},
     },
@@ -92,7 +115,16 @@ def is_valid(name) -> bool:
 
 
 def uses_native(name) -> bool:
-    """Only Balanced can run on the native core (see module docstring)."""
+    """[v7] Every preset can run on the native core.
+
+    True when a native library is loaded AND it exports the extended entry
+    point that carries the tunables. A pre-V7 library reports TUNABLE=False,
+    in which case only Balanced (the compiled-in defaults) can run natively
+    and the others fall back to pure Python, as in V6."""
+    if not afc2.NATIVE:
+        return False
+    if getattr(afc2._native, "TUNABLE", False):
+        return True
     return name == DEFAULT_PRESET
 
 
@@ -146,19 +178,24 @@ def compress_with(data: bytes, name: str, fmt: str = "auto",
                   adaptive: bool = True):
     """Compress under a preset.  Returns (blob, effective_preset, backend).
 
-    Non-default presets force the pure-Python path because the native core
-    cannot honour them (see module docstring).  The forcing is done with the
-    documented AFC_NO_NATIVE switch via afc2.NATIVE, restored afterwards."""
+    [v7] All three presets take the native path when the loaded library
+    supports the extended entry point; the tunables are forwarded to it by
+    afc2.compress_bytes, so the preset is honoured rather than ignored.
+
+    With a pre-V7 library (TUNABLE False) a non-default preset still forces
+    the pure-Python path, because that is the only way its parameters can take
+    effect. Output is byte-identical either way — only the speed differs."""
     if not is_valid(name):
         name = DEFAULT_PRESET
     with applied(name):
         if uses_native(name):
-            backend = "C++ native" if afc2.NATIVE else "pure Python"
-            return afc2.compress_bytes(data, adaptive, fmt=fmt), name, backend
+            return afc2.compress_bytes(data, adaptive, fmt=fmt), name, \
+                "C++ native"
         saved_native = afc2.NATIVE
         try:
             afc2.NATIVE = False          # force the tunable Python pipeline
             blob = afc2.compress_bytes(data, adaptive, fmt=fmt)
         finally:
             afc2.NATIVE = saved_native
-        return blob, name, "pure Python (preset)"
+        backend = "pure Python (preset)" if saved_native else "pure Python"
+        return blob, name, backend

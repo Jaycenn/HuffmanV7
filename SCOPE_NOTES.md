@@ -150,6 +150,52 @@ one queue/archive run. Add analytics queries to `db.py`, not to templates.
 `/api/history` and `/api/stats` return JSON for the logged-in user, which is
 enough to build charts without a new backend aggregation layer.
 
+## 11. V7 — what changed in the engine, and what did not
+
+V7 is the first part that deliberately edits engine files. §1 above ("the
+compression algorithm was not touched") described Parts 1-2 and remains true
+of them; it is superseded for V7 by this section.
+
+**Changed:** `afc2.py` and `afc_native.cpp`, to carry preset parameters into
+the native core. **Unchanged:** `afc.py` (containers, canonical/package-merge
+Huffman, the universal decoder) and `afc_engine.js`.
+
+The constraint-relevant facts for a panel:
+
+1. **The algorithm is the same.** No stage was added, removed or reordered.
+   What changed is that four values which were compiled into the C++ core are
+   now passed in as arguments, so a preset reaches it instead of being
+   silently ignored. Proof: all three presets produce **byte-identical**
+   containers on the native and pure-Python paths across the corpus (30
+   combinations), and Python is still the reference both are checked against.
+2. **The entropy stage is still Huffman-only.** No arithmetic/range/ANS, no
+   LZ77/78/LZW/LZSS or offset back-references, no BWT/MTF, no PPM, no ML.
+3. **Container-aware processing adds no compressor.** `containers.py` decides
+   *where* the existing engine is applied. It imports no compression library
+   and defines no function that compresses — both asserted by AST tests, the
+   same argument used for `afcpak.py` in §2. Every byte it compresses goes
+   through `afc2.compress_bytes`; every byte it does not is copied verbatim.
+4. **DOCX is not solved with ZIP/DEFLATE.** Deflated members are never
+   inflated and re-deflated — that would introduce DEFLATE as a second stage
+   and could not guarantee byte-exact reconstruction. They are preserved
+   verbatim instead. The consequence is reported rather than hidden: a
+   Word-generated DOCX gains little, because its XML is already compressed and
+   cannot be reached losslessly. Where the XML *is* reachable (a STORED
+   package) the engine compresses it by 90.2%.
+5. **Byte-exactness is structural, not hopeful.** The segment plan must
+   exactly tile the input — validated before anything is written — so
+   reconstruction is a concatenation and cannot drift even if the PDF/ZIP
+   parser is wrong about a file. Every document in the corpus is SHA-256
+   verified, including two full compress/decompress cycles.
+6. **Old containers still work.** AFC1/AFC2 are unchanged and dispatch on
+   magic before anything else; the old decoder raises on AFC3 rather than
+   misreading it. AFC3 is only emitted when it is smaller than the plain
+   container.
+
+Nothing in §7 was un-excluded: still no two-factor auth, no export /
+right-to-delete flows, no multi-language support, no webhooks, no scheduled
+automation, and no file encryption.
+
 ## 10. The Compress/Decompress page split (Part 3) is UI only
 
 The dashboard now has two pages, `/compress` and `/decompress`, instead of one

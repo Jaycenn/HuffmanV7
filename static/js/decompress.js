@@ -81,7 +81,7 @@
              + '<strong>Extract archive</strong> tab above.');
         return;
       }
-      if (four !== "AFC1" && four !== "AFC2") {
+      if (four !== "AFC1" && four !== "AFC2" && four !== "AFC3") {
         setErr('This is not an AFC file. The Decompress page only restores '
              + '<code>.afc</code> containers — open the '
              + '<a class="underline font-semibold" href="/compress">Compress '
@@ -190,7 +190,8 @@
     $("dIntegrity").innerHTML = j.integrity_ok
       ? '<span class="text-green-700">✓ VERIFIED</span>'
       : '<span class="text-maroon">✗ FAILED</span>';
-    $("dIntegrityNote").textContent = j.integrity_note || "";
+    $("dIntegrityNote").textContent =
+      (j.integrity_note || "") + (j.component_note ? " " + j.component_note : "");
 
     // Three distinct verdicts. "No reference" is NOT dressed up as a match:
     // without a recorded digest there is nothing to compare against.

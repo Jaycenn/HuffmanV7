@@ -128,6 +128,42 @@ def _byte_label(b: int) -> str:
 # container parsing (read-only mirror of the documented AFC1/AFC2 layout)
 # ===========================================================================
 
+# ---------------------------------------------------------------------------
+# [v7] AFC3 (component-aware) unwrapping
+# ---------------------------------------------------------------------------
+# An AFC3 container holds an ordinary AFC1/AFC2 container inside it — the one
+# produced from the pooled, compressible components of a PDF or DOCX. All the
+# introspection below (tree, code lengths, attribution) describes THAT inner
+# container, because it is the one the Hybrid-Huffman engine actually built.
+# Unwrapping here keeps every reader in this module working on AFC3 files
+# without duplicating their logic.
+
+def unwrap(blob: bytes) -> bytes:
+    """Return the inner coded container, following an AFC3 wrapper if present.
+
+    Non-AFC3 input is returned unchanged, so every caller can apply this
+    unconditionally."""
+    if len(blob) < 5 or blob[:4] != b"AFC3":
+        return blob
+    try:
+        import containers
+        pos = 5
+        _total, pos = containers._get_varint(blob, pos)
+        count, pos = containers._get_varint(blob, pos)
+        for _ in range(count):
+            _v, pos = containers._get_varint(blob, pos)
+        opaque_len, pos = containers._get_varint(blob, pos)
+        pos += opaque_len
+        pooled_len, pos = containers._get_varint(blob, pos)
+        return blob[pos:pos + pooled_len]
+    except Exception:
+        return blob
+
+
+def is_component_aware(blob: bytes) -> bool:
+    return len(blob) >= 4 and blob[:4] == b"AFC3"
+
+
 def parse_container(blob: bytes) -> dict:
     """Parse an AFC container header.
 
@@ -136,6 +172,7 @@ def parse_container(blob: bytes) -> dict:
     tree the encoder wrote — and `patterns` is the structural-block dictionary.
     Raises ValueError on anything that is not a coded container.
     """
+    blob = unwrap(blob)
     if len(blob) < 6 or blob[:4] not in (MAGIC1, MAGIC2):
         raise ValueError("not an AFC container")
     magic = blob[:4]
@@ -269,7 +306,8 @@ def _decode_symbols(blob, pos, want, patterns, lengths, want_bytes=False):
 # Feature 7 — hybrid Huffman tree, for visualisation
 # ===========================================================================
 
-def tree_report(blob: bytes, max_depth: int = 9, max_leaves: int = 900) -> dict:
+def tree_report(blob: bytes, max_depth: int = 9,
+                max_leaves: int = 900) -> dict:
     """Build a renderable view of the ACTUAL hybrid Huffman tree in a container.
 
     The whole point of the thesis title is that one tree mixes two kinds of
@@ -292,6 +330,7 @@ def tree_report(blob: bytes, max_depth: int = 9, max_leaves: int = 900) -> dict:
     literal-vs-block code-length distribution, which makes the split visible
     even where the drawing is truncated.
     """
+    blob = unwrap(blob)
     info = parse_container(blob)
     if info["raw"]:
         return {"raw": True, "summary": {"note": "Stored raw (no tree)."},
@@ -404,6 +443,7 @@ def attribution_report(blob: bytes) -> dict:
     Summing the two classes reproduces the whole-file saving, which is
     asserted in the test suite rather than assumed.
     """
+    blob = unwrap(blob)
     info = parse_container(blob)
     if info["raw"]:
         return {"raw": True, "note": "Stored raw — no coding was applied."}
@@ -453,6 +493,14 @@ def explain(blob: bytes, original_size: int = None) -> str:
 
     Built entirely from the attribution measured above — no new algorithm
     logic, and no claim the numbers do not support."""
+    # [v7] Keep the OUTER size before unwrapping. For an AFC3 file the inner
+    # container covers only the pooled components, so pairing its length with
+    # the caller's whole-file original size would overstate the saving wildly
+    # (a PDF that really saved 4.5% reported 98.4%). Percentages are always
+    # computed from two figures describing the same thing.
+    outer_len = len(blob)
+    component_aware = is_component_aware(blob)
+    blob = unwrap(blob)
     try:
         a = attribution_report(blob)
     except Exception:
@@ -460,21 +508,28 @@ def explain(blob: bytes, original_size: int = None) -> str:
     if a.get("raw"):
         return ("This file was stored raw — coding it would have made it "
                 "larger, so the fallback kept it byte-for-byte.")
-    orig = original_size or a["original_size"]
-    comp = len(blob)
+    if original_size:
+        orig, comp = original_size, outer_len       # whole-file view
+    else:
+        orig, comp = a["original_size"], len(blob)  # coded-portion view
     pct = 100.0 * (1 - comp / orig) if orig else 0.0
+    prefix = ""
+    if component_aware:
+        prefix = ("Container-aware: already-compressed components were "
+                  "preserved as-is and only the compressible parts were "
+                  "coded. ")
     blk = a["block"]
     lit = a["literal"]
     if a["total_bits_saved"] <= 0:
-        return ("This file barely compressed (%.1f%%): its byte distribution "
-                "is close to random, so few patterns paid for themselves."
-                % pct)
+        return (prefix + "This file barely compressed (%.1f%%): its byte "
+                "distribution is close to random, so few patterns paid for "
+                "themselves." % pct)
     if blk["symbols"] == 0:
-        return ("Saved %.1f%% using single-byte Huffman codes only — the Bit "
-                "Cost Decision Engine rejected every multi-byte pattern as "
-                "not worth its dictionary cost." % pct)
-    return ("Saved %.1f%%: %.0f%% of the savings came from %d structural "
-            "blocks (averaging %.1f bytes each), the rest from single-byte "
-            "Huffman codes."
+        return (prefix + "Saved %.1f%% using single-byte Huffman codes only — "
+                "the Bit Cost Decision Engine rejected every multi-byte "
+                "pattern as not worth its dictionary cost." % pct)
+    return (prefix + "Saved %.1f%%: %.0f%% of the savings came from %d "
+            "structural blocks (averaging %.1f bytes each), the rest from "
+            "single-byte Huffman codes."
             % (pct, blk["share_pct"], blk["dictionary_entries"],
                blk["avg_block_bytes"]))

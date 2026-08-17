@@ -78,6 +78,21 @@ if AVAILABLE:
                                   ctypes.POINTER(ctypes.c_uint32)]
     _LIB.afc_compress.restype = ctypes.c_int
 
+    # Extended entry point: same pipeline, caller-supplied tunables. Older
+    # libraries built before V7 do not export it; TUNABLE stays False and
+    # callers fall back to the pure-Python path for non-default presets
+    # exactly as V6 did, so a stale .so degrades instead of misbehaving.
+    TUNABLE = hasattr(_LIB, "afc_compress_ex")
+    if TUNABLE:
+        _LIB.afc_compress_ex.argtypes = [
+            ctypes.c_char_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_int,
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_uint32)]
+        _LIB.afc_compress_ex.restype = ctypes.c_int
+else:
+    TUNABLE = False
+
 
 def _take(outp, outn):
     data = ctypes.string_at(outp, outn.value)
@@ -85,12 +100,36 @@ def _take(outp, outn):
     return data
 
 
-def compress(data: bytes, adaptive: bool = True, fmt: str = "auto") -> bytes:
-    """Full v4 pipeline in one native call (byte-identical to pure Python)."""
+def compress(data: bytes, adaptive: bool = True, fmt: str = "auto",
+             params: dict = None) -> bytes:
+    """Full v4 pipeline in one native call (byte-identical to pure Python).
+
+    `params`, when given, carries the four preset-controlled tunables:
+
+        {"dp": bool, "dp_rounds": int, "merge_rounds": int,
+         "min_freq": int, "tune": bool}
+
+    They map 1:1 onto afc2.OPTS["dp"], afc2.DP_ROUNDS, afc2.MERGE_ROUNDS_V4
+    and afc2.MIN_CANDIDATE_FREQ, so a preset reaches the native core instead
+    of being silently ignored. Omitting `params` uses the engine defaults and
+    calls the original entry point, so nothing changes for existing callers.
+    """
     outp, outn = ctypes.c_void_p(), ctypes.c_uint32()
-    rc = _LIB.afc_compress(data, len(data), 1 if adaptive else 0,
-                           _FMT_CODES.get(fmt, 0),
-                           ctypes.byref(outp), ctypes.byref(outn))
+    if params is None:
+        rc = _LIB.afc_compress(data, len(data), 1 if adaptive else 0,
+                               _FMT_CODES.get(fmt, 0),
+                               ctypes.byref(outp), ctypes.byref(outn))
+    else:
+        if not TUNABLE:
+            raise RuntimeError("native library predates afc_compress_ex")
+        rc = _LIB.afc_compress_ex(
+            data, len(data), 1 if adaptive else 0, _FMT_CODES.get(fmt, 0),
+            1 if params.get("dp", True) else 0,
+            int(params.get("dp_rounds", 3)),
+            int(params.get("merge_rounds", 6)),
+            int(params.get("min_freq", 4)),
+            1 if params.get("tune", True) else 0,
+            ctypes.byref(outp), ctypes.byref(outn))
     if rc != 0:
         raise RuntimeError(f"native compress failed (rc={rc})")
     return _take(outp, outn)

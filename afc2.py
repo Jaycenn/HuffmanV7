@@ -355,10 +355,67 @@ def _build_lengths(counts: Counter) -> dict:
     return huffman_lengths(counts)
 
 
+# [v7] Optimization toggles the native core has compiled in as always-on. It
+# has no way to express these being FALSE, so a run with any of them disabled
+# must still use the pure-Python reference path. Everything else — the four
+# preset-controlled tunables — is now passed through to the native core via
+# afc_compress_ex, which is what makes Fast and Maximum native-capable.
+_NATIVE_FIXED_OPTS = ("llhuff", "hdr2", "refund")
+
+
+def _native_params() -> dict:
+    """The current tunables, in the shape afc_native.compress() expects.
+
+    Mirrors exactly what the pure-Python path below computes, so the two
+    backends stay byte-identical under every preset."""
+    return {
+        "dp": OPTS["dp"],
+        "dp_rounds": DP_ROUNDS,
+        "merge_rounds": (MERGE_ROUNDS_V4 if (OPTS["tune"] and OPTS["refund"])
+                         else MERGE_ROUNDS),
+        "min_freq": MIN_CANDIDATE_FREQ,
+        "tune": OPTS["tune"],
+    }
+
+
+# [v7] Container-aware processing for structured formats (PDF, DOCX/OOXML).
+# When on, a PDF or ZIP-packaged file is analysed so that already-compressed
+# regions (JPEG, deflate payloads) are preserved verbatim and only the
+# structural/textual material is fed to the Hybrid-Huffman pipeline. It is a
+# routing decision, not a second compressor — see containers.py. Set False to
+# force the plain whole-file path (used by the benchmarks for A/B numbers).
+CONTAINER_AWARE = True
+
+_CONTAINER_MAGIC = (b"%PDF-", b"PK\x03\x04")
+
+
+def _looks_like_container(data: bytes) -> bool:
+    return data[:5] == _CONTAINER_MAGIC[0] or data[:4] == _CONTAINER_MAGIC[1]
+
+
 def compress_bytes(data: bytes, adaptive: bool = True,
-                   fmt: str = None) -> bytes:
+                   fmt: str = None, container_aware: bool = None) -> bytes:
     if fmt is None:
         fmt = _default_fmt()
+
+    # [v7] Structured containers get their components routed first. The
+    # callback below is the PLAIN path (container_aware=False), which is what
+    # actually compresses the pooled buffer — the engine is unchanged and is
+    # still the only thing doing compression. Falling through on None keeps
+    # every existing behaviour intact.
+    use_ca = CONTAINER_AWARE if container_aware is None else container_aware
+    if adaptive and use_ca and len(data) > 0 and _looks_like_container(data):
+        try:
+            import containers
+            blob, _info = containers.compress_container(
+                data, fmt=fmt,
+                compress_fn=lambda d, a=True, fmt=fmt: compress_bytes(
+                    d, a, fmt=fmt, container_aware=False))
+            if blob is not None:
+                return blob
+        except Exception:
+            pass          # any analysis problem falls back to the plain path
+
     native_ok = (NATIVE and hasattr(_native, "compress")
                  and fmt in ("auto", "afc1", "afc2"))
     if not adaptive:
@@ -368,8 +425,16 @@ def compress_bytes(data: bytes, adaptive: bool = True,
     if len(data) == 0:
         return emit_raw(data, afc.MAGIC2 if fmt == "afc2" else afc.MAGIC1)
 
-    if native_ok and all(OPTS.values()):
-        return _native.compress(bytes(data), True, fmt)
+    if native_ok and all(OPTS[k] for k in _NATIVE_FIXED_OPTS):
+        if getattr(_native, "TUNABLE", False):
+            # [v7] any preset, natively
+            return _native.compress(bytes(data), True, fmt,
+                                    params=_native_params())
+        if all(OPTS.values()) and (DP_ROUNDS, MERGE_ROUNDS_V4,
+                                   MIN_CANDIDATE_FREQ) == (3, 6, 4):
+            # library predates afc_compress_ex: only the compiled-in defaults
+            # can be honoured, so anything else falls through to Python.
+            return _native.compress(bytes(data), True, fmt)
 
     rounds = MERGE_ROUNDS_V4 if (OPTS["tune"] and OPTS["refund"]) \
         else MERGE_ROUNDS
@@ -410,6 +475,12 @@ def _compress_core(data: bytes, fmt: str, min_freq: int, rounds: int,
 
 
 def decompress_bytes(blob: bytes) -> bytes:
+    # [v7] Dispatch on the container version BEFORE anything else, so an old
+    # container is never reinterpreted under a newer format and vice versa.
+    # AFC1/AFC2 keep their exact existing decode path; only AFC3 is new.
+    if blob[:4] == b"AFC3":
+        import containers
+        return containers.decompress_afc3(blob, decompress_fn=decompress_bytes)
     if NATIVE:
         try:
             return _native.decompress(bytes(blob))

@@ -1,4 +1,4 @@
-# Adaptive File Compression (AFC) — v4
+# Adaptive File Compression (AFC) — v7
 
 **This archive is the complete project: compression engine + web application
 (Parts 1 and 2 combined).** Part 2 extended Part 1 in place, so there is one
@@ -10,14 +10,18 @@ codebase, one database schema and one test suite — nothing needs merging.
   policy, responsive layout) — `CHANGES.md`, first half
 * Web app Part 2 (analytics, entropy estimate, hybrid-tree visualiser,
   explainer, presets, dark mode) — `CHANGES.md`, second half
+* V7: native acceleration for every preset, and container-aware PDF/DOCX —
+  `CHANGES_v7.md`
 * Scope/constraint compliance — `SCOPE_NOTES.md`
 * File-size limits and the measured evidence behind them — `SIZE_POLICY.md`
 
 Verify everything with:
 
 ```bash
-python tests/test_app.py          # 165 checks: web app, Parts 1 + 2,
-                                  # and the Compress/Decompress split
+python tests/test_app.py          # 201 checks: web app, Parts 1 + 2, the
+                                  # Compress/Decompress split, and V7
+python tools/preset_bench.py      # Python vs C++ across all three presets
+python tools/doc_bench.py         # PDF/DOCX container-aware results
 python tools/run_verification.py  # engine round trips
 ```
 
@@ -203,17 +207,25 @@ adjustable with `?depth=` on `/api/tree/<token>` (4–12, default 9).
 
 | Preset | Effect | Backend |
 |---|---|---|
-| **Fast** | skips optimal parsing, fewer growth rounds — ~3× quicker, ~12–18% larger | pure Python |
+| **Fast** | fewer candidates, no optimal parsing, fewer growth rounds | **C++ native** |
 | **Balanced** *(default)* | engine defaults, best ratio-to-time trade | **C++ native** |
-| **Maximum** | deeper search — up to ~3.6% smaller on structured data, ~2× slower | pure Python |
+| **Maximum** | larger candidate search, more DP and growth rounds — usually smaller, but see the note | **C++ native** |
 
-> **Important, and measured:** the C++ core compiles its tuning constants in,
-> so it ignores the Python values entirely (verified: identical output at
-> `DP_ROUNDS` 1, 3 and 6). Only **Balanced** can run natively. Fast and Maximum
-> force the pure-Python path because that is the only way their parameters take
-> effect — so their wall-clock times are comparable to each other, but **not**
-> to Balanced running natively. Ratios are comparable across all three.
-> Details in `presets.py`.
+> **Maximum is not always smaller than Balanced.** Measured over the full
+> corpus it wins on five files (best −3.65%) and loses on two (`data.csv`
+> +3.46%, `code_python.py.txt` +0.07%). Earlier documentation claimed it was
+> never larger; that was generalised from three files and has been corrected.
+> A deeper block-growth search can admit blocks that pass the Bit Cost
+> Decision Engine's estimate but crowd the dictionary. Details in `presets.py`.
+
+> **[v7] All three presets now run natively.** The C++ core used to compile its
+> tuning constants in and ignore the Python values, so Fast and Maximum were
+> forced onto the pure-Python path. `afc_native.cpp` gained an
+> `afc_compress_ex` entry point that carries the four tunables, and
+> `afc2.compress_bytes` forwards them. Python remains the reference: all three
+> presets produce **byte-identical** output on both backends (verified over 10
+> files x 3 presets). Wall-clock times are now directly comparable across
+> presets. See `CHANGES_v7.md` §1-3 for the root cause and the measurements.
 
 ### Dark mode
 
@@ -241,7 +253,7 @@ every file in the thesis corpus.
 ## Running the tests
 
 ```bash
-python tests/test_app.py      # 165 checks: auth, roles, round trips, archives,
+python tests/test_app.py      # 201 checks: auth, roles, round trips, archives,
                               # size policy, reports, isolation, analytics,
                               # entropy, tree, attribution, presets
 python tools/run_verification.py          # engine round trips (unchanged)
@@ -301,7 +313,8 @@ afc2.NATIVE   # True when the C++ core is active
 | `filetypes.py` | content-based type detection; recovers the original extension on decompress. Compresses nothing |
 | `analysis.py` | read-only entropy / container / tree / attribution analysis |
 | `presets.py` | Fast / Balanced / Maximum tunable presets |
-| `tests/test_app.py` | 165-check end-to-end web app suite (Parts 1 + 2 + page split) |
+| `tests/test_app.py` | 201-check end-to-end suite (Parts 1 + 2, page split, V7) |
+| `containers.py` | [v7] container-aware PDF/DOCX segmentation. Routes components to the existing engine; compresses nothing itself |
 | `tools/` | corpus generator, verification suite, size benchmark, CSS + WASM builds |
 | `benchmarks/` | corpus, Canterbury files, harness, v3 snapshot, result CSVs |
 | `CHANGES.md` | web app (Part 1) changelog |

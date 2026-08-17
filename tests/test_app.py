@@ -1043,6 +1043,403 @@ def test_engine_is_not_duplicated():
           calls <= allowed, calls - allowed)
 
 
+# ===========================================================================
+# V7 — native acceleration for every preset
+# ===========================================================================
+
+def _doc_corpus():
+    d = os.path.join(ROOT, "benchmarks", "documents")
+    if not os.path.isdir(d):
+        return []
+    import glob
+    return sorted(glob.glob(os.path.join(d, "*")))
+
+
+def test_all_presets_native_capable():
+    """Fast and Maximum must no longer be forced onto the Python path."""
+    import afc2
+    import presets as P
+    if not afc2.NATIVE:
+        check("native library present (skipping native preset checks)", True)
+        return
+    check("native library exports the extended entry point",
+          getattr(afc2._native, "TUNABLE", False) is True)
+    for name in ("fast", "balanced", "maximum"):
+        check("preset '%s' is native-capable" % name, P.uses_native(name))
+    for d in P.describe():
+        check("API reports '%s' native_capable" % d["name"],
+              d["native_capable"] is True)
+
+
+def test_preset_backend_byte_identity():
+    """THE core V7 correctness property.
+
+    Python is the reference implementation; C++ only accelerates it. For every
+    preset and every corpus file the two backends must produce byte-identical
+    containers, and both must round-trip losslessly."""
+    import afc2
+    import presets as P
+    if not afc2.NATIVE:
+        return
+    files = corpus_files(6) + [
+        os.path.join(ROOT, "benchmarks/canterbury/fields.c"),
+        os.path.join(ROOT, "benchmarks/canterbury/cp.html"),
+    ]
+    identical = lossless = True
+    for path in files:
+        data = open(path, "rb").read()
+        for name in ("fast", "balanced", "maximum"):
+            with P.applied(name):
+                saved = afc2.NATIVE
+                try:
+                    afc2.NATIVE = False
+                    py = afc2.compress_bytes(data, True, fmt="auto")
+                finally:
+                    afc2.NATIVE = saved
+                nat = afc2.compress_bytes(data, True, fmt="auto")
+            if py != nat:
+                identical = False
+                print("   MISMATCH %s/%s: py=%d nat=%d"
+                      % (os.path.basename(path), name, len(py), len(nat)))
+            if afc2.decompress_bytes(nat) != data or \
+                    afc2.decompress_bytes(py) != data:
+                lossless = False
+    check("Python and C++ agree byte-for-byte on every preset", identical)
+    check("both backends round-trip losslessly on every preset", lossless)
+
+
+def test_presets_remain_distinct():
+    """The three presets must still mean different amounts of search.
+
+    Making them all native must not collapse them into the same thing."""
+    import afc2
+    import presets as P
+    data = open(os.path.join(ROOT, "benchmarks/corpus/data.json"), "rb").read()
+    sizes = {}
+    for name in ("fast", "balanced", "maximum"):
+        blob, _, backend = P.compress_with(data, name)
+        sizes[name] = len(blob)
+    check("Fast produces a LARGER file than Balanced",
+          sizes["fast"] > sizes["balanced"], sizes)
+    check("the three presets are not identical",
+          len(set(sizes.values())) > 1, sizes)
+
+    # Maximum means "search harder", NOT "always smaller". Measured across the
+    # corpus it wins on five files and loses on two (data.csv +3.46%,
+    # code_python.py.txt +0.07%). Asserting "never larger" would encode a
+    # claim the numbers do not support — earlier docs did exactly that, from a
+    # three-file sample. What IS true, and worth locking down, is that Maximum
+    # never blows up: it stays within a small margin of Balanced.
+    wins = losses = 0
+    worst = 0.0
+    for path in corpus_files(8):
+        d = open(path, "rb").read()
+        b = len(P.compress_with(d, "balanced")[0])
+        m = len(P.compress_with(d, "maximum")[0])
+        if m < b:
+            wins += 1
+        elif m > b:
+            losses += 1
+            worst = max(worst, 100.0 * (m - b) / b)
+    check("Maximum beats Balanced more often than it loses", wins >= losses,
+          "wins=%d losses=%d" % (wins, losses))
+    check("Maximum never exceeds Balanced by more than 5%%", worst <= 5.0,
+          "worst=+%.2f%%" % worst)
+
+
+def test_cross_implementation_decode():
+    """Python encode -> native decode, and native encode -> Python decode."""
+    import afc  # noqa: F401
+    import afc2
+    if not afc2.NATIVE:
+        return
+    import presets as P
+    ok_pn = ok_np = True
+    for path in corpus_files(5):
+        data = open(path, "rb").read()
+        for name in ("fast", "balanced", "maximum"):
+            with P.applied(name):
+                saved = afc2.NATIVE
+                try:
+                    afc2.NATIVE = False
+                    py_blob = afc2.compress_bytes(data, True, fmt="auto")
+                finally:
+                    afc2.NATIVE = saved
+                nat_blob = afc2.compress_bytes(data, True, fmt="auto")
+            if afc2._native.decompress(py_blob) != data:
+                ok_pn = False
+            if afc.decompress_bytes(nat_blob) != data:
+                ok_np = False
+    check("Python-encoded containers decode natively", ok_pn)
+    check("natively-encoded containers decode in Python", ok_np)
+
+
+# ===========================================================================
+# V7 — container-aware PDF / DOCX
+# ===========================================================================
+
+def test_container_tiling_is_exact():
+    """The segment plan must exactly tile the file — the invariant that makes
+    reconstruction byte-exact regardless of parser quality."""
+    import containers
+    docs = _doc_corpus()
+    if not docs:
+        check("document corpus present (run tools/make_doc_corpus.py)", False)
+        return
+    ok = True
+    for path in docs:
+        data = open(path, "rb").read()
+        segs = containers.plan(data)
+        if not segs:
+            ok = False
+            continue
+        try:
+            containers._validate_tiling(segs, len(data))
+        except Exception as exc:
+            ok = False
+            print("   tiling broken for %s: %s" % (os.path.basename(path), exc))
+        if b"".join(data[s.start:s.end] for s in segs) != data:
+            ok = False
+            print("   segments do not reassemble: %s" % os.path.basename(path))
+    check("segments exactly tile every document (%d files)" % len(docs), ok)
+
+
+def test_pdf_docx_byte_exact():
+    """PDF and DOCX must come back byte-for-byte, verified by SHA-256."""
+    import afc2
+    docs = _doc_corpus()
+    if not docs:
+        return
+    ok = True
+    afc3_used = 0
+    for path in docs:
+        data = open(path, "rb").read()
+        blob = afc2.compress_bytes(data, True, fmt="auto")
+        if blob[:4] == b"AFC3":
+            afc3_used += 1
+        back = afc2.decompress_bytes(blob)
+        if back != data or hashlib.sha256(back).hexdigest() != \
+                hashlib.sha256(data).hexdigest():
+            ok = False
+            print("   NOT byte-exact: %s" % os.path.basename(path))
+    check("every PDF/DOCX reconstructs byte-for-byte (SHA-256)", ok)
+    check("container-aware AFC3 was actually exercised", afc3_used > 0,
+          "afc3 files: %d" % afc3_used)
+
+
+def test_afc3_never_larger_than_plain():
+    """Global size guard: V7 must never produce a bigger file than V6 did."""
+    import afc2
+    docs = _doc_corpus()
+    if not docs:
+        return
+    worse = []
+    for path in docs:
+        data = open(path, "rb").read()
+        plain = afc2.compress_bytes(data, True, fmt="auto",
+                                    container_aware=False)
+        v7 = afc2.compress_bytes(data, True, fmt="auto")
+        if len(v7) > len(plain):
+            worse.append((os.path.basename(path), len(plain), len(v7)))
+    check("container-aware output is never larger than plain", not worse,
+          worse)
+
+
+def test_multi_cycle_reconstruction():
+    """compress -> decompress -> compress -> decompress stays byte-identical."""
+    import afc2
+    docs = _doc_corpus()[:6] + corpus_files(3)
+    ok = True
+    for path in docs:
+        data = open(path, "rb").read()
+        a = afc2.compress_bytes(data, True, fmt="auto")
+        b = afc2.decompress_bytes(a)
+        c = afc2.compress_bytes(b, True, fmt="auto")
+        d = afc2.decompress_bytes(c)
+        if d != data or b != data or a != c:
+            ok = False
+            print("   multi-cycle drift: %s" % os.path.basename(path))
+    check("two full compress/decompress cycles are byte-identical", ok)
+
+
+def test_afc3_backward_compatibility():
+    """AFC1/AFC2 containers must still decode, and never be reinterpreted."""
+    import afc
+    import afc2
+    ok = True
+    for path in corpus_files(4):
+        data = open(path, "rb").read()
+        for fmt in ("afc1", "afc2"):
+            blob = afc2.compress_bytes(data, True, fmt=fmt,
+                                       container_aware=False)
+            if blob[:4] not in (b"AFC1", b"AFC2"):
+                ok = False
+            if afc2.decompress_bytes(blob) != data:
+                ok = False
+            if afc.decompress_bytes(blob) != data:
+                ok = False
+    check("existing AFC1/AFC2 containers still decode unchanged", ok)
+
+    # An AFC3 container must not be mistaken for AFC1/AFC2 by the old decoder.
+    import containers
+    docs = _doc_corpus()
+    if docs:
+        for path in docs:
+            data = open(path, "rb").read()
+            blob = afc2.compress_bytes(data, True, fmt="auto")
+            if blob[:4] == b"AFC3":
+                try:
+                    afc.decompress_bytes(blob)
+                    check("old decoder rejects AFC3 instead of "
+                          "misreading it", False)
+                except Exception:
+                    check("old decoder rejects AFC3 instead of "
+                          "misreading it", True)
+                check("AFC3 magic is distinct", containers.is_afc3(blob))
+                break
+
+
+def test_container_layer_introduces_no_codec():
+    """containers.py must import no compression library and define no
+    compressor of its own — the same structural argument as afcpak.py."""
+    import containers as C
+    src = open(C.__file__, encoding="utf-8").read()
+    tree = ast.parse(src)
+    banned = {"zipfile", "zlib", "gzip", "bz2", "lzma", "tarfile", "brotli",
+              "zstandard"}
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                found.add(a.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            found.add(node.module.split(".")[0])
+    check("containers.py imports no compression library",
+          not (found & banned), found & banned)
+
+    # It must delegate every compression to the engine, never implement one.
+    names = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    homemade = {n for n in names
+                if ("compress" in n or "encode" in n)
+                and n not in ("compress_container", "decompress_afc3")}
+    check("containers.py defines no compressor of its own", not homemade,
+          homemade)
+
+
+def test_container_corrupt_input_is_safe():
+    """A malformed or hostile container must fail cleanly, never silently
+    produce wrong bytes."""
+    import afc2
+    import containers
+    bad_cases = [
+        b"AFC3",                                   # truncated header
+        b"AFC3\x03",                               # no length
+        b"AFC3\x09\x01\x01\x02\x00\x00",           # unknown mode
+        b"AFC3\x03" + b"\xff" * 40,                # garbage body
+    ]
+    clean = True
+    for blob in bad_cases:
+        try:
+            containers.decompress_afc3(blob)
+            clean = False                          # should not have succeeded
+        except Exception:
+            pass
+    check("corrupt AFC3 containers raise instead of returning bad data", clean)
+
+    # A PDF that the parser cannot make sense of must still round-trip.
+    weird = b"%PDF-1.4\nstream\nstream\nendstream" + bytes(range(256)) * 8
+    blob = afc2.compress_bytes(weird, True, fmt="auto")
+    check("a malformed PDF still round-trips losslessly",
+          afc2.decompress_bytes(blob) == weird)
+
+
+def test_container_component_classification():
+    """Already-compressed components must be preserved, textual ones pooled."""
+    import containers
+    docs = {os.path.basename(p): p for p in _doc_corpus()}
+    if not docs:
+        return
+    p = docs.get("pdf_images_only.pdf")
+    if p:
+        st = containers.describe_plan(open(p, "rb").read())
+        labels = st["components"]
+        check("JPEG streams in a PDF are detected and preserved",
+              any("DCT" in k for k in labels), list(labels))
+        check("PDF structural material is pooled for Hybrid-Huffman",
+              any("structure" in k for k in labels), list(labels))
+    d = docs.get("docx_images.docx")
+    if d:
+        st = containers.describe_plan(open(d, "rb").read())
+        labels = st["components"]
+        check("DOCX package structure is pooled",
+              any("zip" in k for k in labels), list(labels))
+        check("DOCX media/deflate payloads are preserved",
+              st["opaque_bytes"] > 0, st["opaque_bytes"])
+
+
+def test_afc3_reporting_is_whole_file(app):
+    """AFC3 figures reported to the user must describe the WHOLE file.
+
+    Regression guard for two bugs found in the browser: the Decompress page
+    read the INNER container's declared length and reported a false integrity
+    failure, and the explainer paired the inner container size with the whole
+    file's original size and claimed 98.4% on a PDF that really saved 4.5%."""
+    import afc2
+    import analysis
+    import containers
+    docs = [p for p in _doc_corpus() if "images" in os.path.basename(p)]
+    if not docs:
+        return
+    ok_len = ok_pct = True
+    for path in docs:
+        data = open(path, "rb").read()
+        blob = afc2.compress_bytes(data, True, fmt="auto")
+        if blob[:4] != b"AFC3":
+            continue
+        if containers.header_info(blob)["original_length"] != len(data):
+            ok_len = False
+        actual = 100.0 * (1 - len(blob) / len(data))
+        text = analysis.explain(blob, len(data))
+        # the sentence must quote the real whole-file saving, within rounding
+        import re as _re
+        m = _re.search(r"Saved (\d+\.\d)%", text)
+        if not m or abs(float(m.group(1)) - actual) > 0.6:
+            ok_pct = False
+            print("   explain says %s, actual %.2f%% (%s)"
+                  % (m.group(1) if m else "?", actual, os.path.basename(path)))
+    check("AFC3 declares the whole-file length, not the pooled length", ok_len)
+    check("the explainer quotes the whole-file saving for AFC3", ok_pct)
+
+    # And the end-to-end API must report integrity VERIFIED, not FAILED.
+    c = app.test_client()
+    login(c, "alice", "correct-horse")
+    data = open(docs[0], "rb").read()
+    j = c.post("/api/compress", data={
+        "file": (io.BytesIO(data), os.path.basename(docs[0]))}).get_json()
+    blob = c.get("/download/" + j["token"]).data
+    d = c.post("/api/decompress", data={
+        "file": (io.BytesIO(blob), "doc.afc")}).get_json()
+    check("Decompress page reports integrity VERIFIED for AFC3",
+          d.get("integrity_ok") is True, d.get("integrity_note"))
+    check("Decompress page names the component-aware mode",
+          "component-aware" in (d.get("container_mode") or ""),
+          d.get("container_mode"))
+
+
+def test_generic_files_unaffected():
+    """Generic (non-container) files must take exactly the V6 path."""
+    import afc2
+    ok = True
+    for path in corpus_files(6):
+        data = open(path, "rb").read()
+        v6 = afc2.compress_bytes(data, True, fmt="auto", container_aware=False)
+        v7 = afc2.compress_bytes(data, True, fmt="auto")
+        if v6 != v7:
+            ok = False
+            print("   generic path changed for %s" % os.path.basename(path))
+    check("generic files produce byte-identical output to V6", ok)
+
+
 def main():
     app, appmod, dbpath = make_app()
     try:
@@ -1082,6 +1479,22 @@ def main():
         test_filetypes_imports_no_codec()
         test_compress_page_flags_container_formats(app)
         test_engine_is_not_duplicated()
+        # --- V7: native acceleration for every preset ---
+        test_all_presets_native_capable()
+        test_preset_backend_byte_identity()
+        test_presets_remain_distinct()
+        test_cross_implementation_decode()
+        # --- V7: container-aware PDF / DOCX ---
+        test_container_tiling_is_exact()
+        test_pdf_docx_byte_exact()
+        test_afc3_never_larger_than_plain()
+        test_multi_cycle_reconstruction()
+        test_afc3_backward_compatibility()
+        test_container_layer_introduces_no_codec()
+        test_container_corrupt_input_is_safe()
+        test_container_component_classification()
+        test_afc3_reporting_is_whole_file(app)
+        test_generic_files_unaffected()
     finally:
         for suffix in ("", "-wal", "-shm"):
             try:

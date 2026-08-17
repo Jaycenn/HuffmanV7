@@ -89,7 +89,7 @@
       }
     }
     readMagic(file).then(function (magic) {
-      if (magic === "AFC1" || magic === "AFC2") {
+      if (magic === "AFC1" || magic === "AFC2" || magic === "AFC3") {
         setErr('This is already an AFC container. Compressing it again would '
              + 'just nest it. Open the <a class="underline font-semibold" '
              + 'href="/decompress">Decompress page</a> to restore it.');
