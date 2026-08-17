@@ -1,0 +1,6 @@
+file,orig_bytes,afc_v4_bytes,gzip9_bytes_REFERENCE,bzip2_bytes_REFERENCE,lzma_bytes_REFERENCE
+alice29.txt,152089,61692,54182,43202,48492
+asyoulik.txt,125179,54741,48790,39569,44536
+cp.html,24603,10869,7952,7624,7644
+fields.c,11150,5330,3127,3039,3028
+grammar.lsp,3721,1927,1234,1283,1292

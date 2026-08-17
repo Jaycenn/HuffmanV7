@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% block title %}Analytics{% endblock %}
+{% block content %}
+<div class="rule2 pt-4 flex flex-wrap items-end gap-3">
+  <div>
+    <h1 class="font-display text-2xl">Analytics</h1>
+    <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Computed from your local compression
+      history. Nothing leaves this machine.</p>
+  </div>
+  {% if is_admin %}
+  <label class="font-data text-xs text-dim dark:text-[#9c968a] ml-auto">
+    <input type="checkbox" id="scopeSystem" class="align-middle"> system-wide
+    (admin)</label>
+  {% endif %}
+</div>
+
+<!-- Feature 1: full stat cards -->
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-6" id="cards">
+  {% for key, label in [('files','Files compressed'), ('avg_ratio','Average ratio'),
+                        ('total_saved','Space saved'), ('transfer','Transfer time saved')] %}
+  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
+    <p class="text-[11px] text-dim dark:text-[#9c968a] uppercase">{{ label }}</p>
+    <p class="font-data tabular text-xl mt-1" data-card="{{ key }}">…</p>
+    {% if key == 'transfer' %}
+    <p class="text-[10px] text-dim dark:text-[#9c968a] mt-1" data-card="transfer_note"></p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+  {% for key, label in [('overall_ratio','Overall ratio'), ('saved_pct','Saved %'),
+                        ('lossless','Lossless verified'), ('processing','Processing time')] %}
+  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
+    <p class="text-[11px] text-dim dark:text-[#9c968a] uppercase">{{ label }}</p>
+    <p class="font-data tabular text-xl mt-1" data-card="{{ key }}">…</p>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Feature 2: comparison chart -->
+<section class="mt-8 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-5">
+  <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Compression ratio over time</h2>
+  <p class="text-xs text-dim dark:text-[#9c968a] mt-1">
+    <span class="inline-block w-3 h-2 align-middle" style="background:#8E1F1F"></span> AFC
+    <span class="inline-block w-3 h-2 align-middle ml-3" style="background:#B57A17"></span> gzip&nbsp;-6
+    <span class="inline-block w-3 h-2 align-middle ml-3" style="background:#6B675E"></span> single-tier Huffman
+  </p>
+  <p class="text-xs text-dim dark:text-[#9c968a] mt-1 italic">gzip and single-tier Huffman are
+    <strong>reference measurements only</strong>, shown for context. gzip is an
+    LZ77+Huffman codec and is never used to produce output here. Where AFC is
+    behind, the chart shows that.</p>
+  <div class="mt-3 overflow-x-auto"><svg id="tsChart" width="100%" height="240"
+       viewBox="0 0 720 240" preserveAspectRatio="none"
+       role="img" aria-label="Compression ratio over time"></svg></div>
+  <p id="tsEmpty" class="text-sm text-dim dark:text-[#9c968a] hidden">No compressions recorded yet.</p>
+</section>
+
+<!-- Feature 3: file-type distribution -->
+<section class="mt-6 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-5">
+  <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">File types</h2>
+  <div class="mt-3 overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-left border-b border-line dark:border-[#35322c]">
+        <tr class="text-[11px] uppercase text-dim dark:text-[#9c968a]">
+          <th class="px-2 py-2">Extension</th><th class="px-2 py-2 text-right">Files</th>
+          <th class="px-2 py-2 text-right">Original</th>
+          <th class="px-2 py-2 text-right">Saved</th>
+          <th class="px-2 py-2 text-right">Avg ratio</th>
+          <th class="px-2 py-2 w-1/3">Share</th></tr></thead>
+      <tbody id="extBody"></tbody></table>
+  </div>
+</section>
+
+<!-- Feature 10: system status -->
+<section class="mt-6 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-5">
+  <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">System status</h2>
+  <dl class="mt-3 grid sm:grid-cols-3 gap-3 text-sm" id="statusGrid"></dl>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* Analytics rendering.
+ * Charts are hand-rolled SVG — no Chart.js or other new dependency, per the
+ * brief. Every number comes from /api/analytics/*, which reads the local
+ * SQLite compression_history table. */
+(function () {
+  "use strict";
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  function human(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return n.toFixed(0) + " B";
+    if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+    if (n < 1073741824) return (n / 1048576).toFixed(2) + " MB";
+    return (n / 1073741824).toFixed(2) + " GB";
+  }
+  function dur(s) {
+    s = Number(s) || 0;
+    if (s < 60) return s.toFixed(1) + " s";
+    if (s < 3600) return (s / 60).toFixed(1) + " min";
+    return (s / 3600).toFixed(2) + " h";
+  }
+  function scopeParam() {
+    var el = document.getElementById("scopeSystem");
+    return (el && el.checked) ? "?scope=system" : "";
+  }
+
+  function loadAll() {
+    var q = scopeParam();
+    fetch("/api/analytics/summary" + q).then(function (r) { return r.json(); })
+      .then(function (s) {
+        var set = function (k, v) {
+          var el = document.querySelector('[data-card="' + k + '"]');
+          if (el) el.textContent = v;
+        };
+        set("files", s.files);
+        set("avg_ratio", (s.avg_ratio || 0).toFixed(3) + "×");
+        set("total_saved", human(s.total_saved));
+        set("transfer", dur(s.transfer_seconds_saved));
+        set("transfer_note", "estimate at " + s.assumed_link_mbps + " Mbps");
+        set("overall_ratio", (s.overall_ratio || 0).toFixed(3) + "×");
+        set("saved_pct", (s.saved_pct || 0).toFixed(1) + "%");
+        set("lossless", s.lossless_count + "/" + s.files);
+        set("processing", dur(s.processing_seconds));
+      });
+
+    fetch("/api/analytics/timeseries" + q).then(function (r) { return r.json(); })
+      .then(drawChart);
+
+    fetch("/api/analytics/extensions" + q).then(function (r) { return r.json(); })
+      .then(function (rows) {
+        var body = document.getElementById("extBody");
+        body.innerHTML = "";
+        var maxFiles = rows.reduce(function (a, r) {
+          return Math.max(a, r.files); }, 1);
+        rows.forEach(function (r) {
+          var pct = (100 * r.files / maxFiles).toFixed(1);
+          var tr = document.createElement("tr");
+          tr.className = "border-b border-line/60 dark:border-[#35322c]/60";
+          tr.innerHTML =
+            '<td class="px-2 py-2 font-data">' + esc(r.ext) + '</td>' +
+            '<td class="px-2 py-2 text-right font-data tabular">' + r.files + '</td>' +
+            '<td class="px-2 py-2 text-right font-data tabular">' + human(r.total_original) + '</td>' +
+            '<td class="px-2 py-2 text-right font-data tabular">' + human(r.saved) + '</td>' +
+            '<td class="px-2 py-2 text-right font-data tabular">' + (r.avg_ratio || 0).toFixed(2) + '×</td>' +
+            '<td class="px-2 py-2"><span class="block h-2 rounded-sm bg-maroon"' +
+              ' style="width:' + pct + '%"></span></td>';
+          body.appendChild(tr);
+        });
+        if (!rows.length) {
+          body.innerHTML = '<tr><td colspan="6" class="px-2 py-6 text-center' +
+            ' text-dim dark:text-[#9c968a] text-sm">No data yet.</td></tr>';
+        }
+      });
+
+    fetch("/api/status").then(function (r) { return r.json(); })
+      .then(function (s) {
+        var g = document.getElementById("statusGrid");
+        var items = [["Engine", s.engine_version], ["App", s.app_version],
+                     ["Backend", s.backend], ["Uptime", s.uptime_human],
+                     ["Python", s.python_version], ["Database", s.database],
+                     ["Archive format", s.archive_format],
+                     ["Max file", human(s.max_file_size)],
+                     ["Cached results", s.results_cached]];
+        g.innerHTML = items.map(function (kv) {
+          return '<div><dt class="text-dim dark:text-[#9c968a] text-xs">' + esc(kv[0]) +
+                 '</dt><dd class="font-data">' + esc(String(kv[1])) + '</dd></div>';
+        }).join("");
+      });
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+
+  function drawChart(rows) {
+    var svg = document.getElementById("tsChart");
+    var empty = document.getElementById("tsEmpty");
+    svg.innerHTML = "";
+    if (!rows || !rows.length) {
+      empty.classList.remove("hidden");
+      return;
+    }
+    empty.classList.add("hidden");
+    var W = 720, H = 240, PADL = 42, PADB = 26, PADT = 12, PADR = 8;
+    var maxR = 1;
+    rows.forEach(function (r) {
+      ["afc_ratio", "gzip_ratio", "huffman_ratio"].forEach(function (k) {
+        if (r[k] != null) maxR = Math.max(maxR, r[k]);
+      });
+    });
+    maxR = Math.ceil(maxR * 1.1);
+    var x = function (i) {
+      return PADL + (rows.length === 1 ? (W - PADL - PADR) / 2
+        : i * (W - PADL - PADR) / (rows.length - 1));
+    };
+    var y = function (v) { return PADT + (1 - v / maxR) * (H - PADT - PADB); };
+    var ns = "http://www.w3.org/2000/svg";
+    function add(tag, attrs, text) {
+      var e = document.createElementNS(ns, tag);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      if (text != null) e.textContent = text;
+      svg.appendChild(e);
+      return e;
+    }
+    // gridlines + y labels
+    for (var g = 0; g <= 4; g++) {
+      var v = maxR * g / 4;
+      add("line", {x1: PADL, x2: W - PADR, y1: y(v), y2: y(v),
+                   stroke: "#E4E0D6", "stroke-width": 1});
+      add("text", {x: 4, y: y(v) + 4, fill: "#6B675E",
+                   "font-size": 10, "font-family": "monospace"},
+          v.toFixed(1) + "×");
+    }
+    add("line", {x1: PADL, x2: W - PADR, y1: y(1), y2: y(1),
+                 stroke: "#6B675E", "stroke-dasharray": "3 3",
+                 "stroke-width": 1});
+    // series — nulls break the line rather than drawing a fake zero
+    [["afc_ratio", "#8E1F1F", 2.5], ["gzip_ratio", "#B57A17", 1.5],
+     ["huffman_ratio", "#6B675E", 1.5]].forEach(function (spec) {
+      var key = spec[0], colour = spec[1], w = spec[2];
+      var d = "", pen = false;
+      rows.forEach(function (r, i) {
+        var v = r[key];
+        if (v == null) { pen = false; return; }
+        d += (pen ? " L" : " M") + x(i) + " " + y(v);
+        pen = true;
+      });
+      if (d) add("path", {d: d.trim(), fill: "none", stroke: colour,
+                          "stroke-width": w});
+      if (key === "afc_ratio") {
+        rows.forEach(function (r, i) {
+          if (r.afc_ratio == null) return;
+          var c = add("circle", {cx: x(i), cy: y(r.afc_ratio), r: 2.5,
+                                 fill: colour});
+          var t = document.createElementNS(ns, "title");
+          t.textContent = r.filename + " — AFC " + r.afc_ratio + "×"
+            + (r.gzip_ratio != null ? ", gzip " + r.gzip_ratio + "×" : "")
+            + (r.huffman_ratio != null ? ", Huffman " + r.huffman_ratio + "×" : "");
+          c.appendChild(t);
+        });
+      }
+    });
+    add("text", {x: PADL, y: H - 6, fill: "#6B675E", "font-size": 10,
+                 "font-family": "monospace"}, "oldest");
+    add("text", {x: W - PADR - 34, y: H - 6, fill: "#6B675E", "font-size": 10,
+                 "font-family": "monospace"}, "newest");
+  }
+
+  var sc = document.getElementById("scopeSystem");
+  if (sc) sc.addEventListener("change", loadAll);
+  loadAll();
+})();
+</script>
+{% endblock %}

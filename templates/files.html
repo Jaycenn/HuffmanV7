@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Files &amp; History{% endblock %}
+{% block content %}
+<div class="rule2 pt-4">
+  <h1 class="font-display text-2xl">Files &amp; History</h1>
+  <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Every file you have processed. Stored in
+    this machine's local SQLite database only.</p>
+</div>
+
+<!-- Feature 4: search / filter controls (extends Part 1's static table) -->
+<form id="filters" class="mt-5 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4
+                          grid gap-3 sm:grid-cols-2 lg:grid-cols-5 items-end"
+      onsubmit="return false">
+  <label class="font-data text-xs text-dim dark:text-[#9c968a]">filename contains
+    <input id="fq" type="search" placeholder="e.g. .json"
+           class="mt-1 w-full border border-line dark:border-[#35322c] rounded-md px-2 py-2 text-sm"></label>
+  <label class="font-data text-xs text-dim dark:text-[#9c968a]">from
+    <input id="ffrom" type="date"
+           class="mt-1 w-full border border-line dark:border-[#35322c] rounded-md px-2 py-2 text-sm"></label>
+  <label class="font-data text-xs text-dim dark:text-[#9c968a]">to
+    <input id="fto" type="date"
+           class="mt-1 w-full border border-line dark:border-[#35322c] rounded-md px-2 py-2 text-sm"></label>
+  <label class="font-data text-xs text-dim dark:text-[#9c968a]">engine
+    <select id="fengine"
+            class="mt-1 w-full border border-line dark:border-[#35322c] rounded-md px-2 py-2 text-sm bg-white dark:bg-[#1c1b18]">
+      <option value="">any</option></select></label>
+  <div class="flex gap-2">
+    <button id="applyBtn"
+            class="px-4 py-2 rounded-md bg-maroon text-white text-sm
+                   font-semibold hover:bg-maroondark">Apply</button>
+    <button id="resetBtn"
+            class="px-3 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
+                   hover:border-maroon">Reset</button>
+  </div>
+</form>
+
+<div class="flex flex-wrap gap-3 mt-4 items-center">
+  <a href="{{ url_for('main.report_csv') }}"
+     class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">
+     Export CSV</a>
+  <a href="{{ url_for('main.report_pdf') }}" target="_blank"
+     class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">
+     Export PDF</a>
+  <a href="{{ url_for('main.compare_page') }}"
+     class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">
+     Compare two results</a>
+  <span id="resultCount" class="font-data text-xs text-dim dark:text-[#9c968a] ml-auto"></span>
+</div>
+
+<div class="mt-3 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg overflow-x-auto">
+  <table class="w-full text-sm" id="histTable">
+    <thead class="text-left border-b border-line dark:border-[#35322c]">
+      <tr class="text-[11px] uppercase text-dim dark:text-[#9c968a]">
+        {% for label, col in [('File','filename'), ('Op',''), ('Original','original_bytes'),
+                              ('Result','compressed_bytes'), ('Ratio','ratio'),
+                              ('Saved %','space_saved_pct'), ('Engine',''),
+                              ('Preset',''), ('Lossless',''), ('When','created_at')] %}
+        <th class="px-3 py-2 {% if col %}cursor-pointer select-none hover:text-maroon{% endif %}"
+            {% if col %}data-sortcol="{{ col }}"{% endif %}>{{ label }}{% if col %}
+          <span class="opacity-40">&#8645;</span>{% endif %}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody id="histBody"></tbody>
+  </table>
+</div>
+
+<div class="flex flex-wrap items-center gap-3 mt-4">
+  <button id="prevBtn"
+          class="px-3 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
+                 hover:border-maroon disabled:opacity-40">Previous</button>
+  <span id="pageInfo" class="font-data text-xs text-dim dark:text-[#9c968a]"></span>
+  <button id="nextBtn"
+          class="px-3 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
+                 hover:border-maroon disabled:opacity-40">Next</button>
+  <label class="font-data text-xs text-dim dark:text-[#9c968a] ml-auto">per page
+    <select id="perPage" class="ml-1 border border-line dark:border-[#35322c] rounded-md px-2 py-1 bg-white dark:bg-[#1c1b18]">
+      <option>15</option><option>25</option><option>50</option><option>100</option>
+    </select></label>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* Feature 4 — server-side search / filter / sort / pagination.
+ * Queries /api/history/search, which whitelists the sort column, so no user
+ * input is ever interpolated into SQL. */
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var state = { page: 1, per_page: 15, sort: "created_at", dir: "desc" };
+
+  function human(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return n + " B";
+    if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+    if (n < 1073741824) return (n / 1048576).toFixed(2) + " MB";
+    return (n / 1073741824).toFixed(2) + " GB";
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+
+  function load() {
+    var p = new URLSearchParams({
+      q: $("fq").value, from: $("ffrom").value, to: $("fto").value,
+      engine: $("fengine").value, page: state.page,
+      per_page: state.per_page, sort: state.sort, dir: state.dir
+    });
+    fetch("/api/history/search?" + p.toString())
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var body = $("histBody");
+        body.innerHTML = "";
+        j.rows.forEach(function (r) {
+          var tr = document.createElement("tr");
+          tr.className = "border-b border-line/60 dark:border-[#35322c]/60";
+          tr.innerHTML =
+            '<td class="px-3 py-2 break-all">' + esc(r.filename) + '</td>' +
+            '<td class="px-3 py-2 font-data text-xs">' + esc(r.operation) + '</td>' +
+            '<td class="px-3 py-2 text-right font-data tabular">' + human(r.original_bytes) + '</td>' +
+            '<td class="px-3 py-2 text-right font-data tabular">' + human(r.compressed_bytes) + '</td>' +
+            '<td class="px-3 py-2 text-right font-data tabular">' + (r.ratio || 0).toFixed(3) + '×</td>' +
+            '<td class="px-3 py-2 text-right font-data tabular">' + (r.space_saved_pct || 0).toFixed(1) + '%</td>' +
+            '<td class="px-3 py-2 font-data text-xs">' + esc(r.engine) + '</td>' +
+            '<td class="px-3 py-2 font-data text-xs">' + esc(r.preset || "—") + '</td>' +
+            '<td class="px-3 py-2">' + (r.lossless_verified
+                ? '<span class="text-green-700">✓</span>'
+                : '<span class="text-maroon">✗</span>') + '</td>' +
+            '<td class="px-3 py-2 font-data text-xs text-dim dark:text-[#9c968a]">' + esc(r.created_at) + '</td>';
+          body.appendChild(tr);
+        });
+        if (!j.rows.length) {
+          body.innerHTML = '<tr><td colspan="10" class="px-4 py-6 text-center' +
+            ' text-dim dark:text-[#9c968a] text-sm">No rows match those filters.</td></tr>';
+        }
+        $("resultCount").textContent = j.total + " row(s)";
+        $("pageInfo").textContent = "page " + j.page + " of " + j.pages;
+        $("prevBtn").disabled = j.page <= 1;
+        $("nextBtn").disabled = j.page >= j.pages;
+        var sel = $("fengine");
+        if (sel.options.length <= 1 && j.engines.length) {
+          j.engines.forEach(function (e) {
+            var o = document.createElement("option");
+            o.value = e; o.textContent = e;
+            sel.appendChild(o);
+          });
+        }
+      });
+  }
+
+  document.querySelectorAll("th[data-sortcol]").forEach(function (th) {
+    th.addEventListener("click", function () {
+      var col = th.dataset.sortcol;
+      if (state.sort === col) {
+        state.dir = state.dir === "asc" ? "desc" : "asc";
+      } else {
+        state.sort = col; state.dir = "desc";
+      }
+      state.page = 1;
+      load();
+    });
+  });
+  $("applyBtn").addEventListener("click", function () { state.page = 1; load(); });
+  $("resetBtn").addEventListener("click", function () {
+    $("fq").value = ""; $("ffrom").value = ""; $("fto").value = "";
+    $("fengine").value = "";
+    state.page = 1; state.sort = "created_at"; state.dir = "desc";
+    load();
+  });
+  $("fq").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { state.page = 1; load(); }
+  });
+  $("prevBtn").addEventListener("click", function () {
+    if (state.page > 1) { state.page--; load(); } });
+  $("nextBtn").addEventListener("click", function () {
+    state.page++; load(); });
+  $("perPage").addEventListener("change", function () {
+    state.per_page = +$("perPage").value; state.page = 1; load(); });
+
+  load();
+})();
+</script>
+{% endblock %}

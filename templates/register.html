@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Register{% endblock %}
+{% block auth_content %}
+<div class="rule2 pt-4 mb-6">
+  <h1 class="font-display text-2xl mt-2">Create an account</h1>
+  <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Accounts are stored locally in this
+    machine's SQLite file only.</p>
+</div>
+<form method="post" class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-6 space-y-4">
+  {% if error %}
+  <p class="text-sm text-maroon border border-maroon/30 bg-maroon/5 rounded-md
+            px-3 py-2" role="alert">{{ error }}</p>
+  {% endif %}
+  <div><label class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]" for="username">Username</label>
+    <input id="username" name="username" required value="{{ username or '' }}"
+           class="mt-1 w-full border border-line dark:border-[#35322c] rounded-md px-3 py-2"></div>
+  <div><label class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]" for="email">Email</label>
+    <input id="email" name="email" type="email" required value="{{ email or '' }}"
+           class="mt-1 w-full border border-line dark:border-[#35322c] rounded-md px-3 py-2"></div>
+  <div><label class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]" for="password">Password</label>
+    <input id="password" name="password" type="password" required
+           class="mt-1 w-full border border-line dark:border-[#35322c] rounded-md px-3 py-2">
+    <p class="text-xs text-dim dark:text-[#9c968a] mt-1">At least {{ cfg.MIN_PASSWORD_LENGTH }} characters.</p></div>
+  <div><label class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]" for="confirm">Confirm password</label>
+    <input id="confirm" name="confirm" type="password" required
+           class="mt-1 w-full border border-line dark:border-[#35322c] rounded-md px-3 py-2"></div>
+  <button class="w-full px-4 py-3 rounded-md bg-maroon text-white text-sm
+                 font-semibold hover:bg-maroondark">Create account</button>
+  <p class="text-xs text-dim dark:text-[#9c968a] text-center">Already registered?
+    <a class="text-maroon underline" href="{{ url_for('auth.login') }}">Sign in</a></p>
+</form>
+{% endblock %}

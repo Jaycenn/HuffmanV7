@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.so
+*.dll
+afc_app.sqlite3*
+node_modules/
+package-lock.json

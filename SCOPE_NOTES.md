@@ -1,0 +1,194 @@
+# SCOPE_NOTES.md — how Part 1 stays inside the thesis scope
+
+Written for two audiences: the engineer picking this up for **Part 2**, and the
+**adviser/panel** asking whether the added features broke the study's stated
+boundaries. Every claim below is enforced by a test in `tests/test_app.py`.
+
+---
+
+## 1. The compression algorithm was not touched
+
+`afc.py`, `afc2.py`, `afc_native.cpp`, `afc_native.py`, `afc_engine.js` are
+**byte-for-byte unchanged** in Part 1. The web layer only calls the published
+API:
+
+```python
+afc2.compress_bytes(data, adaptive, fmt=...)   # -> AFC1/AFC2 container
+afc2.decompress_bytes(blob)                    # -> original bytes
+```
+
+Nothing in `app.py`, `db.py`, `auth.py`, `admin.py`, or `afcpak.py` reaches
+into engine internals, changes a constant, or post-processes a container.
+`git diff` on those five engine files should be empty for this part.
+
+**Entropy coding is still Huffman-only.** No arithmetic/range/ANS coding, no
+LZ77/78/LZW/LZSS or any offset back-reference, no BWT/MTF, no PPM, no ML. The
+new features add packaging and bookkeeping, not a second compressor.
+
+## 2. Why the archive format cannot smuggle in a second codec
+
+`.afcpak` is a **neutral container**: an 8-byte magic, a JSON manifest, and the
+per-file AFC payloads concatenated. It performs no compression of its own.
+
+* **No cross-file references.** Each member goes through the engine
+  independently, so no LZ-style matching happens across file boundaries. A
+  "solid" archive would need exactly the back-reference mechanism the thesis
+  forbids, so it is not offered.
+* **No DEFLATE, structurally.** `afcpak.py` imports no compression library at
+  all — no `zipfile`, `zlib`, `gzip`, `bz2`, `lzma`, `tarfile`. This is
+  asserted by parsing the module's AST in
+  `test_archive_no_deflate`, not by grepping (a grep false-positives on this
+  very paragraph). A second test asserts every member payload begins with the
+  `AFC1`/`AFC2` magic, which would fail immediately if any other codec were
+  introduced.
+* **If someone later switches to `zipfile`**, it must be `ZIP_STORED`.
+  `ZIP_DEFLATED` is LZ77 + Huffman and would silently violate the constraint.
+  The AST test is there to catch that change in review.
+
+## 3. Losslessness is proven, never assumed
+
+Every processed file gets a **SHA-256 round trip** at processing time, and the
+result is what gets stored in `compression_history.lossless_verified`. The
+field is never set optimistically. Inside archives, `afcpak.pack()` verifies
+each member *before* writing it and raises rather than emitting a
+silently-lossy archive; `afcpak.unpack()` re-checks each member's stored digest
+on extraction. The raw-storage fallback in the engine is untouched, so
+incompressible input still cannot inflate beyond the container header.
+
+## 4. Why a local SQLite file still counts as "local, non-cloud"
+
+The thesis Delimitations exclude cloud storage and remote services. A local
+SQLite database does not cross that line, for reasons the team can state
+plainly to an adviser:
+
+1. **It is a file on the same machine**, sitting next to `app.py`
+   (`afc_app.sqlite3`). It is not a server, not a service, and not a network
+   endpoint. SQLite is an embedded library — there is no database process to
+   connect to, no port, no credentials.
+2. **No data leaves the computer.** The app binds to `127.0.0.1`, has no
+   outbound calls, no telemetry, no analytics beacons, and (since Part 1) not
+   even a CDN request — Tailwind is compiled to `static/css/tailwind.css` and
+   served locally, so the dashboard works with the network cable unplugged.
+3. **Deleting the file deletes the data.** `python -c "import db;
+   db.reset_db()"` returns the system to a clean state. There is no remote
+   copy to also delete.
+4. **The alternative is worse for the study.** Keeping accounts and history in
+   memory only would make Part 2's analytics impossible to demonstrate across
+   sessions, and writing them to a cloud service is what the delimitation
+   actually excludes.
+
+In short: the delimitation rules out *cloud* persistence, not *persistence*.
+A single-file embedded database is the most local persistence available.
+
+**Produced files are deliberately NOT persisted.** Compressed output,
+archives, and extracted members live in an in-memory dict (`app.RESULTS`,
+capped at 60 entries) and disappear when the process stops. Only *metadata*
+(sizes, ratio, engine, verification status) is written to SQLite. The app
+never stores user file contents on disk.
+
+## 5. Password hashing is not file encryption
+
+The thesis excludes encryption of compressed output. Part 1 does not encrypt
+any file data — there is no cipher anywhere in the file path.
+
+Account passwords are a separate concern and *are* hashed, with
+`werkzeug.security.generate_password_hash` (PBKDF2-SHA256). That is credential
+storage hygiene, not a compression feature, and it does not make the output
+"password-protected": an `.afc` or `.afcpak` produced by this app can be
+decompressed by the CLI or the browser engine with no credential at all. These
+two things are easy to conflate in a defence; keep them separate.
+
+## 6. Size limits reflect what the paper actually validated
+
+`MAX_FILE_SIZE`/`MAX_BATCH_SIZE` default to the ceiling Appendix C documents
+(100 MB / 500 MB) rather than the larger numbers that were requested, so the
+app cannot accept inputs the paper never claimed to have tested. The measured
+behaviour at 150 MB and 250 MB, and the exact sentence to change if the team
+raises the documented ceiling, are in **SIZE_POLICY.md**. Every limit shown in
+the UI is read from `config.py` (via `/api/config` and the `cfg` template
+context) — there are no hardcoded sizes in templates or JavaScript, and a test
+asserts the Settings page renders the configured value.
+
+## 7. Explicitly excluded, and still excluded
+
+Not implemented, per the brief: two-factor auth, data export / right-to-delete
+flows, multi-language support, webhooks, scheduled or watched-folder
+automation, and any form of file encryption.
+
+---
+
+## 8. Part 2 status (completed)
+
+Part 2 is built. It added analytics, the algorithm-showcase features and the
+small additions, **without modifying any engine file**. Two constraint-relevant
+findings from that work:
+
+* **The engine has no stats API.** Features 6-8 could not read engine
+  internals because every tier function is private. `analysis.py` therefore
+  derives entropy from the input bytes and the tree/attribution from the
+  produced container -- reading only, which constraint #1 allows.
+* **The native core ignores the Python tunables** (measured: byte-identical
+  output at DP_ROUNDS 1/3/6). Presets other than Balanced therefore run on the
+  pure-Python path. This is documented in `presets.py` and stated in the UI so
+  nobody reads "Fast" as the quickest route to a compressed file.
+
+`gzip` now appears in the codebase as a **reference measurement for the
+comparison chart only** (`app._reference_sizes`). It never produces user
+output, and the UI labels it as a reference. This does not introduce a second
+compression mechanism -- the archive path still refuses every compression
+library, as the AST test enforces.
+
+## 9. What Part 2 inherited (and what a Part 3 would)
+
+**Schema** (`schema.sql`): `users`, `compression_history`, `audit_log`,
+`login_attempts`. The history table already carries everything an analytics
+view needs — `ratio`, `space_saved_pct`, `engine`, `container_format`,
+`lossless_verified`, `duration_ms`, `created_at`, and a `batch_id` that groups
+one queue/archive run. Add analytics queries to `db.py`, not to templates.
+
+**Routes already available** (see the map at the top of `app.py`):
+`/api/history` and `/api/stats` return JSON for the logged-in user, which is
+enough to build charts without a new backend aggregation layer.
+
+## 10. The Compress/Decompress page split (Part 3) is UI only
+
+The dashboard now has two pages, `/compress` and `/decompress`, instead of one
+combined upload box. For the panel, the constraint-relevant facts are:
+
+1. **No engine file changed.** `afc.py`, `afc2.py`, `afc_native.cpp`,
+   `afc_native.py` and `afc_engine.js` are byte-for-byte identical, as are
+   `afcpak.py`, `analysis.py`, `presets.py`, `config.py` and `schema.sql`.
+   Both pages call `afc2.compress_bytes` / `afc2.decompress_bytes` — the same
+   entry points the combined page used. A test parses `app.py`'s AST and fails
+   if it ever calls anything else on an engine module.
+2. **No second compressor was introduced.** There is exactly one pipeline. The
+   new `filetypes.py` only *names* byte streams so a restored file regains its
+   extension; a test asserts it defines no function whose name contains
+   "compress", and a second test asserts it imports no compression library —
+   the same AST argument used for `afcpak.py` in §2, and for the same reason.
+3. **No format-specific processing was added.** "Container-aware" here means
+   the user hands over a whole PDF/DOCX and gets a whole PDF/DOCX back: the
+   file is compressed as one byte stream, exactly as before. Nothing extracts
+   PDF page streams or DOCX package parts, because doing so would be a
+   second, format-specific algorithm — which the brief forbids.
+4. **The container format is unchanged.** Filename recovery reads the restored
+   *output*; nothing new is written into AFC1 or AFC2, so every existing
+   decoder (Python, C++, JavaScript, WASM) still reads these files.
+5. **SHA-256 verification is never fabricated.** The Decompress page can only
+   claim a match against a digest this account actually recorded at compression
+   time. With no record it says "no reference on file" and shows the restored
+   file's own digest. Integrity — restored length versus the length declared in
+   the header — is reported separately and is always available. A test asserts
+   that a foreign container yields *no reference*, not a green check.
+
+Nothing in §7 was un-excluded: still no two-factor auth, no export/right-to-
+delete flows, no multi-language support, no webhooks, no scheduled automation,
+and no file encryption.
+
+**Conventions worth keeping:**
+* every new admin route gets `@auth.role_required("admin")` — it returns a
+  real 403, which the tests assert;
+* every new limit goes in `config.py` and `public_dict()`, never in a template;
+* every feature that touches file data gets a SHA-256 round-trip test;
+* rebuild `static/css/tailwind.css` with `sh tools/build_css.sh` after editing
+  templates, or new utility classes will not exist in the local stylesheet.

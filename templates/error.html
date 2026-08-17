@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Error {{ code }}{% endblock %}
+{% set body %}
+<div class="max-w-lg">
+  <p class="font-data text-[11px] tracking-[0.14em] uppercase text-maroon">Error {{ code }}</p>
+  <h1 class="font-display text-2xl mt-2">{{ message }}</h1>
+  <a href="{{ url_for('main.dashboard') }}"
+     class="inline-block mt-4 px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
+            hover:border-maroon">Back to dashboard</a>
+</div>
+{% endset %}
+{% block content %}{{ body }}{% endblock %}
+{% block auth_content %}{{ body }}{% endblock %}

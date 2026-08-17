@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}AFC{% endblock %} · Adaptive File Compression</title>
+<!-- LOCAL Tailwind build — no CDN, so the dashboard renders correctly with no
+     internet (thesis demo requirement + the local/non-cloud delimitation).
+     Rebuild after changing templates:  sh tools/build_css.sh -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
+<script>
+// Feature 13 — dark mode. Applied before first paint to avoid a flash.
+// Preference is per-browser (localStorage); nothing is sent to the server,
+// consistent with the local/non-cloud delimitation.
+(function () {
+  try {
+    var t = localStorage.getItem("afc-theme");
+    if (t === "dark") document.documentElement.classList.add("dark");
+  } catch (e) {}
+})();
+</script>
+<style>
+  .tabular { font-variant-numeric: tabular-nums; }
+  .rule2 { border-top: 2.5px solid #8E1F1F; box-shadow: 0 4px 0 -2.5px #8E1F1F; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  /* Responsive contract — verified at 1440 / 768 / 375 px:
+     >=1024px  persistent left sidebar
+     768-1023  sidebar hidden, hamburger opens it as an overlay
+     <768      same overlay + a fixed bottom nav for the primary destinations */
+  @media print {
+    .no-print { display: none !important; }
+    body { background: #fff; }
+  }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body class="bg-paper dark:bg-[#131211] text-ink dark:text-[#ECE8E0] min-h-screen">
+
+{% if current_user %}
+<!-- mobile top bar -->
+<div class="lg:hidden sticky top-0 z-30 bg-white dark:bg-[#1c1b18] border-b border-line dark:border-[#35322c]
+            flex items-center gap-3 px-4 py-3 no-print">
+  <button id="navToggle" aria-label="Open navigation" aria-expanded="false"
+          class="p-2 -ml-2 rounded-md hover:bg-paper focus:outline-none
+                 focus:ring-2 focus:ring-maroon/40">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <span class="font-display text-lg">Adaptive File Compression</span>
+</div>
+
+<div class="lg:flex">
+  <!-- sidebar / overlay drawer -->
+  <div id="navScrim" class="hidden lg:hidden fixed inset-0 bg-ink/40 z-30 no-print"></div>
+  <aside id="sidebar"
+         class="hidden lg:block fixed lg:sticky top-0 left-0 z-40 lg:z-auto
+                w-64 h-screen shrink-0 bg-white dark:bg-[#1c1b18] border-r border-line dark:border-[#35322c]
+                overflow-y-auto no-print">
+    <div class="px-5 py-5 border-b border-line dark:border-[#35322c]">
+      <p class="font-data text-[10px] tracking-[0.18em] uppercase text-maroon">
+        Holy Angel University</p>
+      <p class="font-display text-lg leading-tight mt-1">Adaptive File<br>Compression</p>
+      <p class="font-data text-[10px] text-dim dark:text-[#9c968a] mt-2">{{ cfg.APP_VERSION }} ·
+        {{ cfg.ENGINE_VERSION }}</p>
+    </div>
+    <nav class="p-3" aria-label="Main">
+      {#  Compress and Decompress are their OWN primary destinations, in their
+          own visually separated group. They are deliberately not folded into
+          Dashboard/Analytics/History/Settings and never share one ambiguous
+          "compress or decompress?" entry — a first-time user picks the page
+          that names the operation they want. #}
+      <div class="space-y-1">
+        {% for ep, label in [('main.dashboard','Dashboard'),
+                             ('main.analytics_page','Analytics'),
+                             ('main.files_page','History'),
+                             ('main.compare_page','Compare')] %}
+        <a href="{{ url_for(ep) }}"
+           class="block px-3 py-2 rounded-md text-sm
+                  {% if request.endpoint == ep %}bg-maroon text-white
+                  {% else %}hover:bg-paper dark:hover:bg-[#26241f]{% endif %}">{{ label }}</a>
+        {% endfor %}
+      </div>
+
+      <div class="my-3 border-t border-line dark:border-[#35322c]"></div>
+
+      <div class="space-y-1">
+        {% for ep, label, hint in [
+             ('main.compress_page','Compress','normal file → .afc'),
+             ('main.decompress_page','Decompress','.afc → original file')] %}
+        <a href="{{ url_for(ep) }}"
+           class="block px-3 py-2 rounded-md
+                  {% if request.endpoint == ep %}bg-maroon text-white
+                  {% else %}hover:bg-paper dark:hover:bg-[#26241f]{% endif %}">
+          <span class="block text-sm font-semibold">{{ label }}</span>
+          <span class="block font-data text-[10px] mt-0.5
+                       {% if request.endpoint == ep %}text-white/70
+                       {% else %}text-dim dark:text-[#9c968a]{% endif %}">{{ hint }}</span>
+        </a>
+        {% endfor %}
+      </div>
+
+      <div class="my-3 border-t border-line dark:border-[#35322c]"></div>
+
+      <div class="space-y-1">
+        <a href="{{ url_for('main.settings_page') }}"
+           class="block px-3 py-2 rounded-md text-sm
+                  {% if request.endpoint == 'main.settings_page' %}bg-maroon text-white
+                  {% else %}hover:bg-paper dark:hover:bg-[#26241f]{% endif %}">Settings</a>
+      </div>
+      {% if current_user['role'] == 'admin' %}
+      <p class="font-data text-[10px] tracking-[0.14em] uppercase text-dim dark:text-[#9c968a]
+                px-3 pt-4 pb-1">Admin</p>
+      <a href="{{ url_for('admin.users') }}"
+         class="block px-3 py-2 rounded-md text-sm
+                {% if request.endpoint=='admin.users' %}bg-maroon text-white
+                {% else %}hover:bg-paper{% endif %}">Users</a>
+      <a href="{{ url_for('admin.audit_log') }}"
+         class="block px-3 py-2 rounded-md text-sm
+                {% if request.endpoint=='admin.audit_log' %}bg-maroon text-white
+                {% else %}hover:bg-paper{% endif %}">Audit log</a>
+      {% endif %}
+    </nav>
+    <div class="p-3 mt-2 border-t border-line dark:border-[#35322c]">
+      <p class="font-data text-xs text-dim dark:text-[#9c968a] px-3">Signed in as</p>
+      <p class="px-3 text-sm font-semibold">{{ current_user['username'] }}
+        <span class="font-data text-[10px] text-dim dark:text-[#9c968a]">({{ current_user['role'] }})</span></p>
+      <button id="themeToggle" type="button"
+              class="w-full px-3 py-2 mt-2 rounded-md border border-line dark:border-[#35322c] text-sm
+                     hover:border-maroon" aria-pressed="false">
+        <span id="themeLabel">Dark mode</span></button>
+      <form method="post" action="{{ url_for('auth.logout') }}" class="px-3 mt-2">
+        <button class="w-full px-3 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
+                       hover:border-maroon">Sign out</button>
+      </form>
+    </div>
+  </aside>
+
+  <main class="flex-1 min-w-0 px-4 sm:px-6 lg:px-8 py-6 pb-24 lg:pb-8">
+    {% with msgs = get_flashed_messages() %}
+      {% if msgs %}
+        <div class="mb-4 border border-gold/40 bg-gold/10 rounded-md px-4 py-2
+                    text-sm no-print">{{ msgs|join(' ') }}</div>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+<!-- bottom nav (mobile only) -->
+<!-- Mobile primary nav. Compress and Decompress each get their own tab here
+     too, so neither is ever buried behind another destination on a phone. -->
+<nav class="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white dark:bg-[#1c1b18] border-t border-line dark:border-[#35322c]
+            grid grid-cols-5 no-print" aria-label="Primary">
+  {% for ep, short in [('main.dashboard','Home'),('main.analytics_page','Stats'),
+                       ('main.compress_page','Compress'),
+                       ('main.decompress_page','Decompress'),
+                       ('main.files_page','History')] %}
+  <a href="{{ url_for(ep) }}" class="py-2 px-1 text-center text-[10px] leading-tight font-data break-words
+     {% if request.endpoint == ep %}text-maroon font-bold{% else %}text-dim dark:text-[#9c968a]{% endif %}">
+    {{ short }}</a>
+  {% endfor %}
+</nav>
+
+<script>
+(function () {
+  var tb = document.getElementById("themeToggle");
+  function paintLabel() {
+    var dark = document.documentElement.classList.contains("dark");
+    var lbl = document.getElementById("themeLabel");
+    if (lbl) lbl.textContent = dark ? "Light mode" : "Dark mode";
+    if (tb) tb.setAttribute("aria-pressed", dark ? "true" : "false");
+  }
+  if (tb) tb.addEventListener("click", function () {
+    var dark = document.documentElement.classList.toggle("dark");
+    try { localStorage.setItem("afc-theme", dark ? "dark" : "light"); } catch (e) {}
+    paintLabel();
+  });
+  paintLabel();
+})();
+(function () {
+  var btn = document.getElementById("navToggle"),
+      side = document.getElementById("sidebar"),
+      scrim = document.getElementById("navScrim");
+  if (!btn) return;
+  function setOpen(open) {
+    side.classList.toggle("hidden", !open);
+    scrim.classList.toggle("hidden", !open);
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  btn.addEventListener("click", function () {
+    setOpen(side.classList.contains("hidden"));
+  });
+  scrim.addEventListener("click", function () { setOpen(false); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") setOpen(false);
+  });
+})();
+</script>
+{% else %}
+<main class="max-w-md mx-auto px-5 py-16">{% block auth_content %}{% endblock %}</main>
+{% endif %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

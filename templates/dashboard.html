@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="rule2 pt-4">
+  <h1 class="font-display text-2xl">Dashboard</h1>
+  <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Summary of everything you have compressed on
+    this machine. Full analytics charts arrive in Part 2.</p>
+</div>
+
+<!-- stat cards -->
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-6">
+  {% set cards = [
+      ('Files compressed', stats.files|string, ''),
+      ('Total original', human(stats.total_original), ''),
+      ('Total compressed', human(stats.total_compressed), 'maroon'),
+      ('Space saved', '%.1f%%'|format(stats.saved_pct), '')] %}
+  {% for label, value, tone in cards %}
+  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
+    <p class="text-[11px] text-dim dark:text-[#9c968a] uppercase">{{ label }}</p>
+    <p class="font-data tabular text-xl mt-1 {% if tone %}text-maroon{% endif %}">{{ value }}</p>
+  </div>
+  {% endfor %}
+</div>
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
+    <p class="text-[11px] text-dim dark:text-[#9c968a] uppercase">Overall ratio</p>
+    <p class="font-data tabular text-xl mt-1">{{ '%.3f'|format(stats.overall_ratio) }}×</p>
+  </div>
+  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
+    <p class="text-[11px] text-dim dark:text-[#9c968a] uppercase">Average ratio</p>
+    <p class="font-data tabular text-xl mt-1">{{ '%.3f'|format(stats.avg_ratio) }}×</p>
+  </div>
+  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
+    <p class="text-[11px] text-dim dark:text-[#9c968a] uppercase">Lossless verified</p>
+    <p class="font-data tabular text-xl mt-1">{{ stats.lossless_count }}/{{ stats.files }}</p>
+  </div>
+  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
+    <p class="text-[11px] text-dim dark:text-[#9c968a] uppercase">Bytes saved</p>
+    <p class="font-data tabular text-xl mt-1">{{ human(stats.total_saved) }}</p>
+  </div>
+</div>
+
+<div class="flex flex-wrap gap-3 mt-6">
+  <a href="{{ url_for('main.compress_page') }}"
+     class="px-5 py-3 rounded-md bg-maroon text-white text-sm font-semibold
+            hover:bg-maroondark">Compress files</a>
+  <a href="{{ url_for('main.report_csv') }}"
+     class="px-4 py-3 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">
+     Download report (CSV)</a>
+  <a href="{{ url_for('main.report_pdf') }}" target="_blank"
+     class="px-4 py-3 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">
+     Report (PDF / print)</a>
+</div>
+
+<h2 class="font-data text-[11px] tracking-[0.14em] uppercase text-dim dark:text-[#9c968a] mt-8">
+  Recent files</h2>
+<div class="mt-2 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead class="text-left border-b border-line dark:border-[#35322c]">
+      <tr class="text-[11px] uppercase text-dim dark:text-[#9c968a]">
+        <th class="px-4 py-2">File</th><th class="px-4 py-2">Op</th>
+        <th class="px-4 py-2 text-right">Original</th>
+        <th class="px-4 py-2 text-right">Result</th>
+        <th class="px-4 py-2 text-right">Ratio</th>
+        <th class="px-4 py-2">Lossless</th><th class="px-4 py-2">When</th></tr>
+    </thead>
+    <tbody>
+      {% for r in recent %}
+      <tr class="border-b border-line/60 dark:border-[#35322c]/60">
+        <td class="px-4 py-2 break-all">{{ r['filename'] }}</td>
+        <td class="px-4 py-2 font-data text-xs">{{ r['operation'] }}</td>
+        <td class="px-4 py-2 text-right font-data tabular">{{ human(r['original_bytes']) }}</td>
+        <td class="px-4 py-2 text-right font-data tabular">{{ human(r['compressed_bytes']) }}</td>
+        <td class="px-4 py-2 text-right font-data tabular">{{ '%.2f'|format(r['ratio']) }}×</td>
+        <td class="px-4 py-2">{% if r['lossless_verified'] %}
+            <span class="text-green-700">✓</span>{% else %}
+            <span class="text-maroon">✗</span>{% endif %}</td>
+        <td class="px-4 py-2 font-data text-xs text-dim dark:text-[#9c968a]">{{ r['created_at'] }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="px-4 py-6 text-center text-dim dark:text-[#9c968a] text-sm">
+        Nothing yet — <a class="text-maroon underline"
+        href="{{ url_for('main.compress_page') }}">compress a file</a> to begin.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

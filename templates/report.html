@@ -1,0 +1,52 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<title>AFC Compression Report</title>
+<style>
+ body{font-family:Georgia,serif;color:#21201C;margin:2rem;}
+ h1{font-size:1.5rem;margin:0 0 .25rem}
+ .meta{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#6B675E}
+ table{width:100%;border-collapse:collapse;margin-top:1rem;font-size:12px}
+ th,td{border-bottom:1px solid #E4E0D6;padding:6px 8px;text-align:left}
+ th{font-size:10px;text-transform:uppercase;color:#6B675E}
+ td.n{text-align:right;font-family:ui-monospace,Consolas,monospace;
+      font-variant-numeric:tabular-nums}
+ tfoot td{font-weight:bold;border-top:2px solid #8E1F1F}
+ .rule{border-top:2.5px solid #8E1F1F;box-shadow:0 4px 0 -2.5px #8E1F1F;padding-top:.75rem}
+ .ok{color:#15803d}.bad{color:#8E1F1F}
+ @media print{.no-print{display:none}}
+</style></head><body>
+<div class="rule">
+  <p class="meta">HOLY ANGEL UNIVERSITY · SCHOOL OF COMPUTING</p>
+  <h1>Adaptive File Compression — Performance Report</h1>
+  <p class="meta">Generated {{ generated }} · {{ cfg.APP_VERSION }} ·
+     {{ cfg.ENGINE_VERSION }} · user {{ current_user['username'] }}</p>
+</div>
+<button class="no-print" onclick="window.print()"
+        style="margin-top:1rem;padding:.5rem 1rem">Save as PDF / Print</button>
+<table>
+<thead><tr><th>File</th><th>Original</th><th>Compressed</th><th>Ratio</th>
+<th>Saved %</th><th>Engine</th><th>Container</th><th>Lossless</th><th>ms</th></tr></thead>
+<tbody>
+{% for r in rows %}
+<tr><td>{{ r['filename'] }}</td>
+<td class="n">{{ r['original_bytes'] }}</td>
+<td class="n">{{ r['compressed_bytes'] }}</td>
+<td class="n">{{ '%.3f'|format(r['ratio']) }}×</td>
+<td class="n">{{ '%.2f'|format(r['space_saved_pct']) }}</td>
+<td>{{ r['engine'] }}</td><td>{{ r['container_format'] }}</td>
+<td class="{{ 'ok' if r['lossless_verified'] else 'bad' }}">
+   {{ 'verified' if r['lossless_verified'] else 'NOT VERIFIED' }}</td>
+<td class="n">{{ '%.1f'|format(r['duration_ms']) }}</td></tr>
+{% endfor %}
+</tbody>
+<tfoot><tr><td>TOTAL ({{ rows|length }} files)</td>
+<td class="n">{{ total_original }}</td><td class="n">{{ total_compressed }}</td>
+<td class="n">{{ '%.3f'|format(overall_ratio) }}×</td>
+<td class="n">{{ '%.2f'|format(saved_pct) }}</td>
+<td colspan="2"></td>
+<td>{{ verified }}/{{ rows|length }} verified</td><td></td></tr></tfoot>
+</table>
+<p class="meta" style="margin-top:1.5rem">Lossless status is a SHA-256 round
+trip performed at processing time. Entropy coding: static canonical Huffman
+only (no LZ/arithmetic/ANS). Archive packaging stores AFC payloads without
+additional compression.</p>
+</body></html>

@@ -1,0 +1,11 @@
+file,mode,engine,backend,orig_bytes,out_bytes,comp_ms_median,dec_ms_median,sha_ok
+alice29.txt,adaptive,v4,python,152089,61692,1533.43,32.92,1
+alice29.txt,baseline,v4,python,152089,87809,37.15,51.00,1
+asyoulik.txt,adaptive,v4,python,125179,54741,1100.37,21.29,1
+asyoulik.txt,baseline,v4,python,125179,75918,31.30,38.98,1
+cp.html,adaptive,v4,python,24603,10869,357.95,5.95,1
+cp.html,baseline,v4,python,24603,16338,6.41,8.33,1
+fields.c,adaptive,v4,python,11150,5330,142.89,2.34,1
+fields.c,baseline,v4,python,11150,7170,3.46,4.06,1
+grammar.lsp,adaptive,v4,python,3721,1927,42.49,0.92,1
+grammar.lsp,baseline,v4,python,3721,2293,1.36,1.39,1

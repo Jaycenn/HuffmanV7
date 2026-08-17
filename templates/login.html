@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block auth_content %}
+<div class="rule2 pt-4 mb-6">
+  <p class="font-data text-[11px] tracking-[0.18em] uppercase text-maroon">
+    Holy Angel University · School of Computing</p>
+  <h1 class="font-display text-2xl mt-2">Adaptive File Compression</h1>
+  <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Sign in to continue. All processing happens
+    on this computer.</p>
+</div>
+<form method="post" class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-6 space-y-4">
+  {% if error %}
+  <p class="text-sm text-maroon border border-maroon/30 bg-maroon/5 rounded-md
+            px-3 py-2" role="alert">{{ error }}</p>
+  {% endif %}
+  <div>
+    <label class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]" for="username">Username</label>
+    <input id="username" name="username" required autofocus autocomplete="username"
+           class="mt-1 w-full border border-line dark:border-[#35322c] rounded-md px-3 py-2">
+  </div>
+  <div>
+    <label class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]" for="password">Password</label>
+    <input id="password" name="password" type="password" required
+           autocomplete="current-password"
+           class="mt-1 w-full border border-line dark:border-[#35322c] rounded-md px-3 py-2">
+  </div>
+  <button class="w-full px-4 py-3 rounded-md bg-maroon text-white text-sm
+                 font-semibold hover:bg-maroondark">Sign in</button>
+  <p class="text-xs text-dim dark:text-[#9c968a] text-center">No account?
+    <a class="text-maroon underline" href="{{ url_for('auth.register') }}">Register</a></p>
+</form>
+{% endblock %}

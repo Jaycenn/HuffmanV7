@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="rule2 pt-4">
+  <h1 class="font-display text-2xl">Settings</h1>
+</div>
+<div class="grid lg:grid-cols-2 gap-4 mt-6">
+  <section class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-6">
+    <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Account</h2>
+    <dl class="mt-3 text-sm space-y-1">
+      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Username</dt>
+        <dd class="font-data">{{ current_user['username'] }}</dd></div>
+      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Email</dt>
+        <dd class="font-data break-all">{{ current_user['email'] }}</dd></div>
+      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Role</dt>
+        <dd class="font-data">{{ current_user['role'] }}</dd></div>
+      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Created</dt>
+        <dd class="font-data">{{ current_user['created_at'] }}</dd></div>
+    </dl>
+    <a href="{{ url_for('auth.change_password') }}"
+       class="inline-block mt-4 px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
+              hover:border-maroon">Change password</a>
+  </section>
+
+  <section class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-6">
+    <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Size policy (enforced)</h2>
+    <p class="text-xs text-dim dark:text-[#9c968a] mt-1">These come from <code>config.py</code>; the
+      UI never hardcodes a limit.</p>
+    <dl class="mt-3 text-sm space-y-1">
+      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Minimum file</dt>
+        <dd class="font-data tabular">{{ human(cfg.MIN_FILE_SIZE) }}</dd></div>
+      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Maximum file</dt>
+        <dd class="font-data tabular">{{ human(cfg.MAX_FILE_SIZE) }}</dd></div>
+      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Maximum batch</dt>
+        <dd class="font-data tabular">{{ human(cfg.MAX_BATCH_SIZE) }}</dd></div>
+      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Concurrent jobs</dt>
+        <dd class="font-data tabular">{{ cfg.MAX_CONCURRENT_JOBS }}</dd></div>
+    </dl>
+    <p class="text-xs text-dim dark:text-[#9c968a] mt-3">Defaults match the ceiling the thesis
+      Appendix C documents as tested ({{ human(cfg.PAPER_TESTED_MAX_FILE) }} per
+      file, {{ human(cfg.PAPER_TESTED_MAX_BATCH) }} per batch). See
+      <code>SIZE_POLICY.md</code> before raising them.</p>
+  </section>
+
+  <section class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-6 lg:col-span-2">
+    <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Engine</h2>
+    <dl class="mt-3 text-sm grid sm:grid-cols-3 gap-2">
+      <div><dt class="text-dim dark:text-[#9c968a] text-xs">App</dt>
+        <dd class="font-data">{{ cfg.APP_VERSION }}</dd></div>
+      <div><dt class="text-dim dark:text-[#9c968a] text-xs">Engine</dt>
+        <dd class="font-data">{{ cfg.ENGINE_VERSION }}</dd></div>
+      <div><dt class="text-dim dark:text-[#9c968a] text-xs">Archive format</dt>
+        <dd class="font-data">{{ cfg.ARCHIVE_EXT }}</dd></div>
+    </dl>
+    <p class="text-xs text-dim dark:text-[#9c968a] mt-3">Data stays on this machine: accounts and
+      history live in a local SQLite file, produced files are held in memory
+      for this session only, and nothing is uploaded anywhere. See
+      <code>SCOPE_NOTES.md</code>.</p>
+  </section>
+</div>
+{% endblock %}

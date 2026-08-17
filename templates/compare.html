@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Compare{% endblock %}
+{% block content %}
+<div class="rule2 pt-4">
+  <h1 class="font-display text-2xl">Compare two results</h1>
+  <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Pick any two entries from your history to
+    diff their sizes, ratio, engine and container.</p>
+</div>
+
+<form method="get" class="mt-5 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-5
+                          flex flex-wrap gap-3 items-end">
+  {% for side, sel in [('a', left), ('b', right)] %}
+  <label class="font-data text-xs text-dim dark:text-[#9c968a] flex-1 min-w-[240px]">
+    {{ 'First' if side == 'a' else 'Second' }} entry
+    <select name="{{ side }}" class="mt-1 w-full border border-line dark:border-[#35322c] rounded-md
+                                     px-2 py-2 bg-white dark:bg-[#1c1b18] text-ink dark:text-[#ECE8E0] text-sm">
+      <option value="">— choose —</option>
+      {% for r in rows %}
+      <option value="{{ r['id'] }}"
+        {% if sel and sel['id'] == r['id'] %}selected{% endif %}>
+        {{ r['filename'][:44] }} · {{ human(r['original_bytes']) }} ·
+        {{ '%.2f'|format(r['ratio']) }}× · {{ r['created_at'][:16] }}
+      </option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endfor %}
+  <button class="px-5 py-2 rounded-md bg-maroon text-white text-sm
+                 font-semibold hover:bg-maroondark">Compare</button>
+</form>
+
+{% if left and right %}
+<div class="mt-6 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead class="border-b border-line dark:border-[#35322c] text-left">
+      <tr class="text-[11px] uppercase text-dim dark:text-[#9c968a]">
+        <th class="px-3 py-2">Metric</th>
+        <th class="px-3 py-2 text-right">{{ left['filename'][:28] }}</th>
+        <th class="px-3 py-2 text-right">{{ right['filename'][:28] }}</th>
+        <th class="px-3 py-2 text-right">Difference</th></tr></thead>
+    <tbody>
+      {% macro row(label, key, fmt='bytes', better='lower') %}
+      {% set d = diff[key] %}
+      <tr class="border-b border-line/60 dark:border-[#35322c]/60">
+        <td class="px-3 py-2">{{ label }}</td>
+        <td class="px-3 py-2 text-right font-data tabular">
+          {% if fmt=='bytes' %}{{ human(d.left) }}{% elif fmt=='x' %}{{ '%.3f'|format(d.left) }}×{% elif fmt=='ms' %}{{ '%.1f'|format(d.left) }} ms{% else %}{{ '%.2f'|format(d.left) }}%{% endif %}</td>
+        <td class="px-3 py-2 text-right font-data tabular">
+          {% if fmt=='bytes' %}{{ human(d.right) }}{% elif fmt=='x' %}{{ '%.3f'|format(d.right) }}×{% elif fmt=='ms' %}{{ '%.1f'|format(d.right) }} ms{% else %}{{ '%.2f'|format(d.right) }}%{% endif %}</td>
+        {% set good = (d.abs < 0) if better=='lower' else (d.abs > 0) %}
+        <td class="px-3 py-2 text-right font-data tabular
+                   {% if d.abs == 0 %}text-dim dark:text-[#9c968a]{% elif good %}text-green-700{% else %}text-maroon{% endif %}">
+          {{ '%+.2f'|format(d.pct) }}%</td>
+      </tr>
+      {% endmacro %}
+      {{ row('Original size', 'original_bytes', 'bytes', 'lower') }}
+      {{ row('Compressed size', 'compressed_bytes', 'bytes', 'lower') }}
+      {{ row('Ratio', 'ratio', 'x', 'higher') }}
+      {{ row('Space saved', 'space_saved_pct', 'pct', 'higher') }}
+      {{ row('Duration', 'duration_ms', 'ms', 'lower') }}
+      {% for label, key in [('Engine','engine'), ('Container','container_format'),
+                            ('Preset','preset'), ('Lossless','lossless_verified')] %}
+      <tr class="border-b border-line/60 dark:border-[#35322c]/60">
+        <td class="px-3 py-2">{{ label }}</td>
+        <td class="px-3 py-2 text-right font-data text-xs">
+          {% if key=='lossless_verified' %}{{ '✓' if left[key] else '✗' }}{% else %}{{ left[key] or '—' }}{% endif %}</td>
+        <td class="px-3 py-2 text-right font-data text-xs">
+          {% if key=='lossless_verified' %}{{ '✓' if right[key] else '✗' }}{% else %}{{ right[key] or '—' }}{% endif %}</td>
+        <td class="px-3 py-2 text-right font-data text-xs text-dim dark:text-[#9c968a]">
+          {% if left[key] == right[key] %}same{% else %}differs{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="text-xs text-dim dark:text-[#9c968a] mt-3">Green marks the better value for that metric
+  (smaller output / higher ratio / faster). Percentages are relative to the
+  first entry.</p>
+{% elif left or right %}
+<p class="mt-6 text-sm text-dim dark:text-[#9c968a]">Choose a second entry to see the diff.</p>
+{% endif %}
+{% endblock %}
