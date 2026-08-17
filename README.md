@@ -18,8 +18,9 @@ codebase, one database schema and one test suite — nothing needs merging.
 Verify everything with:
 
 ```bash
-python tests/test_app.py          # 201 checks: web app, Parts 1 + 2, the
+python tests/test_app.py          # 214 checks: web app, Parts 1 + 2, the
                                   # Compress/Decompress split, and V7
+python tools/native_doctor.py     # WHY is the backend Python or C++?
 python tools/preset_bench.py      # Python vs C++ across all three presets
 python tools/doc_bench.py         # PDF/DOCX container-aware results
 python tools/run_verification.py  # engine round trips
@@ -253,7 +254,7 @@ every file in the thesis corpus.
 ## Running the tests
 
 ```bash
-python tests/test_app.py      # 201 checks: auth, roles, round trips, archives,
+python tests/test_app.py      # 214 checks: auth, roles, round trips, archives,
                               # size policy, reports, isolation, analytics,
                               # entropy, tree, attribution, presets
 python tools/run_verification.py          # engine round trips (unchanged)
@@ -313,7 +314,8 @@ afc2.NATIVE   # True when the C++ core is active
 | `filetypes.py` | content-based type detection; recovers the original extension on decompress. Compresses nothing |
 | `analysis.py` | read-only entropy / container / tree / attribution analysis |
 | `presets.py` | Fast / Balanced / Maximum tunable presets |
-| `tests/test_app.py` | 201-check end-to-end suite (Parts 1 + 2, page split, V7) |
+| `tests/test_app.py` | 214-check end-to-end suite (Parts 1 + 2, page split, V7) |
+| `tools/native_doctor.py` | [v7] diagnoses why the native core is or is not loaded |
 | `containers.py` | [v7] container-aware PDF/DOCX segmentation. Routes components to the existing engine; compresses nothing itself |
 | `tools/` | corpus generator, verification suite, size benchmark, CSS + WASM builds |
 | `benchmarks/` | corpus, Canterbury files, harness, v3 snapshot, result CSVs |

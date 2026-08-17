@@ -1426,6 +1426,89 @@ def test_afc3_reporting_is_whole_file(app):
           d.get("container_mode"))
 
 
+def test_native_backend_diagnostics(app):
+    """A silent fall back to pure Python is the bug behind the 138-second
+    dickens run: identical output, ~12x slower, and no way to find out why.
+    The loader must always be able to say what happened."""
+    import afc_native
+    check("loader records diagnostic steps",
+          isinstance(afc_native.DIAGNOSTICS, list)
+          and len(afc_native.DIAGNOSTICS) > 0)
+    check("loader exposes a REASON string",
+          isinstance(afc_native.REASON, str) and afc_native.REASON != "")
+    txt = afc_native.report()
+    check("report() names the backend state",
+          ("AVAILABLE" in txt) and ("Searched:" in txt), txt[:80])
+    if afc_native.AVAILABLE:
+        check("report() names the loaded library",
+              afc_native.LIBRARY_PATH in txt and
+              os.path.exists(afc_native.LIBRARY_PATH))
+
+    # architecture detection: a 32-bit library must be refused, not loaded
+    import struct as _s
+    import tempfile as _t
+    mz = bytearray(b"MZ" + b"\x00" * 0x3a)
+    mz += _s.pack("<I", 0x40)
+    mz += b"PE\x00\x00" + _s.pack("<H", 0x014c) + b"\x00" * 200
+    fd, p = _t.mkstemp(suffix=".dll")
+    os.write(fd, bytes(mz))
+    os.close(fd)
+    try:
+        check("32-bit PE library is detected as 32-bit",
+              afc_native._binary_bits(p) == 32, afc_native._binary_bits(p))
+    finally:
+        os.remove(p)
+    check("this Python's bitness is detected",
+          afc_native._python_bits() in (32, 64))
+
+    # the status API must surface it so the user sees it without a terminal
+    c = app.test_client()
+    login(c, "alice", "correct-horse")
+    s = c.get("/api/status").get_json()
+    check("status API reports the native reason",
+          isinstance(s.get("native_reason"), str) and s["native_reason"] != "",
+          s.get("native_reason"))
+    check("status API reports a backend per preset",
+          set(s.get("preset_backends", {})) == {"fast", "balanced", "maximum"},
+          s.get("preset_backends"))
+
+
+def test_pdf_object_inventory():
+    """Real PDF component analysis: page objects, /Contents, filters."""
+    import containers
+    docs = {os.path.basename(p): p for p in _doc_corpus()}
+    p = docs.get("pdf_text_and_images.pdf")
+    if not p:
+        return
+    comps = containers.pdf_components(open(p, "rb").read())
+    kinds = {}
+    for c in comps:
+        kinds[c["kind"]] = kinds.get(c["kind"], 0) + 1
+    check("PDF objects are parsed", len(comps) > 10, len(comps))
+    check("page content streams are identified via /Type /Page + /Contents",
+          kinds.get("page-content", 0) > 0, kinds)
+    check("image XObjects are identified", kinds.get("image", 0) > 0, kinds)
+    check("stream filters are read from the object dictionary",
+          any(c["filter"] for c in comps))
+
+    # A Flate-filtered PDF must have its page streams PRESERVED, not
+    # re-compressed: already-compressed data is not fed to Hybrid-Huffman.
+    q = docs.get("pdf_word_flate.pdf")
+    if q:
+        data = open(q, "rb").read()
+        segs = containers.plan(data)
+        opaque = [(s.start, s.end) for s in segs
+                  if s.kind == containers.OPAQUE]
+        flate = [c for c in containers.pdf_components(data)
+                 if c["filter"] == "/FlateDecode" and c["stream_start"] >= 0]
+        preserved = [c for c in flate
+                     if any(a <= c["stream_start"] and c["stream_end"] <= b
+                            for a, b in opaque)]
+        check("already-compressed (/FlateDecode) streams are preserved",
+              len(flate) > 0 and len(preserved) == len(flate),
+              "%d of %d" % (len(preserved), len(flate)))
+
+
 def test_generic_files_unaffected():
     """Generic (non-container) files must take exactly the V6 path."""
     import afc2
@@ -1494,6 +1577,8 @@ def main():
         test_container_corrupt_input_is_safe()
         test_container_component_classification()
         test_afc3_reporting_is_whole_file(app)
+        test_native_backend_diagnostics(app)
+        test_pdf_object_inventory()
         test_generic_files_unaffected()
     finally:
         for suffix in ("", "-wal", "-shm"):

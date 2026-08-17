@@ -840,11 +840,30 @@ def api_presets():
 def api_status():
     """Feature 10 — system status panel (ISO 5055 maintainability evidence)."""
     up = time.time() - APP_STARTED_AT
+    # [v7] Surface WHY the backend is what it is. A silent fall back to the
+    # pure-Python path is ~12x slower with identical output, which looks like
+    # "the compressor is slow" rather than "the native library did not load".
+    try:
+        import afc_native
+        native_reason = afc_native.REASON
+        native_library = afc_native.LIBRARY_PATH
+        native_tunable = bool(getattr(afc_native, "TUNABLE", False))
+        native_steps = afc_native.DIAGNOSTICS
+    except Exception:
+        native_reason, native_library, native_tunable, native_steps = "", "", False, []
+
     return jsonify(
         app_version=config.APP_VERSION,
         engine_version=config.ENGINE_VERSION,
         backend="C++ native" if engine.NATIVE else "pure Python",
         native_available=bool(engine.NATIVE),
+        native_reason=native_reason,
+        native_library=native_library,
+        native_tunable=native_tunable,
+        native_diagnostics=native_steps,
+        preset_backends={p: ("C++ native" if presets.uses_native(p)
+                             else "pure Python")
+                         for p in ("fast", "balanced", "maximum")},
         uptime_seconds=round(up, 1),
         uptime_human=_uptime_human(up),
         python_version=sys.version.split()[0],

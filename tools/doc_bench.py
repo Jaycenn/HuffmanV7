@@ -72,6 +72,40 @@ def bench_one(path, runs):
         "segments": 0, "pooled_bytes": 0, "opaque_bytes": 0,
         "opaque_fraction": 0.0, "components": {}}
 
+    # Object-level inventory (§14): how many components were analysed, how
+    # many were routed to Hybrid-Huffman, how many were preserved verbatim.
+    inventory = []
+    if data[:5] == b"%PDF-":
+        try:
+            inventory = containers.pdf_components(data)
+        except Exception:
+            inventory = []
+    segs = containers.plan(data) or []
+    opaque_ranges = [(s.start, s.end) for s in segs
+                     if s.kind == containers.OPAQUE]
+
+    def _is_preserved(c):
+        return any(a <= c["stream_start"] and c["stream_end"] <= b
+                   for a, b in opaque_ranges)
+
+    streams = [c for c in inventory if c["stream_start"] >= 0]
+    preserved = [c for c in streams if _is_preserved(c)]
+    compressed = [c for c in streams if not _is_preserved(c)]
+    stats["components_analyzed"] = len(inventory)
+    stats["streams_analyzed"] = len(streams)
+    stats["streams_compressed"] = len(compressed)
+    stats["streams_preserved"] = len(preserved)
+    stats["compressed_stream_bytes"] = sum(c["length"] for c in compressed)
+    stats["preserved_stream_bytes"] = sum(c["length"] for c in preserved)
+    kinds = {}
+    for c in streams:
+        k = kinds.setdefault(c["kind"], {"n": 0, "bytes": 0, "preserved": 0})
+        k["n"] += 1
+        k["bytes"] += c["length"]
+        if _is_preserved(c):
+            k["preserved"] += 1
+    stats["stream_kinds"] = kinds
+
     return {
         "file": name, "orig": len(data),
         "v6_bytes": len(plain), "v7_bytes": len(v7),
@@ -83,6 +117,13 @@ def bench_one(path, runs):
         "opaque_bytes": stats["opaque_bytes"],
         "opaque_pct": 100.0 * stats["opaque_fraction"],
         "components": stats["components"],
+        "components_analyzed": stats.get("components_analyzed", 0),
+        "streams_analyzed": stats.get("streams_analyzed", 0),
+        "streams_compressed": stats.get("streams_compressed", 0),
+        "streams_preserved": stats.get("streams_preserved", 0),
+        "compressed_stream_bytes": stats.get("compressed_stream_bytes", 0),
+        "preserved_stream_bytes": stats.get("preserved_stream_bytes", 0),
+        "stream_kinds": stats.get("stream_kinds", {}),
         "sha_in": sha_in, "sha_out": sha_out, "lossless": lossless,
         "v7_saved_pct": 100.0 * (1 - len(v7) / len(data)) if data else 0.0,
         "v7_vs_v6_pct": (100.0 * (len(v7) - len(plain)) / len(plain)
@@ -150,13 +191,39 @@ def main():
               % (r["file"], r["segments"], r["pooled_bytes"],
                  r["opaque_bytes"], r["opaque_pct"], comps or "-"))
 
+    # ---- §14 object-level component inventory (PDF) -----------------------
+    pdfs = [r for r in rows if r["components_analyzed"]]
+    if pdfs:
+        print()
+        print("=" * 108)
+        print("PDF OBJECT INVENTORY — components analysed / compressed / preserved")
+        print("=" * 108)
+        print("%-28s %7s %8s %10s %10s %12s %12s"
+              % ("file", "objects", "streams", "compressed", "preserved",
+                 "comp bytes", "presv bytes"))
+        for r in pdfs:
+            print("%-28s %7d %8d %10d %10d %12d %12d"
+                  % (r["file"], r["components_analyzed"], r["streams_analyzed"],
+                     r["streams_compressed"], r["streams_preserved"],
+                     r["compressed_stream_bytes"], r["preserved_stream_bytes"]))
+        print()
+        print("%-28s %s" % ("file", "stream kinds (n, bytes, preserved)"))
+        for r in pdfs:
+            k = ", ".join("%s x%d/%dB/%dpres" % (name, v["n"], v["bytes"],
+                                                 v["preserved"])
+                          for name, v in sorted(r["stream_kinds"].items()))
+            print("%-28s %s" % (r["file"], k or "-"))
+
     if a.csv:
         import csv
         with open(a.csv, "w", newline="") as f:
             cols = ["file", "orig", "v6_bytes", "v7_bytes", "v7_vs_v6_pct",
                     "v7_saved_pct", "v6_ms", "v7_ms", "dec_ms", "container",
                     "backend", "segments", "pooled_bytes", "opaque_bytes",
-                    "opaque_pct", "sha_in", "sha_out", "lossless"]
+                    "opaque_pct", "components_analyzed", "streams_analyzed",
+                    "streams_compressed", "streams_preserved",
+                    "compressed_stream_bytes", "preserved_stream_bytes",
+                    "sha_in", "sha_out", "lossless"]
             w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
             w.writeheader()
             for r in rows:

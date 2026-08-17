@@ -58,4 +58,42 @@
       <code>SCOPE_NOTES.md</code>.</p>
   </section>
 </div>
+
+<!-- [v7] Compression backend. A silent fall back to pure Python is ~12x
+     slower with byte-identical output, so it is stated plainly here rather
+     than left for the user to infer from a slow run. -->
+<div class="mt-6 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-5">
+  <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Compression backend</h2>
+  <p class="mt-2 text-lg font-semibold" id="beState">checking…</p>
+  <p class="text-sm text-dim dark:text-[#9c968a] mt-1" id="beReason"></p>
+  <div class="mt-3 grid gap-1 font-data text-xs" id="bePresets"></div>
+  <pre id="beSteps" class="hidden mt-3 text-[10px] font-data overflow-auto max-h-48
+                           whitespace-pre-wrap text-dim dark:text-[#9c968a]"></pre>
+  <p class="text-[11px] text-dim dark:text-[#9c968a] mt-3">Output is identical on
+    either backend — only speed differs. For a full diagnosis run
+    <code>python tools/native_doctor.py</code>.</p>
+</div>
+<script>
+fetch("/api/status").then(function (r) { return r.json(); }).then(function (j) {
+  var ok = j.native_available;
+  var el = document.getElementById("beState");
+  el.textContent = ok ? "C++ native — active" : "pure Python — native core not loaded";
+  el.className = "mt-2 text-lg font-semibold " + (ok ? "text-green-700" : "text-maroon");
+  document.getElementById("beReason").textContent = j.native_reason || "";
+  var pb = document.getElementById("bePresets");
+  pb.innerHTML = "";
+  Object.keys(j.preset_backends || {}).forEach(function (k) {
+    var d = document.createElement("div");
+    d.textContent = k + " \u2192 " + j.preset_backends[k];
+    pb.appendChild(d);
+  });
+  if (!ok && (j.native_diagnostics || []).length) {
+    var pre = document.getElementById("beSteps");
+    pre.textContent = j.native_diagnostics.map(function (d) {
+      return (d.ok ? "[ok]   " : "[FAIL] ") + d.step + (d.detail ? " - " + d.detail : "");
+    }).join("\n");
+    pre.classList.remove("hidden");
+  }
+});
+</script>
 {% endblock %}

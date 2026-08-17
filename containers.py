@@ -69,6 +69,7 @@ AFC1 and AFC2 are untouched and every existing decoder still reads them. AFC3
 is only ever emitted when it is measurably smaller than the plain whole-file
 container, so an existing file never becomes larger by upgrading (§27).
 """
+import re
 import struct
 
 import afc2
@@ -252,6 +253,8 @@ _PDF_BINARY_FILTERS = (b"/DCTDecode", b"/JPXDecode", b"/JBIG2Decode",
                        b"/CCITTFaxDecode", b"/FlateDecode", b"/LZWDecode",
                        b"/RunLengthDecode", b"/Crypt")
 
+_OBJ_RE = re.compile(rb"(\d+)\s+(\d+)\s+obj\b")
+
 
 def _pdf_filter_of(data, dict_start, dict_end):
     """Name the filter declared in the stream's preceding dictionary."""
@@ -260,6 +263,103 @@ def _pdf_filter_of(data, dict_start, dict_end):
         if f in window:
             return f.decode("ascii")
     return ""
+
+
+def pdf_components(data):
+    """Object-level inventory of a PDF: what each component actually is.
+
+    Walks `N G obj ... endobj` records, reads each object's dictionary, and
+    classifies it. Page objects are located via `/Type /Page` and their
+    `/Contents N 0 R` references are resolved, so a content stream is
+    identified as a *page stream* rather than as an anonymous stream.
+
+    Returns a list of dicts:
+        {obj, kind, filter, subtype, dict_start, dict_end,
+         stream_start, stream_end, length}
+
+    `kind` is one of: page-content, image, font, metadata, objstm,
+    content-stream, object.
+
+    This is INVENTORY ONLY — it decides nothing. Segmentation still guarantees
+    an exact tiling, and the accept/reject decision is still the engine's Bit
+    Cost Decision Engine acting on the pooled buffer.
+    """
+    out = []
+    if not data.startswith(b"%PDF-"):
+        return out
+
+    # First pass: object spans and their dictionaries/streams.
+    objs = {}
+    for m in _OBJ_RE.finditer(data):
+        num = int(m.group(1))
+        start = m.end()
+        end = data.find(b"endobj", start)
+        if end < 0:
+            end = len(data)
+        body = data[start:min(end, start + 4096)]
+        srel = data.find(b"stream", start)
+        s_start = s_end = -1
+        if 0 <= srel < end:
+            j = srel + 6
+            if data[j:j + 2] == b"\r\n":
+                j += 2
+            elif data[j:j + 1] in (b"\n", b"\r"):
+                j += 1
+            e = data.find(b"endstream", j)
+            if 0 <= e <= end:
+                s_end = e
+                if data[s_end - 2:s_end] == b"\r\n":
+                    s_end -= 2
+                elif data[s_end - 1:s_end] in (b"\n", b"\r"):
+                    s_end -= 1
+                s_start = j
+        objs[num] = {"obj": num, "dict_start": start,
+                     "dict_end": srel if srel > 0 else end,
+                     "stream_start": s_start, "stream_end": s_end,
+                     "body": body}
+
+    # Second pass: which objects are page content streams?
+    page_content = set()
+    for num, o in objs.items():
+        d = data[o["dict_start"]:o["dict_end"]]
+        if b"/Type" in d and b"/Page" in d and b"/Pages" not in d:
+            cm = re.search(rb"/Contents\s+(?:(\d+)\s+\d+\s+R|\[([^\]]*)\])", d)
+            if cm:
+                if cm.group(1):
+                    page_content.add(int(cm.group(1)))
+                elif cm.group(2):
+                    for r in re.finditer(rb"(\d+)\s+\d+\s+R", cm.group(2)):
+                        page_content.add(int(r.group(1)))
+
+    for num, o in sorted(objs.items()):
+        d = data[o["dict_start"]:o["dict_end"]]
+        filt = _pdf_filter_of(data, o["dict_start"], o["dict_end"])
+        subtype = ""
+        sm = re.search(rb"/Subtype\s*/(\w+)", d)
+        if sm:
+            subtype = sm.group(1).decode("ascii", "replace")
+        if o["stream_start"] < 0:
+            kind = "object"
+        elif num in page_content:
+            kind = "page-content"
+        elif subtype == "Image" or b"/Image" in d:
+            kind = "image"
+        elif b"/FontFile" in d or subtype.startswith("Type1C") or \
+                b"/Type /Font" in d or b"/Type/Font" in d:
+            kind = "font"
+        elif b"/Metadata" in d:
+            kind = "metadata"
+        elif b"/ObjStm" in d:
+            kind = "objstm"
+        else:
+            kind = "content-stream"
+        out.append({
+            "obj": num, "kind": kind, "filter": filt, "subtype": subtype,
+            "dict_start": o["dict_start"], "dict_end": o["dict_end"],
+            "stream_start": o["stream_start"], "stream_end": o["stream_end"],
+            "length": max(0, o["stream_end"] - o["stream_start"]),
+        })
+    return out
 
 
 def analyze_pdf(data):
@@ -274,6 +374,12 @@ def analyze_pdf(data):
     pos = 0
     n = len(data)
     cursor = 0            # start of the current pooled run
+    # object-level inventory, keyed by stream payload offset
+    try:
+        comp_by_start = {c["stream_start"]: c for c in pdf_components(data)
+                         if c["stream_start"] >= 0}
+    except Exception:
+        comp_by_start = {}
     while True:
         i = data.find(b"stream", pos)
         if i < 0:
@@ -305,6 +411,15 @@ def analyze_pdf(data):
 
         payload = data[j:payload_end]
         filt = _pdf_filter_of(data, max(0, i - 512), i)
+        # [v7] Prefer the object-level identity (page content / image / font /
+        # metadata) over a bare filter name, so the component report names
+        # what the bytes actually are. Classification itself is unchanged: the
+        # entropy probe decides, so a mislabelled or unusual stream can never
+        # send incompressible data into the expensive path.
+        desc = comp_by_start.get(j)
+        if desc:
+            filt = "%s%s" % (desc["kind"],
+                             (" " + desc["filter"]) if desc["filter"] else "")
         kind = _classify(payload, filt)
         if kind == OPAQUE:
             # everything since the last opaque payload is structural -> pooled

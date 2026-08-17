@@ -10,6 +10,7 @@ for backwards compatibility."""
 import ctypes
 import os
 import subprocess
+import sys
 from array import array
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,29 +18,105 @@ _LIB = None
 
 _FMT_CODES = {"auto": 0, "afc1": 1, "afc2": 2}
 
+# ---------------------------------------------------------------------------
+# [v7] Loader diagnostics — WHY the native core is or is not in use
+# ---------------------------------------------------------------------------
+# The V6 loader swallowed every failure: `except OSError: pass`, a discarded
+# g++ stderr, and a silent FileNotFoundError when g++ was not on PATH. The
+# only visible symptom was the whole engine quietly running ~12x slower on the
+# pure-Python path, with the UI reporting "pure Python" and no way to find out
+# why. That is exactly the situation behind the 138-second dickens run.
+#
+# Every step now records its outcome in DIAGNOSTICS, and REASON carries a
+# one-line explanation that /api/status and the Settings page surface to the
+# user. Nothing here changes compression behaviour.
+
+DIAGNOSTICS = []
+REASON = ""
+LIBRARY_PATH = ""
+SEARCHED = []
+
+
+def _note(step, ok, detail=""):
+    DIAGNOSTICS.append({"step": step, "ok": bool(ok), "detail": str(detail)})
+    return ok
+
+
+def _python_bits():
+    return 64 if ctypes.sizeof(ctypes.c_void_p) == 8 else 32
+
+
+def _binary_bits(path):
+    """Bitness of a .dll/.so, read from its header.
+
+    A 32-bit MinGW DLL will not load into 64-bit Python — a very common
+    Windows failure whose OSError message ("%1 is not a valid Win32
+    application") does not say so plainly. Returns None if unrecognised.
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(4096)
+        if head[:4] == b"\x7fELF":
+            return 64 if head[4] == 2 else 32
+        if head[:2] == b"MZ":
+            off = int.from_bytes(head[0x3C:0x40], "little")
+            if head[off:off + 4] == b"PE\x00\x00":
+                machine = int.from_bytes(head[off + 4:off + 6], "little")
+                return {0x014c: 32, 0x8664: 64, 0xAA64: 64}.get(machine)
+    except Exception:
+        return None
+    return None
+
 
 def _load():
-    global _LIB
+    """Try each candidate library, recording exactly why any of them fails."""
+    global _LIB, LIBRARY_PATH
+    found_any = False
     for name in ("afc_kernels.dll", "afc_kernels.so", "libafc_kernels.so"):
         p = os.path.join(_DIR, name)
-        if os.path.exists(p):
-            try:
-                lib = ctypes.CDLL(p)
-                # require the v4 entry points; stale v3-only binaries force
-                # a rebuild so engine and library never disagree
-                if not hasattr(lib, "afc_compress"):
-                    continue
-                _LIB = lib
-                return True
-            except OSError:
-                pass
+        SEARCHED.append(p)
+        if not os.path.exists(p):
+            continue
+        found_any = True
+        bits = _binary_bits(p)
+        mine = _python_bits()
+        if bits and bits != mine:
+            _note("load %s" % name, False,
+                  "architecture mismatch: library is %d-bit, this Python is "
+                  "%d-bit. Rebuild with a matching toolchain (on Windows use "
+                  "a 64-bit MinGW-w64 shell for 64-bit Python)." % (bits, mine))
+            continue
+        try:
+            lib = ctypes.CDLL(p)
+        except OSError as exc:
+            hint = ""
+            if os.name == "nt":
+                hint = (" On Windows this usually means the MinGW runtime "
+                        "DLLs are not on PATH — rebuild with -static.")
+            _note("load %s" % name, False, "%s.%s" % (exc, hint))
+            continue
+        # require the v4 entry point; a stale v3-only binary is rejected so
+        # the engine and the library can never disagree
+        if not hasattr(lib, "afc_compress"):
+            _note("load %s" % name, False,
+                  "library predates AFC v4 (no afc_compress export); "
+                  "delete it and let the engine rebuild.")
+            continue
+        _LIB = lib
+        LIBRARY_PATH = p
+        _note("load %s" % name, True, "loaded (%d-bit)" % (bits or mine))
+        return True
+    if not found_any:
+        _note("locate library", False,
+              "no afc_kernels.dll/.so beside afc_native.py")
     return False
 
 
 def _build():
+    """Attempt a one-time build, recording the compiler's own error output."""
     src = os.path.join(_DIR, "afc_native.cpp")
     if not os.path.exists(src):
-        return False
+        return _note("build", False, "afc_native.cpp not found")
     if os.name == "nt":
         out = os.path.join(_DIR, "afc_kernels.dll")
         cmd = ["g++", "-O3", "-std=c++17", "-shared", "-static", "-pthread",
@@ -50,12 +127,69 @@ def _build():
                src, "-o", out]
     try:
         r = subprocess.run(cmd, capture_output=True)
-        return r.returncode == 0 and _load()
     except FileNotFoundError:
+        return _note("build", False,
+                     "g++ is not on PATH, so the native library cannot be "
+                     "built automatically. Install a C++ toolchain (Windows: "
+                     "MSYS2 `pacman -S mingw-w64-x86_64-gcc`, then build from "
+                     "the MinGW 64-bit shell), or ship a prebuilt "
+                     "afc_kernels.dll next to afc_native.py.")
+    except Exception as exc:                       # pragma: no cover
+        return _note("build", False, "build failed to start: %s" % exc)
+    if r.returncode != 0:
+        err = (r.stderr or b"").decode("utf-8", "replace").strip()
+        return _note("build", False,
+                     "g++ exited %d: %s" % (r.returncode, err[-400:] or "(no output)"))
+    _note("build", True, " ".join(cmd))
+    return _load()
+
+
+def _resolve():
+    global REASON
+    if os.environ.get("AFC_NO_NATIVE"):
+        _note("environment", False,
+              "AFC_NO_NATIVE is set, so the native core is disabled on "
+              "purpose. Unset it to use the C++ backend.")
+        REASON = "disabled by AFC_NO_NATIVE"
         return False
+    if _load() or _build():
+        REASON = "native library loaded from %s" % LIBRARY_PATH
+        return True
+    failures = [d for d in DIAGNOSTICS if not d["ok"]]
+    REASON = failures[-1]["detail"] if failures else "unknown"
+    return False
 
 
-AVAILABLE = _load() or _build()
+AVAILABLE = _resolve()
+
+
+def report():
+    """Human-readable explanation of the backend decision.
+
+    Printed by tools/native_doctor.py and surfaced by /api/status, so a slow
+    run is never a mystery."""
+    lines = ["AFC native backend: %s" % ("AVAILABLE" if AVAILABLE
+                                         else "NOT AVAILABLE")]
+    lines.append("Python: %d-bit, %s" % (_python_bits(), sys.platform))
+    if AVAILABLE:
+        lines.append("Library: %s" % LIBRARY_PATH)
+        lines.append("Tunable presets (afc_compress_ex): %s" % TUNABLE)
+    else:
+        lines.append("Reason: %s" % REASON)
+        lines.append("Consequence: every preset runs on the pure-Python "
+                     "reference path, which is roughly an order of magnitude "
+                     "slower. Output is identical; only speed differs.")
+    lines.append("")
+    lines.append("Steps:")
+    for d in DIAGNOSTICS:
+        lines.append("  [%s] %s%s" % ("ok " if d["ok"] else "FAIL", d["step"],
+                                      (" - " + d["detail"]) if d["detail"] else ""))
+    if SEARCHED:
+        lines.append("")
+        lines.append("Searched:")
+        for p in SEARCHED:
+            lines.append("  %s%s" % (p, "" if os.path.exists(p) else "  (absent)"))
+    return "\n".join(lines)
 
 if AVAILABLE:
     _LIB.afc_free.argtypes = [ctypes.c_void_p]

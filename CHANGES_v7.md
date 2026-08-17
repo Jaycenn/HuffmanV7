@@ -11,6 +11,77 @@ application, redesign the UI, or replace the Hybrid-Huffman algorithm.
 
 ---
 
+## 0. The `dickens` performance bug — why Balanced ran on pure Python
+
+**Reported:** a 9.72 MB file, preset Balanced, 3.61 MB out (62.82%), **138.23 s**,
+backend "pure Python".
+
+**Reproduced.** Silesia is unreachable from this environment, so the test used a
+byte-for-byte size match (10 192 446 B) built from the repository's own English
+text. On the pure-Python path it took **128.23 s** — close enough to 138 s to
+confirm the same code path and the same scenario.
+
+**The cause is not preset routing.** Balanced was already the one preset V6
+allowed on the native core, and `presets.uses_native("balanced")` returns True.
+The backend said "pure Python" for the only remaining reason: `afc_native.AVAILABLE`
+was False, so `afc2.NATIVE` was False and *every* preset ran interpreted.
+
+**The real defect is that the loader never said so.** V6's `afc_native.py`
+swallowed every failure:
+
+```python
+except OSError:
+    pass                       # wrong architecture, missing runtime DLL — silent
+...
+if not hasattr(lib, "afc_compress"):
+    continue                   # stale binary — silent
+...
+r = subprocess.run(cmd, capture_output=True)
+return r.returncode == 0 and _load()   # g++ stderr discarded
+except FileNotFoundError:
+    return False               # g++ not on PATH — silent
+```
+
+Any of these produced an engine that was ~12x slower with byte-identical
+output. The user sees "the compressor is slow", not "the native library did not
+load". On Windows the likely chain is: no `afc_kernels.dll` is shipped →
+auto-build tries `g++` → not on PATH → `FileNotFoundError` → silent fallback.
+
+**Fix.** Every step now records its outcome. `afc_native.DIAGNOSTICS`,
+`REASON`, `LIBRARY_PATH` and `report()` explain the decision; the loader also
+reads the PE/ELF header and refuses an architecture-mismatched library with a
+message naming the mismatch (a 32-bit MinGW DLL silently failing to load into
+64-bit Python is a classic Windows case whose OSError text does not say so).
+`g++` stderr is captured and reported.
+
+Surfaced in three places so it cannot stay hidden:
+
+* `python tools/native_doctor.py` — full diagnosis plus the exact build command;
+* `GET /api/status` — `native_available`, `native_reason`, `native_library`,
+  `native_diagnostics`, `preset_backends`;
+* the **Settings page**, which states the active backend, the reason, and the
+  per-preset backend.
+
+Verified by simulation: with no library and no `g++`, the loader reports
+*"g++ is not on PATH, so the native library cannot be built automatically…"*;
+with a 32-bit DLL and 64-bit Python it reports the architecture mismatch,
+skips it, and rebuilds a working library rather than failing.
+
+**Result on the same file, preset Balanced:**
+
+| metric | pure Python | C++ native | factor |
+|---|---:|---:|---:|
+| compressed bytes | 3 574 764 | 3 574 764 | **identical** |
+| space saved | 64.93% | 64.93% | — |
+| ratio | 2.85x | 2.85x | — |
+| compression time | **128.23 s** | **11.10 s** | **11.6x faster** |
+| decompression time | 2.32 s | 0.07 s | 31.9x faster |
+| peak RSS | 828.8 MB | 212.6 MB | 3.9x less |
+| SHA-256 lossless | yes | yes | — |
+
+The compression result is preserved exactly — the 62.82%-class ratio is not
+traded away for the speed-up.
+
 ## 1. Root cause of the Fast/Maximum Python fallback
 
 Two mechanisms, one underlying cause.
@@ -337,7 +408,8 @@ produces real gains (up to −2.43%) and large speed-ups.
 
 ## 8. Files
 
-**Added:** `containers.py`, `CHANGES_v7.md`, `tools/preset_bench.py`,
+**Added:** `containers.py`, `CHANGES_v7.md`, `tools/native_doctor.py`,
+`tools/preset_bench.py`,
 `tools/doc_bench.py`, `tools/make_doc_corpus.py`, `benchmarks/documents/*`,
 `benchmarks/v7_preset_matrix.csv`, `benchmarks/v7_documents.csv`.
 
@@ -360,10 +432,31 @@ interface. `afc.py` (containers, canonical Huffman, the universal decoder) and
 `afc_engine.js` remain untouched, and the algorithm itself is unchanged — only
 the plumbing that carries parameters into it.
 
+## 8.5 PDF object inventory
+
+`containers.pdf_components()` walks `N G obj … endobj` records, reads each
+object dictionary, resolves `/Type /Page` → `/Contents N 0 R`, and names each
+stream: **page-content, image, font, metadata, objstm, content-stream**, along
+with its declared filter. Measured on the corpus:
+
+| file | objects | streams | compressed | preserved | stream kinds |
+|---|---:|---:|---:|---:|---|
+| pdf_text_large.pdf | 324 | 160 | 160 | 0 | page-content x160 |
+| pdf_text_and_images.pdf | 68 | 34 | 30 | 4 | page-content x30, image x4 (all preserved) |
+| pdf_images_only.pdf | 22 | 12 | 6 | 6 | image x6 preserved, page-content x6 compressed |
+| pdf_word_flate.pdf | 84 | 40 | 0 | **40** | page-content x40, all /FlateDecode → preserved |
+| pdf_flate_and_images.pdf | 68 | 34 | 0 | 34 | image x4 + /FlateDecode page-content x30 |
+
+`pdf_word_flate.pdf` is the filter-awareness case (§6): every page stream is
+already `/FlateDecode`-compressed, so all 40 are preserved rather than fed to
+Hybrid-Huffman a second time. Classification is still decided by the entropy
+probe rather than by trusting the declared filter, so a mislabelled stream
+cannot send incompressible data into the expensive path.
+
 ## 9. Verification
 
 ```
-tests/test_app.py          201 passed, 0 failed   (V6 had 165; 36 new)
+tests/test_app.py          214 passed, 0 failed   (V6 had 165; 49 new)
 tools/run_verification.py  ALL CHECKS PASSED      (60 round trips, cross-decode)
 tools/doc_bench.py         14/14 byte-exact, SHA-256 verified
 tools/preset_bench.py      60/60 rows verified lossless
