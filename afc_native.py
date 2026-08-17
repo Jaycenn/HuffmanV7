@@ -112,36 +112,78 @@ def _load():
     return False
 
 
+def library_name():
+    """The library filename this platform expects."""
+    return "afc_kernels.dll" if os.name == "nt" else "afc_kernels.so"
+
+
+def expected_path():
+    return os.path.join(_DIR, library_name())
+
+
+def _build_commands(src, out):
+    """Candidate build commands, in preference order.
+
+    V6 only ever tried `g++`. On Windows that is often absent even when a
+    perfectly good compiler is installed — Visual Studio ships `cl.exe`, and
+    LLVM ships `clang++`. Trying all three (and reporting each failure) is the
+    difference between "native unavailable" and a working DLL.
+    """
+    if os.name == "nt":
+        return [
+            ("g++", ["g++", "-O3", "-std=c++17", "-shared", "-static",
+                     "-pthread", src, "-o", out]),
+            ("clang++", ["clang++", "-O3", "-std=c++17", "-shared",
+                         src, "-o", out]),
+            # MSVC: /LD builds a DLL. The AFC_API __declspec(dllexport)
+            # annotations in afc_native.cpp are what make its exports visible
+            # — without them cl.exe produces a DLL that exports nothing.
+            ("cl", ["cl", "/nologo", "/LD", "/O2", "/EHsc", "/std:c++17",
+                    src, "/Fe:" + out]),
+        ]
+    return [
+        ("g++", ["g++", "-O3", "-std=c++17", "-shared", "-fPIC", "-pthread",
+                 src, "-o", out]),
+        ("clang++", ["clang++", "-O3", "-std=c++17", "-shared", "-fPIC",
+                     "-pthread", src, "-o", out]),
+    ]
+
+
 def _build():
-    """Attempt a one-time build, recording the compiler's own error output."""
+    """Attempt a one-time build, recording each compiler's own error output."""
     src = os.path.join(_DIR, "afc_native.cpp")
     if not os.path.exists(src):
-        return _note("build", False, "afc_native.cpp not found")
-    if os.name == "nt":
-        out = os.path.join(_DIR, "afc_kernels.dll")
-        cmd = ["g++", "-O3", "-std=c++17", "-shared", "-static", "-pthread",
-               src, "-o", out]
-    else:
-        out = os.path.join(_DIR, "afc_kernels.so")
-        cmd = ["g++", "-O3", "-std=c++17", "-shared", "-fPIC", "-pthread",
-               src, "-o", out]
-    try:
-        r = subprocess.run(cmd, capture_output=True)
-    except FileNotFoundError:
-        return _note("build", False,
-                     "g++ is not on PATH, so the native library cannot be "
-                     "built automatically. Install a C++ toolchain (Windows: "
-                     "MSYS2 `pacman -S mingw-w64-x86_64-gcc`, then build from "
-                     "the MinGW 64-bit shell), or ship a prebuilt "
-                     "afc_kernels.dll next to afc_native.py.")
-    except Exception as exc:                       # pragma: no cover
-        return _note("build", False, "build failed to start: %s" % exc)
-    if r.returncode != 0:
+        return _note("build", False, "afc_native.cpp not found at %s" % src)
+    out = expected_path()
+    tried = []
+    for name, cmd in _build_commands(src, out):
+        try:
+            r = subprocess.run(cmd, capture_output=True)
+        except FileNotFoundError:
+            tried.append("%s: not on PATH" % name)
+            _note("build with %s" % name, False, "not on PATH")
+            continue
+        except Exception as exc:                   # pragma: no cover
+            tried.append("%s: %s" % (name, exc))
+            _note("build with %s" % name, False, str(exc))
+            continue
+        if r.returncode == 0:
+            _note("build with %s" % name, True, " ".join(cmd))
+            return _load()
         err = (r.stderr or b"").decode("utf-8", "replace").strip()
-        return _note("build", False,
-                     "g++ exited %d: %s" % (r.returncode, err[-400:] or "(no output)"))
-    _note("build", True, " ".join(cmd))
-    return _load()
+        if not err:
+            err = (r.stdout or b"").decode("utf-8", "replace").strip()
+        tried.append("%s: exited %d" % (name, r.returncode))
+        _note("build with %s" % name, False,
+              "exit %d: %s" % (r.returncode, err[-500:] or "(no output)"))
+
+    return _note("build", False,
+                 "no usable C++ compiler. Tried %s. Install one and re-run, "
+                 "or place a prebuilt %s next to afc_native.py. Windows: "
+                 "MSYS2 `pacman -S mingw-w64-x86_64-gcc` then build from the "
+                 "MinGW 64-bit shell, or use the Visual Studio Developer "
+                 "Command Prompt (cl.exe)."
+                 % ("; ".join(tried), library_name()))
 
 
 def _resolve():
@@ -161,6 +203,113 @@ def _resolve():
 
 
 AVAILABLE = _resolve()
+
+
+def smoke_test():
+    """Actually CALL the native library and verify a round trip.
+
+    Existing + loadable + exporting the symbol is still not proof that the
+    native path works. This compresses and decompresses a tiny payload through
+    the C++ core and compares the bytes, so `--diagnose` reports a real
+    success rather than an inference.
+
+    Returns (ok, detail).
+    """
+    if not AVAILABLE:
+        return False, "native library not loaded"
+    sample = b"hello hello hello AFC AFC AFC native smoke test 1234567890\n" * 8
+    try:
+        blob = compress(sample, True, "auto")
+    except Exception as exc:
+        return False, "native compress raised: %s" % exc
+    try:
+        back = decompress(blob)
+    except Exception as exc:
+        return False, "native decompress raised: %s" % exc
+    if back != sample:
+        return False, ("round trip mismatch: %d bytes in, %d out"
+                       % (len(sample), len(back)))
+    if TUNABLE:
+        try:
+            alt = compress(sample, True, "auto",
+                           params={"dp": False, "dp_rounds": 1,
+                                   "merge_rounds": 2, "min_freq": 5,
+                                   "tune": True})
+            if decompress(alt) != sample:
+                return False, "afc_compress_ex round trip mismatch"
+        except Exception as exc:
+            return False, "afc_compress_ex raised: %s" % exc
+    return True, ("%d bytes -> %d bytes -> %d bytes, byte-identical"
+                  % (len(sample), len(blob), len(back)))
+
+
+def diagnose():
+    """The exact checklist a slow run needs answered. Returns an exit code."""
+    import platform
+    path = expected_path()
+    exists = os.path.exists(path)
+    bits = _binary_bits(path) if exists else None
+    has_ex = bool(_LIB is not None and hasattr(_LIB, "afc_compress_ex"))
+    has_c = bool(_LIB is not None and hasattr(_LIB, "afc_compress"))
+    ok, detail = smoke_test()
+
+    print("AFC NATIVE BACKEND DIAGNOSIS")
+    print("=" * 60)
+    print("Python architecture   : %d-bit" % _python_bits())
+    print("Python version        : %s" % platform.python_version())
+    print("Operating system      : %s (%s)" % (platform.system(),
+                                               platform.machine()))
+    print("Module directory      : %s" % _DIR)
+    print("Working directory     : %s" % os.getcwd())
+    print("Library expected path : %s" % path)
+    print("Library exists        : %s" % ("YES" if exists else "NO"))
+    print("Library architecture  : %s" % (("%d-bit" % bits) if bits
+                                          else ("UNKNOWN" if exists else "n/a")))
+    if exists and bits and bits != _python_bits():
+        print("                        *** MISMATCH: %d-bit library cannot "
+              "load into %d-bit Python ***" % (bits, _python_bits()))
+    print("Library load          : %s" % ("SUCCESS" if _LIB is not None
+                                          else "FAIL"))
+    print("Loaded from           : %s" % (LIBRARY_PATH or "-"))
+    print("Export afc_compress   : %s" % ("YES" if has_c else "NO"))
+    print("Export afc_compress_ex: %s" % ("YES" if has_ex else
+                                          "NO (pre-V7 library: Fast and "
+                                          "Maximum will use Python)"))
+    print("Native call test      : %s" % ("SUCCESS" if ok else "FAIL"))
+    print("                        %s" % detail)
+    print("AFC_NO_NATIVE set     : %s"
+          % ("YES - native disabled on purpose"
+             if os.environ.get("AFC_NO_NATIVE") else "no"))
+    print()
+    print("RESULT: %s" % ("C++ native backend is ACTIVE" if (AVAILABLE and ok)
+                          else "PURE PYTHON - native backend unavailable"))
+    if not (AVAILABLE and ok):
+        print("Reason: %s" % REASON)
+    print()
+    print("Steps attempted:")
+    for d in DIAGNOSTICS:
+        print("  [%s] %s%s" % ("ok  " if d["ok"] else "FAIL", d["step"],
+                               (" - " + d["detail"]) if d["detail"] else ""))
+    print()
+    print("Searched for a library at:")
+    for p in SEARCHED:
+        print("  %s%s" % (p, "" if os.path.exists(p) else "   (absent)"))
+    if not (AVAILABLE and ok):
+        print()
+        print("BUILD IT MANUALLY")
+        if os.name == "nt":
+            print("  MinGW-w64 (from the *MinGW 64-bit* shell):")
+            print("    g++ -O3 -std=c++17 -shared -static -pthread \\")
+            print("        afc_native.cpp -o afc_kernels.dll")
+            print("  Visual Studio (Developer Command Prompt for x64):")
+            print("    cl /nologo /LD /O2 /EHsc /std:c++17 \\")
+            print("       afc_native.cpp /Fe:afc_kernels.dll")
+            print("  The toolchain bitness MUST match your Python.")
+        else:
+            print("    g++ -O3 -std=c++17 -shared -fPIC -pthread \\")
+            print("        afc_native.cpp -o afc_kernels.so")
+        print("  Then re-run: python -m afc_native --diagnose")
+    return 0 if (AVAILABLE and ok) else 1
 
 
 def report():
@@ -328,3 +477,15 @@ def pack_bits(ids: array, codes: dict, max_id: int) -> bytes:
                    carr.buffer_info()[0], bytes(larr),
                    ctypes.byref(outp), ctypes.byref(outn))
     return _take(outp, outn)
+
+
+# ---------------------------------------------------------------------------
+# python -m afc_native --diagnose
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import sys as _sys
+    if "--diagnose" in _sys.argv or "-d" in _sys.argv or len(_sys.argv) == 1:
+        _sys.exit(diagnose())
+    print(report())
+    _sys.exit(0 if AVAILABLE else 1)

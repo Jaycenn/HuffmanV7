@@ -248,9 +248,27 @@
     $("rRatio").textContent = j.ratio.toFixed(2) + "×";
     $("rTime").textContent = j.ms < 1000 ? j.ms.toFixed(1) + " ms"
                                          : (j.ms / 1000).toFixed(2) + " s";
-    $("rEngine").textContent = j.engine || "";
+    // Backend, stated plainly. A silent fall back to pure Python is ~12x
+    // slower with identical output, so when it happens the reason is shown
+    // right here rather than left for the user to discover.
+    if (j.native_available) {
+      $("rEngine").innerHTML = '<span class="text-green-700 font-semibold">'
+        + 'C++ Native \u2713</span>';
+      $("rNative").classList.add("hidden");
+    } else {
+      $("rEngine").innerHTML = '<span class="text-maroon font-semibold">'
+        + 'Pure Python \u26a0</span>';
+      var n = $("rNative");
+      n.innerHTML = '<strong>Native backend unavailable.</strong><br>'
+        + '<span class="font-data text-[11px]">Reason: ' + esc(j.native_reason
+        || "unknown") + '</span><br><span class="font-data text-[11px]">'
+        + 'Run <code>python -m afc_native --diagnose</code> for the full '
+        + 'diagnosis. Compression output is identical either way \u2014 only '
+        + 'speed differs.</span>';
+      n.classList.remove("hidden");
+    }
     $("rContainer").textContent = (j.container || "") + " container"
-      + (j.preset ? " · " + j.preset + " preset" : "");
+      + (j.preset ? " \u00b7 " + j.preset + " preset" : "");
     $("rVerify").innerHTML = j.lossless
       ? '<span class="text-green-700 font-semibold">✓ VERIFIED — lossless '
         + 'SHA-256 round trip</span>'

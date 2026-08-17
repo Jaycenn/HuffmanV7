@@ -1473,6 +1473,62 @@ def test_native_backend_diagnostics(app):
           s.get("preset_backends"))
 
 
+def test_backend_reported_on_every_result(app):
+    """Every compress/decompress result must carry the backend AND the reason.
+
+    Reporting only "pure Python" is what let a 138-second run look like a slow
+    algorithm instead of an unloaded native library."""
+    c = app.test_client()
+    login(c, "alice", "correct-horse")
+    data = open(corpus_files(1)[0], "rb").read()
+    j = c.post("/api/compress",
+               data={"file": (io.BytesIO(data), "b.txt")}).get_json()
+    for k in ("native_available", "native_reason", "native_library",
+              "native_tunable"):
+        check("compress result carries '%s'" % k, k in j, sorted(j))
+    check("compress reason is non-empty",
+          isinstance(j.get("native_reason"), str) and j["native_reason"] != "")
+
+    blob = c.get("/download/" + j["token"]).data
+    d = c.post("/api/decompress",
+               data={"file": (io.BytesIO(blob), "b.afc")}).get_json()
+    check("decompress result carries the backend reason",
+          d.get("native_reason", "") != "", d.get("native_reason"))
+
+
+def test_native_smoke_and_diagnose():
+    """The diagnostic must actually CALL the library, not just infer."""
+    import afc_native
+    ok, detail = afc_native.smoke_test()
+    if afc_native.AVAILABLE:
+        check("native smoke test performs a real round trip", ok, detail)
+        check("smoke test reports byte-identical output",
+              "byte-identical" in detail, detail)
+    check("library_name() matches the platform",
+          afc_native.library_name().endswith(".dll" if os.name == "nt"
+                                             else ".so"))
+    check("expected_path() is absolute",
+          os.path.isabs(afc_native.expected_path()))
+    check("diagnose() is callable and returns an exit code",
+          afc_native.diagnose.__call__ is not None)
+
+
+def test_native_exports_are_declared():
+    """Every ctypes entry point must be marked exported in the C++ source.
+
+    MinGW auto-exports extern \"C\" symbols but MSVC does not: a cl.exe build
+    without __declspec(dllexport) yields a DLL that exports nothing, the
+    hasattr() check fails, and the engine silently falls back to Python."""
+    src = open(os.path.join(ROOT, "afc_native.cpp"), encoding="utf-8").read()
+    check("AFC_API export macro is defined", "define AFC_API" in src)
+    check("macro uses dllexport on Windows", "__declspec(dllexport)" in src)
+    for fn in ("afc_compress", "afc_compress_ex", "afc_decompress",
+               "afc_free"):
+        check("%s is marked AFC_API" % fn,
+              ("AFC_API int %s(" % fn) in src or
+              ("AFC_API void %s(" % fn) in src)
+
+
 def test_pdf_object_inventory():
     """Real PDF component analysis: page objects, /Contents, filters."""
     import containers
@@ -1578,6 +1634,9 @@ def main():
         test_container_component_classification()
         test_afc3_reporting_is_whole_file(app)
         test_native_backend_diagnostics(app)
+        test_backend_reported_on_every_result(app)
+        test_native_smoke_and_diagnose()
+        test_native_exports_are_declared()
         test_pdf_object_inventory()
         test_generic_files_unaffected()
     finally:

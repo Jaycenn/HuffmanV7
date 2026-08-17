@@ -37,8 +37,23 @@
 #include <vector>
 using namespace std;
 
+// ---------------------------------------------------------------------------
+// [v7] DLL export visibility
+// ---------------------------------------------------------------------------
+// MinGW-w64 auto-exports every extern "C" symbol from a shared library, so
+// `extern "C"` alone was enough there. MSVC does NOT: a cl.exe build of this
+// file produces a DLL that exports NOTHING, the ctypes bridge then fails its
+// hasattr(lib, "afc_compress") check, and the engine silently falls back to
+// pure Python. Marking the entry points explicitly makes the DLL correct
+// under MSVC, MinGW and clang-cl alike, and is harmless elsewhere.
+#if defined(_WIN32) || defined(__CYGWIN__)
+#  define AFC_API __declspec(dllexport)
+#else
+#  define AFC_API __attribute__((visibility("default")))
+#endif
+
 extern "C" {
-void afc_free(void* p) { free(p); }
+AFC_API void afc_free(void* p) { free(p); }
 }
 
 // ============================================================================
@@ -779,7 +794,7 @@ static int afc_compress_impl(const uint8_t* data, uint32_t n, int adaptive,
 
 // Original ABI, unchanged in signature and behaviour: engine defaults.
 // Existing callers and any prebuilt binary check keep working.
-int afc_compress(const uint8_t* data, uint32_t n, int adaptive, int fmt,
+AFC_API int afc_compress(const uint8_t* data, uint32_t n, int adaptive, int fmt,
                  void** out, uint32_t* outn) {
   Params P;
   return afc_compress_impl(data, n, adaptive, fmt, P, out, outn);
@@ -788,7 +803,7 @@ int afc_compress(const uint8_t* data, uint32_t n, int adaptive, int fmt,
 // Extended ABI: the same pipeline with the four preset-controlled tunables
 // supplied by the caller. This is what makes Fast and Maximum native-capable.
 // Passing the defaults reproduces afc_compress() byte-for-byte.
-int afc_compress_ex(const uint8_t* data, uint32_t n, int adaptive, int fmt,
+AFC_API int afc_compress_ex(const uint8_t* data, uint32_t n, int adaptive, int fmt,
                     int dp, int dp_rounds, int merge_rounds, int min_freq,
                     int tune, void** out, uint32_t* outn) {
   Params P;
@@ -947,7 +962,7 @@ static int decode_stream(BitReader& br, const DecTable& t,
 
 extern "C" {
 
-int afc_decompress(const uint8_t* blob, uint32_t n, void** out,
+AFC_API int afc_decompress(const uint8_t* blob, uint32_t n, void** out,
                    uint32_t* outn) {
   if (n < 6) return -1;
   bool is1 = memcmp(blob, "AFC1", 4) == 0;
@@ -1076,7 +1091,7 @@ extern "C" {
 
 // ---- Tier-2 kernel: n-gram frequencies, lengths 2..5, min freq 4 ----
 // out: [u32 count] then entries: [u8 len][len bytes][u32 freq]
-int count_ngrams(const uint8_t* data, uint32_t n, uint32_t window,
+AFC_API int count_ngrams(const uint8_t* data, uint32_t n, uint32_t window,
                  void** out, uint32_t* outn) {
   if (n > window) n = window;
   string buf(4, '\0');
@@ -1110,7 +1125,7 @@ int count_ngrams(const uint8_t* data, uint32_t n, uint32_t window,
 // ---- segmentation kernel: greedy longest match over the pattern set ----
 // pats blob: [u32 count] then per entry: [u8 len][bytes]
 // out: u32 ids (literal byte value, or 256+pattern_index)
-int segment_ids(const uint8_t* data, uint32_t n, const uint8_t* pats,
+AFC_API int segment_ids(const uint8_t* data, uint32_t n, const uint8_t* pats,
                 uint32_t /*patn*/, void** out, uint32_t* outn) {
   uint32_t count;
   memcpy(&count, pats, 4);
@@ -1169,7 +1184,7 @@ int segment_ids(const uint8_t* data, uint32_t n, const uint8_t* pats,
 
 // ---- bitstream pack kernel ----
 // ids u32[n]; codes u32[max_id+1]; lens u8[max_id+1]
-int pack_bits(const uint32_t* ids, uint32_t n, const uint32_t* codes,
+AFC_API int pack_bits(const uint32_t* ids, uint32_t n, const uint32_t* codes,
               const uint8_t* lens, void** out, uint32_t* outn) {
   vector<uint8_t> b;
   b.reserve(n);

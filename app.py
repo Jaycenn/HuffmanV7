@@ -120,6 +120,26 @@ def _stash(name, blob, mimetype="application/octet-stream"):
     return token
 
 
+
+def backend_status():
+    """Backend name plus WHY, for every API response that reports a backend.
+
+    Reporting only "pure Python" hides the actual problem: a silent native
+    fallback is ~12x slower with byte-identical output, so it reads as a slow
+    algorithm rather than an unloaded library. Every result now carries the
+    reason with it."""
+    try:
+        import afc_native
+        return {"native_available": bool(afc_native.AVAILABLE),
+                "native_reason": afc_native.REASON,
+                "native_library": afc_native.LIBRARY_PATH,
+                "native_tunable": bool(getattr(afc_native, "TUNABLE", False))}
+    except Exception as exc:
+        return {"native_available": False,
+                "native_reason": "afc_native could not be imported: %s" % exc,
+                "native_library": "", "native_tunable": False}
+
+
 def engine_name():
     return "C++ native" if engine.NATIVE else "pure Python"
 
@@ -326,7 +346,8 @@ def _process_one(data, filename, fmt, adaptive, batch_id=None,
             "gzip_bytes": gz, "huffman_bytes": hz,
             "detected": kind["label"], "family": kind["family"],
             "container_aware": kind["container_aware"],
-            "sha256_original": sha_original, "sha256_container": sha_container}
+            "sha256_original": sha_original, "sha256_container": sha_container,
+            **backend_status()}
 
 
 @main.post("/api/compress")
@@ -544,7 +565,7 @@ def api_decompress():
         detected=kind["label"], family=kind["family"],
         container_aware=kind["container_aware"],
         component_note=component_note,
-        token=token)
+        token=token, **backend_status())
 
 
 @main.post("/api/archive/create")
