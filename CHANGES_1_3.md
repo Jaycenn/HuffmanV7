@@ -66,6 +66,15 @@ AFC3 and whole-file AFC. On the current fixtures, forced AFC6 reconstruction
 was exact, but AFC3 remained smaller and therefore won automatic selection.
 This is reported as a measured outcome, not an improvement claim.
 
+Large PDFs also use an early viability probe before spending minutes parsing
+every eligible DEFLATE stream. On the supplied 5,862,949-byte `AFC Engine.pdf`,
+37 candidate streams would have expanded 4,326,699 encoded bytes into
+26,063,463 bytes of source plus exact recipes. A controlled Maximum run before
+the gate took 122.027 seconds; after the gate it took 20.536 seconds. Both runs
+selected the identical 4,891,396-byte AFC3 payload and reconstructed byte-for-
+byte with the same SHA-256. The gate changes candidate routing only, not the
+Hybrid-Huffman algorithm or AFC decoding.
+
 ## DOCX path retained and verified
 
 AFC4 continues to discover normal OOXML members from the ZIP central

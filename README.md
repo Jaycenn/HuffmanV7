@@ -242,6 +242,11 @@ automatic.
   call; JPEG/JPX and high-entropy payloads stay verbatim. Suitable textual
   `/FlateDecode` page/content streams can be exposed as expanded source plus
   an exact zlib/DEFLATE-token recipe in **AFC6**. No stream is re-deflated.
+  For large PDFs, a bounded early viability probe declines AFC6 when sampled
+  expanded source plus its exact recipe already exceeds the encoded streams
+  by more than 4x; the unchanged AFC3/plain candidates still process every
+  original byte. This prevents token analysis for a demonstrably losing
+  candidate without changing the codec.
 * **DOCX/OOXML:** the ZIP central directory identifies members by their real
   names and methods, including `word/document.xml`. STORED XML is directly
   pooled. For suitable method-8 XML, `deflate_tokens.py` parses the producer's

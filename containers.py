@@ -166,6 +166,17 @@ MAX_PDF_TRANSFORM_BYTES = 64 * 1024 * 1024
 MIN_PDF_TRANSFORM_BYTES = 256
 MAX_PDF_TRANSFORM_VIABILITY_RATIO = 8
 
+# Large-PDF early viability probe. Exact token extraction can itself dominate
+# runtime: the measured 5,862,949-byte AFC Engine.pdf exposed 26,063,463 bytes
+# of source+recipe from 4,326,699 encoded bytes and spent about 50 seconds in
+# analysis before the smaller AFC3 path won. Once at least four streams and
+# 256 KiB of their encoded bytes have shown an aggregate expansion above 4x,
+# decline AFC6 for that file. Small fixtures still exercise the exact AFC6
+# implementation, and all declined bytes remain available to AFC3/plain.
+PDF_TRANSFORM_PROBE_MIN_COMPONENTS = 4
+PDF_TRANSFORM_PROBE_MIN_BYTES = 256 * 1024
+PDF_TRANSFORM_PROBE_MAX_RATIO = 4
+
 
 class Segment:
     __slots__ = ("kind", "start", "end", "label", "source", "recipe")
@@ -790,6 +801,8 @@ def pdf_transform_plan(data):
     cursor = 0
     transformed_total = 0
     transformed_count = 0
+    transformed_encoded = 0
+    transformed_exposed = 0
     transform_kinds = {"page-content", "content-stream", "metadata",
                        "objstm"}
     for component in sorted(components, key=lambda row: row["stream_start"]):
@@ -823,6 +836,18 @@ def pdf_transform_plan(data):
                     source=plain, recipe=recipe)
                 transformed_total += len(plain)
                 transformed_count += 1
+                transformed_encoded += len(payload)
+                transformed_exposed += len(plain) + len(recipe)
+
+                # Do not parse the rest of a large, demonstrably non-viable
+                # candidate. This changes routing only: AFC3/plain still see
+                # every original byte and the final output remains exact.
+                if (transformed_count >= PDF_TRANSFORM_PROBE_MIN_COMPONENTS
+                        and transformed_encoded >=
+                        PDF_TRANSFORM_PROBE_MIN_BYTES
+                        and transformed_exposed > transformed_encoded *
+                        PDF_TRANSFORM_PROBE_MAX_RATIO):
+                    return None
             except Exception:
                 segment = None
 
