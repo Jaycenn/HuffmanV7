@@ -229,7 +229,7 @@ _THEME = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
 
 
 def build_docx(path, paras, tables=0, images=0, seed=1, image_bytes=40000,
-               compresslevel=6):
+               compresslevel=6, compression=zipfile.ZIP_DEFLATED):
     ct = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
           '<Types xmlns="http://schemas.openxmlformats.org/package/2006/'
           'content-types"><Default Extension="rels" ContentType="application/'
@@ -253,8 +253,9 @@ def build_docx(path, paras, tables=0, images=0, seed=1, image_bytes=40000,
                        for i in range(max(1, images)))
              + '</Relationships>')
 
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED,
-                         compresslevel=compresslevel) as z:
+    kwargs = {"compresslevel": compresslevel} \
+        if compression == zipfile.ZIP_DEFLATED else {}
+    with zipfile.ZipFile(path, "w", compression, **kwargs) as z:
         z.writestr("[Content_Types].xml", ct)
         z.writestr("_rels/.rels", rels)
         z.writestr("word/document.xml", docx_document_xml(paras, tables))
@@ -320,6 +321,13 @@ def main():
     made.append(("docx_stored.docx",
                  build_docx(os.path.join(OUT, "docx_stored.docx"),
                             paragraphs(300, 17), seed=17, compresslevel=0)))
+    # The historical fixture above uses DEFLATE level 0 (stored blocks inside
+    # a method-8 stream), despite its old filename. This separate fixture is
+    # a genuine ZIP method-0 package whose XML payloads are directly reachable.
+    made.append(("docx_zip_stored.docx",
+                 build_docx(os.path.join(OUT, "docx_zip_stored.docx"),
+                            paragraphs(300, 18), seed=18,
+                            compression=zipfile.ZIP_STORED)))
 
     print("wrote %d documents to %s\n" % (len(made), OUT))
     for name, size in made:

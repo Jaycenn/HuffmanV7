@@ -129,9 +129,9 @@ def _byte_label(b: int) -> str:
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# [v7] AFC3 (component-aware) unwrapping
+# Component-aware AFC3/AFC4 unwrapping
 # ---------------------------------------------------------------------------
-# An AFC3 container holds an ordinary AFC1/AFC2 container inside it — the one
+# AFC3/AFC4 hold an ordinary AFC1/AFC2 container inside — the one
 # produced from the pooled, compressible components of a PDF or DOCX. All the
 # introspection below (tree, code lengths, attribution) describes THAT inner
 # container, because it is the one the Hybrid-Huffman engine actually built.
@@ -139,29 +139,21 @@ def _byte_label(b: int) -> str:
 # without duplicating their logic.
 
 def unwrap(blob: bytes) -> bytes:
-    """Return the inner coded container, following an AFC3 wrapper if present.
+    """Return the inner coded container, following AFC3/AFC4 when present.
 
-    Non-AFC3 input is returned unchanged, so every caller can apply this
+    Other input is returned unchanged, so every caller can apply this
     unconditionally."""
-    if len(blob) < 5 or blob[:4] != b"AFC3":
+    if len(blob) < 5 or blob[:4] not in (b"AFC3", b"AFC4"):
         return blob
     try:
         import containers
-        pos = 5
-        _total, pos = containers._get_varint(blob, pos)
-        count, pos = containers._get_varint(blob, pos)
-        for _ in range(count):
-            _v, pos = containers._get_varint(blob, pos)
-        opaque_len, pos = containers._get_varint(blob, pos)
-        pos += opaque_len
-        pooled_len, pos = containers._get_varint(blob, pos)
-        return blob[pos:pos + pooled_len]
+        return containers.inner_container(blob)
     except Exception:
         return blob
 
 
 def is_component_aware(blob: bytes) -> bool:
-    return len(blob) >= 4 and blob[:4] == b"AFC3"
+    return len(blob) >= 4 and blob[:4] in (b"AFC3", b"AFC4")
 
 
 def parse_container(blob: bytes) -> dict:
@@ -493,7 +485,7 @@ def explain(blob: bytes, original_size: int = None) -> str:
 
     Built entirely from the attribution measured above — no new algorithm
     logic, and no claim the numbers do not support."""
-    # [v7] Keep the OUTER size before unwrapping. For an AFC3 file the inner
+    # Keep the OUTER size before unwrapping. For AFC3/AFC4 the inner
     # container covers only the pooled components, so pairing its length with
     # the caller's whole-file original size would overstate the saving wildly
     # (a PDF that really saved 4.5% reported 98.4%). Percentages are always

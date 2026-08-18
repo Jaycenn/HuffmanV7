@@ -2,9 +2,9 @@
 """
 tools/doc_bench.py — PDF / DOCX container-aware benchmark.
 
-Produces the two tables the V7 brief asks for:
+Produces whole-file and component tables for the current implementation:
 
-  §43  per file: original, V6 AFC (plain whole-file), V7 AFC (container-aware),
+  per file: original, plain whole-file AFC, current component-aware AFC,
        old time, new time, backend, and the SHA-256 verification result;
   §41  per file: the component-level breakdown — how many bytes were pooled
        into the Hybrid-Huffman input versus preserved verbatim, and what those
@@ -21,7 +21,7 @@ dropped from the table.
 Usage:
     python tools/doc_bench.py                    # benchmarks/documents/*
     python tools/doc_bench.py FILE [FILE ...]
-    python tools/doc_bench.py --runs 3 --csv benchmarks/v7_documents.csv
+    python tools/doc_bench.py --runs 3 --csv benchmarks/v8_documents.csv
 """
 import argparse
 import glob
@@ -106,6 +106,23 @@ def bench_one(path, runs):
             k["preserved"] += 1
     stats["stream_kinds"] = kinds
 
+    # DOCX/OOXML member inventory. This names word/document.xml explicitly,
+    # distinguishes STORED from method-8 XML, and reports whether the exact
+    # token transform was viable enough to build an AFC4 candidate.
+    zip_entries = containers.zip_components(data) if data[:4] == b"PK\x03\x04" else []
+    xml_entries = [e for e in zip_entries if containers._is_xml_part(e["name"])]
+    deflated_xml = [e for e in xml_entries if e["method"] == 8]
+    stored_xml = [e for e in xml_entries if e["method"] == 0]
+    transform_plan = containers.docx_transform_plan(data) if zip_entries else None
+    transform_stats = containers.describe_docx_transform(
+        data, transform_plan) if transform_plan else {}
+    afc4_candidate_bytes = 0
+    if transform_plan:
+        candidate = containers.build_afc4(data, transform_plan)
+        if containers.decompress_afc4(candidate) != data:
+            raise ValueError("AFC4 benchmark candidate did not round-trip")
+        afc4_candidate_bytes = len(candidate)
+
     return {
         "file": name, "orig": len(data),
         "v6_bytes": len(plain), "v7_bytes": len(v7),
@@ -124,6 +141,18 @@ def bench_one(path, runs):
         "compressed_stream_bytes": stats.get("compressed_stream_bytes", 0),
         "preserved_stream_bytes": stats.get("preserved_stream_bytes", 0),
         "stream_kinds": stats.get("stream_kinds", {}),
+        "zip_entries": len(zip_entries), "xml_entries": len(xml_entries),
+        "stored_xml_entries": len(stored_xml),
+        "deflated_xml_entries": len(deflated_xml),
+        "deflated_xml_compressed_bytes": sum(e["compressed_size"]
+                                               for e in deflated_xml),
+        "deflated_xml_expanded_bytes": sum(e["uncompressed_size"]
+                                             for e in deflated_xml),
+        "transformed_xml_entries": transform_stats.get(
+            "transformed_components", 0),
+        "transformed_xml_bytes": transform_stats.get("xml_bytes", 0),
+        "recipe_bytes": transform_stats.get("recipe_bytes", 0),
+        "afc4_candidate_bytes": afc4_candidate_bytes,
         "sha_in": sha_in, "sha_out": sha_out, "lossless": lossless,
         "v7_saved_pct": 100.0 * (1 - len(v7) / len(data)) if data else 0.0,
         "v7_vs_v6_pct": (100.0 * (len(v7) - len(plain)) / len(plain)
@@ -155,8 +184,8 @@ def main():
     print("WHOLE-FILE RESULT (the headline number)")
     print("=" * 108)
     print("%-28s %9s %10s %10s %8s %9s %9s %8s %-11s %s"
-          % ("file", "original", "V6 AFC", "V7 AFC", "V7 vs V6",
-             "V6 ms", "V7 ms", "saved%", "container", "SHA-256"))
+          % ("file", "original", "plain AFC", "current", "vs plain",
+             "plain ms", "current ms", "saved%", "container", "SHA-256"))
     for r in rows:
         print("%-28s %9d %10d %10d %7.2f%% %9.1f %9.1f %7.2f%% %-11s %s"
               % (r["file"], r["orig"], r["v6_bytes"], r["v7_bytes"],
@@ -172,7 +201,7 @@ def main():
                                            100.0 * (t7 - t6) / t6 if t6 else 0))
     worse = [r for r in rows if r["v7_bytes"] > r["v6_bytes"]]
     better = [r for r in rows if r["v7_bytes"] < r["v6_bytes"]]
-    print("V7 smaller on %d file(s), larger on %d, unchanged on %d."
+    print("Current path smaller on %d file(s), larger on %d, unchanged on %d."
           % (len(better), len(worse), len(rows) - len(better) - len(worse)))
 
     # ---- §41 component-level breakdown ------------------------------------
@@ -214,6 +243,24 @@ def main():
                           for name, v in sorted(r["stream_kinds"].items()))
             print("%-28s %s" % (r["file"], k or "-"))
 
+    docx = [r for r in rows if r["zip_entries"]]
+    if docx:
+        print()
+        print("=" * 108)
+        print("DOCX MEMBER INVENTORY — normal upload, automatic internal analysis")
+        print("=" * 108)
+        print("%-28s %7s %7s %7s %8s %12s %12s %9s %10s" % (
+            "file", "entries", "XML", "stored", "deflated", "deflate B",
+            "expanded B", "xformed", "AFC4 cand"))
+        for r in docx:
+            print("%-28s %7d %7d %7d %8d %12d %12d %9d %10s" % (
+                r["file"], r["zip_entries"], r["xml_entries"],
+                r["stored_xml_entries"], r["deflated_xml_entries"],
+                r["deflated_xml_compressed_bytes"],
+                r["deflated_xml_expanded_bytes"],
+                r["transformed_xml_entries"],
+                str(r["afc4_candidate_bytes"] or "-") ))
+
     if a.csv:
         import csv
         with open(a.csv, "w", newline="") as f:
@@ -223,6 +270,11 @@ def main():
                     "opaque_pct", "components_analyzed", "streams_analyzed",
                     "streams_compressed", "streams_preserved",
                     "compressed_stream_bytes", "preserved_stream_bytes",
+                    "zip_entries", "xml_entries", "stored_xml_entries",
+                    "deflated_xml_entries", "deflated_xml_compressed_bytes",
+                    "deflated_xml_expanded_bytes", "transformed_xml_entries",
+                    "transformed_xml_bytes", "recipe_bytes",
+                    "afc4_candidate_bytes",
                     "sha_in", "sha_out", "lossless"]
             w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
             w.writeheader()

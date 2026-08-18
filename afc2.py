@@ -477,10 +477,15 @@ def _compress_core(data: bytes, fmt: str, min_freq: int, rounds: int,
 def decompress_bytes(blob: bytes) -> bytes:
     # [v7] Dispatch on the container version BEFORE anything else, so an old
     # container is never reinterpreted under a newer format and vice versa.
-    # AFC1/AFC2 keep their exact existing decode path; only AFC3 is new.
+    # AFC1/AFC2 keep their exact existing decode path. AFC3 is the direct
+    # component wrapper; AFC4 is the explicitly versioned DOCX XML/token
+    # wrapper. Dispatch happens before the native decoder sees either magic.
     if blob[:4] == b"AFC3":
         import containers
         return containers.decompress_afc3(blob, decompress_fn=decompress_bytes)
+    if blob[:4] == b"AFC4":
+        import containers
+        return containers.decompress_afc4(blob, decompress_fn=decompress_bytes)
     if NATIVE:
         try:
             return _native.decompress(bytes(blob))

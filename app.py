@@ -97,9 +97,10 @@ import db
 import filetypes   # content sniffing so restored files regain their real name
 import presets     # Part 2: Fast/Balanced/Maximum tunable presets
 
-# Every container version the engine can read. AFC3 is the [v7]
-# component-aware format; AFC1/AFC2 are unchanged and still decode.
-AFC_MAGICS = (b"AFC1", b"AFC2", b"AFC3")
+# Every container version the engine can read. AFC3 is direct component-aware
+# routing; AFC4 adds exact DOCX XML/token reconstruction. AFC1/AFC2 are
+# unchanged and still decode.
+AFC_MAGICS = (b"AFC1", b"AFC2", b"AFC3", b"AFC4")
 
 APP_STARTED_AT = time.time()
 
@@ -477,8 +478,8 @@ def api_decompress():
     declared = None
     mode_name = ""
     component_note = ""
-    if container == "AFC3":
-        # [v7] Read the AFC3 header itself. analysis.parse_container()
+    if container in ("AFC3", "AFC4"):
+        # Read the outer header itself. analysis.parse_container()
         # transparently unwraps to the INNER container, whose declared length
         # covers only the pooled components — comparing that against the whole
         # restored file would report a false integrity failure.
@@ -486,13 +487,26 @@ def api_decompress():
             import containers as _c
             hi = _c.header_info(data)
             declared = hi["original_length"]
-            mode_name = "component-aware (Hybrid-Huffman on %d of %d bytes)" % (
-                hi["pooled_bytes"], hi["pooled_bytes"] + hi["opaque_bytes"])
-            component_note = (
-                "%d components: %s B compressed with Hybrid-Huffman, %s B "
-                "already-compressed and preserved verbatim."
-                % (hi["segments"], f"{hi['pooled_bytes']:,}",
-                   f"{hi['opaque_bytes']:,}"))
+            if container == "AFC4":
+                mode_name = (
+                    "component-aware DOCX XML (Hybrid-Huffman on %d source bytes)"
+                    % hi["hybrid_input_bytes"])
+                component_note = (
+                    "%d components: %s B of XML reconstructed through %s B "
+                    "of exact DEFLATE-token recipes; %s B of encoded/media "
+                    "data preserved verbatim."
+                    % (hi["segments"], f"{hi['xml_bytes']:,}",
+                       f"{hi['recipe_bytes']:,}", f"{hi['opaque_bytes']:,}"))
+            else:
+                mode_name = (
+                    "component-aware (Hybrid-Huffman on %d of %d bytes)" % (
+                        hi["pooled_bytes"],
+                        hi["pooled_bytes"] + hi["opaque_bytes"]))
+                component_note = (
+                    "%d components: %s B compressed with Hybrid-Huffman, %s B "
+                    "already-compressed and preserved verbatim."
+                    % (hi["segments"], f"{hi['pooled_bytes']:,}",
+                       f"{hi['opaque_bytes']:,}"))
         except Exception:
             pass
     else:
@@ -849,8 +863,7 @@ def api_tree(token):
 @main.get("/api/presets")
 @auth.login_required
 def api_presets():
-    """Feature 9 — preset descriptions, including the honest note that only
-    Balanced can use the native core."""
+    """Preset descriptions and the current native capability of each."""
     return jsonify(presets=presets.describe(),
                    default=presets.DEFAULT_PRESET,
                    native_available=bool(engine.NATIVE))

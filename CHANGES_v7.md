@@ -216,10 +216,13 @@ bytes. Deflated payloads are therefore preserved verbatim.
 
 **This bounds what is achievable on a Word-generated DOCX, and the numbers
 below show it honestly.** The XML inside such a file is already deflate-
-compressed and cannot be reached losslessly. Where the XML *is* reachable —
-`docx_stored.docx`, a package written with STORED members — the existing
-engine compresses it by **90.2%** (184 151 → 18 025 B), which is the evidence
-that the engine exploits that redundancy when it can get to it.
+compressed and cannot be reached by V7's direct segmentation. **V8 fixture
+correction:** despite its historical filename, `docx_stored.docx` was created
+with ZIP method 8 at compression level 0, not method 0; its DEFLATE stream is
+made of stored blocks and remains low-entropy enough for V7 to compress as raw
+bytes. The measured **90.2%** result is real, but it did not prove member-name
+aware XML extraction. V8 adds a genuinely method-0 fixture and exact token
+processing; see `CHANGES_v8.md`.
 
 ### AFC3
 
@@ -387,7 +390,7 @@ the −2.43% and −1.63%. Text-only PDFs are unchanged within noise.
 | pdf_text_large.pdf | 1 | 388 414 | 0 | pdf-structure (nothing opaque) |
 | docx_images.docx | 17 | 2 581 | 202 590 | zip-stored x5, zip-deflate x3, zip-header x8 |
 | docx_text_and_images.docx | 13 | 2 328 | 125 919 | zip-stored x3, zip-deflate x3 |
-| docx_stored.docx | 1 | 184 151 | 0 | zip-structure (all reachable XML) |
+| docx_stored.docx | 1 | 184 151 | 0 | low-entropy level-0 DEFLATE bytes (historical fixture name) |
 
 ### 7.6 The honest DOCX result
 
@@ -396,11 +399,11 @@ already deflate-compressed and cannot be reached without inflating and
 re-deflating — which would introduce DEFLATE as a second stage and could not
 guarantee byte-exact reconstruction.
 
-The engine is not the limitation. `docx_stored.docx` is the same content in a
-package whose members are STORED, so the XML *is* reachable, and Hybrid-Huffman
-compresses it **90.2%** (184 151 → 18 025 B). That is the measurement behind
-the brief's ~80% figure, and it confirms the redundancy is there — it is simply
-locked behind DEFLATE in a normal Word file.
+`docx_stored.docx` compresses **90.2%** (184 151 → 18 025 B), but the V8 audit
+found that it uses method-8 level-0 stored blocks rather than ZIP method 0.
+That result demonstrates low-entropy DEFLATE bytes, not XML-member extraction.
+The limitation described above remains valid for V7; V8 addresses it with a
+central-directory inventory and a reversible token recipe.
 
 PDFs are different, and that is where container-awareness pays: PDF structural
 syntax is stored in the clear, so pooling it away from the JPEG/Flate payloads

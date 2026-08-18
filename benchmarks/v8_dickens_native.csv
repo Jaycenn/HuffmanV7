@@ -1,0 +1,4 @@
+file,orig,preset,backend,bytes,ratio,saved_pct,comp_ms,dec_ms,peak_kb,container,lossless
+dickens_surrogate.txt,10437251,fast,C++ native,3978304,2.6235,61.88,1196.279,64.701,-1.0,AFC2,True
+dickens_surrogate.txt,10437251,balanced,C++ native,3619716,2.8834,65.32,11096.766,61.73,-1.0,AFC2,True
+dickens_surrogate.txt,10437251,maximum,C++ native,3556007,2.9351,65.93,29993.806,60.707,-1.0,AFC2,True

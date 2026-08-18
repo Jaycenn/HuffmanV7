@@ -13,7 +13,7 @@ boundaries. Every claim below is enforced by a test in `tests/test_app.py`.
 API:
 
 ```python
-afc2.compress_bytes(data, adaptive, fmt=...)   # -> AFC1/AFC2 container
+afc2.compress_bytes(data, adaptive, fmt=...)   # -> AFC1/AFC2 (later AFC3/AFC4)
 afc2.decompress_bytes(blob)                    # -> original bytes
 ```
 
@@ -38,8 +38,8 @@ per-file AFC payloads concatenated. It performs no compression of its own.
   all — no `zipfile`, `zlib`, `gzip`, `bz2`, `lzma`, `tarfile`. This is
   asserted by parsing the module's AST in
   `test_archive_no_deflate`, not by grepping (a grep false-positives on this
-  very paragraph). A second test asserts every member payload begins with the
-  `AFC1`/`AFC2` magic, which would fail immediately if any other codec were
+  very paragraph). A second test asserts every member payload begins with an
+  `AFC1`/`AFC2`/`AFC3`/`AFC4` magic, which would fail if a foreign codec were
   introduced.
 * **If someone later switches to `zipfile`**, it must be `ZIP_STORED`.
   `ZIP_DEFLATED` is LZ77 + Huffman and would silently violate the constraint.
@@ -238,3 +238,27 @@ and no file encryption.
 * every feature that touches file data gets a SHA-256 round-trip test;
 * rebuild `static/css/tailwind.css` with `sh tools/build_css.sh` after editing
   templates, or new utility classes will not exist in the local stylesheet.
+
+## 12. V8 — exact DOCX XML/token processing
+
+V8 corrects the V7 limitation without adding another compressor.
+
+1. `containers.zip_components()` reads ZIP central-directory metadata and
+   names real OOXML members such as `word/document.xml`. It imports neither
+   `zipfile` nor a compression library.
+2. STORED XML bytes are pooled directly into the existing Hybrid-Huffman
+   engine. Method-8 XML is considered only when its expanded size is viable.
+3. `deflate_tokens.py` is a reversible parser/serializer, not an encoder: it
+   records the producer's existing block headers, Huffman symbols, match
+   lengths/distances and extra bits. It performs no match search, tree choice,
+   or compression-library call. The resulting plain XML + exact recipe are
+   the bytes compressed by Hybrid-Huffman.
+4. AFC4 is a new outer wrapper, explicitly distinguished from AFC1/AFC2/AFC3.
+   AFC1/AFC2 are unchanged; AFC3 decoding is unchanged and hardened against
+   truncated/trailing component data. Old decoders reject AFC4 cleanly.
+5. The global guard compares the complete AFC4 candidate against the normal
+   whole-file result. Already-compact Word XML remains verbatim when the
+   transform would be larger. No ratio improvement is claimed for those files.
+6. Exactness is checked at three levels: DEFLATE recipe bytes, ZIP member
+   size/CRC, and complete-file byte equality plus SHA-256. The web flow still
+   accepts one normal `.docx` and returns the exact original package.

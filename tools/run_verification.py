@@ -15,6 +15,7 @@ Exit code 0 = everything passed.  Run from the project root:
 """
 import glob
 import hashlib
+import json
 import os
 import random
 import shutil
@@ -65,7 +66,11 @@ def main():
         ref = hashlib.sha256(data).digest()
         for adaptive, fmt in combos:
             blob = afc2.compress_bytes(data, adaptive, fmt=fmt)
-            blobs[(path, adaptive, fmt)] = blob
+            # Normalise here and when reading subprocess output: Windows glob
+            # paths use backslashes while the child script prints a mixed
+            # slash form, which previously caused a KeyError after all round
+            # trips had already passed.
+            blobs[(os.path.normpath(path), adaptive, fmt)] = blob
             out = afc2.decompress_bytes(blob)
             ok_all &= hashlib.sha256(out).digest() == ref
     check(f"{len(blobs)} corpus round trips (SHA-256)", ok_all)
@@ -87,7 +92,7 @@ def main():
         if ident:
             for line in r.stdout.strip().splitlines():
                 p, a, fmt, ln, h = line.split()
-                b = blobs[(p, a == "True", fmt)]
+                b = blobs[(os.path.normpath(p), a == "True", fmt)]
                 if (str(len(b)), hashlib.sha256(b).hexdigest()) != (ln, h):
                     ident = False
                     print("   mismatch:", p, a, fmt)
@@ -110,20 +115,25 @@ def main():
         for i, ((p, a, fmt), b) in enumerate(sorted(blobs.items())):
             fn = os.path.join(tmp, f"{i}.afc")
             open(fn, "wb").write(b)
-            manifest.append((fn, p))
-        open(os.path.join(tmp, "list.txt"), "w").write(
+            manifest.append((os.path.abspath(fn), os.path.abspath(p)))
+        list_path = os.path.abspath(os.path.join(tmp, "list.txt"))
+        open(list_path, "w").write(
             "\n".join(f"{a}\t{b}" for a, b in manifest))
         js = (
             "const fs=require('fs');const AFC=require('./afc_engine.js');"
             "let bad=0;"
-            "for(const line of fs.readFileSync('" + tmp +
-            "/list.txt','utf8').trim().split('\\n')){"
+            "for(const line of fs.readFileSync(" + json.dumps(list_path) +
+            ",'utf8').trim().split(/\\r?\\n/)){"
             "const [fn,src]=line.split('\\t');"
             "const out=AFC.decompressBytes(new Uint8Array(fs.readFileSync(fn)));"
             "const ref=new Uint8Array(fs.readFileSync(src));"
             "if(Buffer.compare(Buffer.from(out),Buffer.from(ref))!==0){bad++;}}"
             "console.log('jsbad='+bad);process.exit(bad?1:0);")
         r = subprocess.run([node, "-e", js], capture_output=True, text=True)
+        if r.returncode != 0:
+            detail = (r.stderr or r.stdout).strip()
+            if detail:
+                print("   JavaScript cross-decode detail:", detail[-1000:])
         check("JavaScript engine decodes every container",
               r.returncode == 0)
         shutil.rmtree(tmp, ignore_errors=True)

@@ -28,13 +28,14 @@ ZIP specification.
 
 WHAT IS NEVER DONE
 ------------------
-* No DEFLATE / zlib / ZIP / LZ / arithmetic coding anywhere. This module
-  imports no compression library at all (asserted by an AST test, exactly as
-  for afcpak.py — see SCOPE_NOTES.md §2).
-* No inflating and re-deflating of ZIP members. Re-deflating cannot be relied
-  on to reproduce the original bytes, and doing it would introduce DEFLATE as
-  a second stage. Already-deflated member payloads are therefore treated as
-  opaque and preserved verbatim.
+* No zlib / zipfile / gzip / LZ / arithmetic compressor is used. This module
+  imports no compression library (asserted by an AST test, exactly as for
+  afcpak.py — see SCOPE_NOTES.md §2).
+* ZIP members are never inflated and re-deflated. For suitable DOCX XML,
+  ``deflate_tokens.py`` parses the producer's *existing* DEFLATE tokens and
+  records an exact reversible recipe. The XML + recipe go through the same
+  Hybrid-Huffman engine; restoration serialises the original token choices
+  bit-for-bit. No new match search, tree choice, or second compressor exists.
 * No PDF rewriting: no image recoding, no metadata stripping, no object
   removal, no xref rebuilding. The original file is never modified.
 
@@ -54,8 +55,8 @@ Two things, both measured in benchmarks/:
    parse entirely (see §29 of the brief: a fast path for incompressible data,
    not a new algorithm).
 
-THE AFC3 CONTAINER
-------------------
+THE AFC3 / AFC4 CONTAINERS
+-------------------------
     "AFC3"                     magic
     u8                         mode (3 = component-aware)
     varint original_length     total size of the reconstructed file
@@ -68,7 +69,14 @@ THE AFC3 CONTAINER
 AFC1 and AFC2 are untouched and every existing decoder still reads them. AFC3
 is only ever emitted when it is measurably smaller than the plain whole-file
 container, so an existing file never becomes larger by upgrading (§27).
+
+AFC4 is the explicitly versioned DOCX extension. It keeps AFC3's direct
+pooled/opaque segments and adds a transformed kind for method-8 XML members.
+The transformed source is ``plain XML | exact DEFLATE recipe`` inside the
+ordinary AFC1/AFC2 inner Hybrid-Huffman container. AFC4 is likewise emitted
+only when its final whole-file size beats every applicable older path.
 """
+import binascii
 import re
 import struct
 
@@ -76,11 +84,14 @@ import afc2
 import afc
 
 MAGIC3 = b"AFC3"
+MAGIC4 = b"AFC4"
 MODE_COMPONENT = 3
+MODE_COMPONENT_XML = 4
 
 # Segment kinds
 OPAQUE = 0      # stored verbatim: already compressed or high entropy
 POOLED = 1      # concatenated into the single Hybrid-Huffman input
+TRANSFORMED = 2 # exact DEFLATE-token recipe + plain XML, both Hybrid-Huffman
 
 # A segment must be at least this big to be worth classifying separately;
 # below it the manifest entry costs more than the segment can save.
@@ -123,23 +134,41 @@ MIN_OPAQUE_BYTES = 8192
 MIN_POOLED_BYTES = 512
 MIN_OPAQUE_FRACTION = 0.25
 
+# Guard against hostile ZIP expansion while analysing method-8 XML. This is
+# an analysis budget, not an upload-size policy: declined members simply stay
+# opaque and the unchanged whole-file/AFC3 paths remain available.
+MAX_XML_TRANSFORM_BYTES = 64 * 1024 * 1024
+MIN_XML_TRANSFORM_BYTES = 1024
+
+# Size-viability gate for the exact XML/token transform. On the checked DOCX
+# corpus, candidates that lost had expanded XML+recipe inputs 9x-57x the raw
+# deflate bytes; the level-0 stream that won was 1.00x. A conservative 4x gate
+# leaves a wide unobserved margin while avoiding a full Hybrid-Huffman trial
+# that cannot plausibly beat a highly compact producer stream. This affects
+# routing only: declined bytes remain exact and take AFC3/plain comparison.
+MAX_XML_TRANSFORM_VIABILITY_RATIO = 4
+
 
 class Segment:
-    __slots__ = ("kind", "start", "end", "label")
+    __slots__ = ("kind", "start", "end", "label", "source", "recipe")
 
-    def __init__(self, kind, start, end, label=""):
+    def __init__(self, kind, start, end, label="", source=None, recipe=None):
         self.kind = kind
         self.start = start
         self.end = end
         self.label = label
+        self.source = source
+        self.recipe = recipe
 
     @property
     def length(self):
         return self.end - self.start
 
     def __repr__(self):
+        names = {OPAQUE: "OPAQUE", POOLED: "POOLED",
+                 TRANSFORMED: "TRANSFORMED"}
         return "Segment(%s, %d..%d, %r)" % (
-            "OPAQUE" if self.kind == OPAQUE else "POOLED",
+            names.get(self.kind, "?"),
             self.start, self.end, self.label)
 
 
@@ -456,8 +485,8 @@ def analyze_pdf(data):
 _LFH = b"PK\x03\x04"
 
 
-def analyze_zip(data):
-    """Segment a ZIP package (DOCX/XLSX/PPTX/ODF) into pooled and opaque runs."""
+def _analyze_zip_local(data):
+    """Legacy local-header scan used when no central directory is readable."""
     if not data.startswith(_LFH):
         return None
     segs = []
@@ -506,6 +535,146 @@ def analyze_zip(data):
     if cursor < n:
         segs.append(Segment(POOLED, cursor, n, "zip-structure"))
     return segs or [Segment(POOLED, 0, n, "zip-structure")]
+
+
+_CDFH = b"PK\x01\x02"
+_EOCD = b"PK\x05\x06"
+_XML_SUFFIXES = (".xml", ".rels")
+_MEDIA_SUFFIXES = (
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".tif", ".tiff",
+    ".mp3", ".mp4", ".avi", ".mov", ".wmv", ".bin", ".emf", ".wmf",
+)
+
+
+def _zip_name(raw, flags):
+    codec = "utf-8" if (flags & 0x800) else "cp437"
+    return raw.decode(codec, "replace")
+
+
+def _is_xml_part(name):
+    lower = name.lower()
+    return lower.endswith(_XML_SUFFIXES) or lower == "[content_types].xml"
+
+
+def zip_components(data):
+    """Return a central-directory-backed inventory of ZIP/OOXML members.
+
+    Each row names the package component and gives its exact raw payload
+    range, compression method, CRC and expanded size. Central-directory sizes
+    are authoritative, so entries using a trailing data descriptor (general
+    purpose flag bit 3) are handled correctly. ZIP64 and multi-disk archives
+    are conservatively declined; the caller then uses the legacy safe scan or
+    the unchanged whole-file path.
+    """
+    if not data.startswith(_LFH):
+        return []
+    n = len(data)
+    search_from = max(0, n - (65535 + 22))
+    eocd = data.rfind(_EOCD, search_from)
+    if eocd < 0 or eocd + 22 > n:
+        return []
+    try:
+        (sig, disk, cd_disk, disk_entries, total_entries, cd_size, cd_offset,
+         comment_len) = struct.unpack_from("<IHHHHIIH", data, eocd)
+    except struct.error:
+        return []
+    if (sig != 0x06054B50 or disk != 0 or cd_disk != 0
+            or disk_entries != total_entries
+            or total_entries == 0xFFFF
+            or cd_size == 0xFFFFFFFF or cd_offset == 0xFFFFFFFF
+            or eocd + 22 + comment_len > n
+            or cd_offset + cd_size > n):
+        return []
+
+    out = []
+    pos = cd_offset
+    for _ in range(total_entries):
+        if pos + 46 > n or data[pos:pos + 4] != _CDFH:
+            return []
+        try:
+            fields = struct.unpack_from("<IHHHHHHIIIHHHHHII", data, pos)
+        except struct.error:
+            return []
+        (_sig, _made, needed, flags, method, _mtime, _mdate, crc,
+         csize, usize, namelen, extralen, commentlen, start_disk,
+         _iattr, _eattr, local_at) = fields
+        end = pos + 46 + namelen + extralen + commentlen
+        if (end > n or start_disk != 0 or csize == 0xFFFFFFFF
+                or usize == 0xFFFFFFFF or local_at + 30 > n
+                or data[local_at:local_at + 4] != _LFH):
+            return []
+        name_raw = data[pos + 46:pos + 46 + namelen]
+        name = _zip_name(name_raw, flags)
+        try:
+            local = struct.unpack_from("<IHHHHHIIIHH", data, local_at)
+        except struct.error:
+            return []
+        (_lsig, _lneeded, lflags, lmethod, _ltime, _ldate, _lcrc,
+         _lcsize, _lusize, lnamelen, lextralen) = local
+        payload_start = local_at + 30 + lnamelen + lextralen
+        payload_end = payload_start + csize
+        if (payload_start > n or payload_end > n or lmethod != method
+                or (lflags & 0x800) != (flags & 0x800)):
+            return []
+        out.append({
+            "name": name, "flags": flags, "method": method,
+            "crc32": crc, "compressed_size": csize,
+            "uncompressed_size": usize, "needed_version": needed,
+            "local_start": local_at, "payload_start": payload_start,
+            "payload_end": payload_end, "central_start": pos,
+        })
+        pos = end
+    if pos > cd_offset + cd_size:
+        return []
+    out.sort(key=lambda row: row["payload_start"])
+    for left, right in zip(out, out[1:]):
+        if left["payload_end"] > right["payload_start"]:
+            return []
+    return out
+
+
+def analyze_zip(data):
+    """Segment an OOXML ZIP into named structural, XML, and opaque runs.
+
+    Method-0 XML is directly reachable and pooled into Hybrid-Huffman.
+    Method-8 XML is already encoded and remains verbatim in AFC3; the AFC4
+    candidate builder below can instead expose it through an exact token
+    recipe. Media and other encoded/high-entropy member payloads are kept out
+    of the expensive engine path.
+    """
+    entries = zip_components(data)
+    if not entries:
+        return _analyze_zip_local(data)
+    segs = []
+    cursor = 0
+    for entry in entries:
+        start, end = entry["payload_start"], entry["payload_end"]
+        if end <= start:
+            continue
+        if start > cursor:
+            segs.append(Segment(POOLED, cursor, start, "zip-structure"))
+        name = entry["name"]
+        payload = data[start:end]
+        method = entry["method"]
+        short = name if len(name) <= 120 else name[:117] + "..."
+        if method == 0 and _is_xml_part(name):
+            kind, label = POOLED, "docx-xml-stored:" + short
+        elif method == 0:
+            kind = _classify(payload, name)
+            label = ("zip-stored:" if kind == POOLED else
+                     "zip-stored-opaque:") + short
+        elif method == 8 and _is_xml_part(name):
+            kind, label = OPAQUE, "docx-xml-deflate:" + short
+        else:
+            kind = OPAQUE
+            prefix = "docx-media:" if name.lower().endswith(_MEDIA_SUFFIXES) \
+                else "zip-encoded:"
+            label = prefix + short
+        segs.append(Segment(kind, start, end, label))
+        cursor = end
+    if cursor < len(data):
+        segs.append(Segment(POOLED, cursor, len(data), "zip-structure"))
+    return segs or [Segment(POOLED, 0, len(data), "zip-structure")]
 
 
 # ---------------------------------------------------------------------------
@@ -579,6 +748,121 @@ def describe_plan(data, segs=None):
             "components": by_label}
 
 
+def docx_transform_plan(data):
+    """Return an exact tiling with suitable deflated XML exposed for AFC4.
+
+    The central directory supplies member names, sizes and CRCs. Each
+    method-8 XML payload is parsed by ``deflate_tokens`` into plain XML plus a
+    reversible token recipe. Both are self-verified before the segment is
+    admitted. A malformed, encrypted, oversized, or unsupported member stays
+    opaque; it can never make reconstruction approximate.
+    """
+    entries = zip_components(data)
+    if not entries:
+        return None
+    try:
+        import deflate_tokens
+    except Exception:
+        return None
+
+    segs = []
+    cursor = 0
+    transformed_total = 0
+    transformed_count = 0
+    for entry in entries:
+        start, end = entry["payload_start"], entry["payload_end"]
+        if end <= start:
+            continue
+        if start > cursor:
+            segs.append(Segment(POOLED, cursor, start, "zip-structure"))
+        name = entry["name"]
+        method = entry["method"]
+        payload = data[start:end]
+        short = name if len(name) <= 120 else name[:117] + "..."
+        segment = None
+
+        # Encrypted entries cannot be interpreted, and expanding an extreme
+        # ratio could be a ZIP bomb. Declining a transform is safe: the raw
+        # member is preserved below.
+        eligible = (method == 8 and _is_xml_part(name)
+                    and not (entry["flags"] & 1)
+                    and (entry["uncompressed_size"] >= MIN_XML_TRANSFORM_BYTES
+                         or entry["compressed_size"]
+                         >= entry["uncompressed_size"])
+                    and entry["uncompressed_size"] <= MAX_XML_TRANSFORM_BYTES
+                    and entry["uncompressed_size"] <= max(
+                        1, entry["compressed_size"]
+                        * MAX_XML_TRANSFORM_VIABILITY_RATIO)
+                    and transformed_total + entry["uncompressed_size"]
+                    <= MAX_XML_TRANSFORM_BYTES)
+        if eligible:
+            try:
+                plain, recipe = deflate_tokens.transform(
+                    payload, max_output=entry["uncompressed_size"])
+                crc = binascii.crc32(plain) & 0xFFFFFFFF
+                # transform() already serialises and byte-compares its recipe;
+                # size + CRC independently verify the expanded ZIP member.
+                if (len(plain) != entry["uncompressed_size"]
+                        or crc != entry["crc32"]):
+                    raise ValueError("ZIP size/CRC/recipe verification failed")
+                # A named XML part should actually be textual. This prevents
+                # a misleading extension from expanding arbitrary binary data.
+                head = plain[:512].lstrip()
+                if not head.startswith(b"<") or b"\x00" in head:
+                    raise ValueError("named XML part is not textual XML")
+                segment = Segment(
+                    TRANSFORMED, start, end,
+                    "docx-xml-transformed:" + short,
+                    source=plain, recipe=recipe)
+                transformed_total += len(plain)
+                transformed_count += 1
+            except Exception:
+                segment = None
+
+        if segment is None:
+            if method == 0 and _is_xml_part(name):
+                segment = Segment(POOLED, start, end,
+                                  "docx-xml-stored:" + short)
+            elif method == 0:
+                kind = _classify(payload, name)
+                label = ("zip-stored:" if kind == POOLED else
+                         "zip-stored-opaque:") + short
+                segment = Segment(kind, start, end, label)
+            else:
+                prefix = "docx-xml-preserved:" if _is_xml_part(name) else (
+                    "docx-media:" if name.lower().endswith(_MEDIA_SUFFIXES)
+                    else "zip-encoded:")
+                segment = Segment(OPAQUE, start, end, prefix + short)
+        segs.append(segment)
+        cursor = end
+
+    if cursor < len(data):
+        segs.append(Segment(POOLED, cursor, len(data), "zip-structure"))
+    if not transformed_count:
+        return None
+    _validate_tiling(segs, len(data))
+    return segs
+
+
+def describe_docx_transform(data, segs=None):
+    segs = segs if segs is not None else docx_transform_plan(data)
+    if not segs:
+        return None
+    direct = sum(s.length for s in segs if s.kind == POOLED)
+    opaque = sum(s.length for s in segs if s.kind == OPAQUE)
+    transformed = [s for s in segs if s.kind == TRANSFORMED]
+    xml = sum(len(s.source) for s in transformed)
+    recipes = sum(len(s.recipe) for s in transformed)
+    return {
+        "segments": len(segs), "direct_pooled_bytes": direct,
+        "opaque_bytes": opaque,
+        "transformed_deflate_bytes": sum(s.length for s in transformed),
+        "xml_bytes": xml, "recipe_bytes": recipes,
+        "hybrid_input_bytes": direct + xml + recipes,
+        "transformed_components": len(transformed),
+    }
+
+
 # ---------------------------------------------------------------------------
 # encode / decode
 # ---------------------------------------------------------------------------
@@ -614,12 +898,61 @@ def build_afc3(data, segs, fmt="auto", compress_fn=None):
     return bytes(out)
 
 
+def build_afc4(data, segs, fmt="auto", compress_fn=None):
+    """Serialise a DOCX transform plan as an AFC4 container.
+
+    Direct structural/STORED segments and every transformed member's plain
+    XML + exact recipe are concatenated into one Hybrid-Huffman input. Opaque
+    media/unsupported members remain byte-for-byte raw.
+    """
+    compress_fn = compress_fn or afc2.compress_bytes
+    _validate_tiling(segs, len(data))
+    if not any(s.kind == TRANSFORMED for s in segs):
+        raise ValueError("AFC4 requires at least one transformed component")
+    pooled_parts = []
+    opaque_parts = []
+    for s in segs:
+        if s.kind == OPAQUE:
+            opaque_parts.append(data[s.start:s.end])
+        elif s.kind == POOLED:
+            pooled_parts.append(data[s.start:s.end])
+        elif s.kind == TRANSFORMED:
+            if s.source is None or s.recipe is None:
+                raise ValueError("transformed component lacks source/recipe")
+            pooled_parts.extend((s.source, s.recipe))
+        else:
+            raise ValueError("unknown AFC4 segment kind")
+
+    pooled = b"".join(pooled_parts)
+    opaque = b"".join(opaque_parts)
+    pooled_blob = compress_fn(pooled, True, fmt=fmt) if pooled else b""
+
+    out = bytearray(MAGIC4)
+    out.append(MODE_COMPONENT_XML)
+    _put_varint(out, len(data))
+    _put_varint(out, len(segs))
+    for s in segs:
+        _put_varint(out, (s.length << 2) | s.kind)
+        if s.kind == TRANSFORMED:
+            _put_varint(out, len(s.source))
+            _put_varint(out, len(s.recipe))
+    _put_varint(out, len(opaque))
+    out += opaque
+    _put_varint(out, len(pooled_blob))
+    out += pooled_blob
+    return bytes(out)
+
+
 def is_afc3(blob):
     return len(blob) >= 5 and blob[:4] == MAGIC3
 
 
+def is_afc4(blob):
+    return len(blob) >= 5 and blob[:4] == MAGIC4
+
+
 def header_info(blob):
-    """Read an AFC3 header without decoding the payload.
+    """Read an AFC3/AFC4 header without decoding the payload.
 
     Returns {original_length, segments, pooled_bytes, opaque_bytes}. The
     original_length here is the length of the WHOLE reconstructed file — not
@@ -627,21 +960,75 @@ def header_info(blob):
     that report integrity must use this one, or they will compare a whole-file
     length against a pooled length and wrongly declare a mismatch.
     """
-    if not is_afc3(blob):
-        raise ValueError("not an AFC3 container")
+    if not (is_afc3(blob) or is_afc4(blob)):
+        raise ValueError("not an AFC3/AFC4 container")
+    if (is_afc3(blob) and blob[4] != MODE_COMPONENT) or \
+            (is_afc4(blob) and blob[4] != MODE_COMPONENT_XML):
+        raise ValueError("unknown component-aware mode")
     pos = 5
     total, pos = _get_varint(blob, pos)
     count, pos = _get_varint(blob, pos)
-    pooled = opaque = 0
+    if count > len(blob):
+        raise ValueError("unreasonable component count")
+    pooled = opaque = transformed = xml = recipes = hybrid_input = 0
     for _ in range(count):
         v, pos = _get_varint(blob, pos)
-        kind, length = v & 1, v >> 1
+        if is_afc3(blob):
+            kind, length = v & 1, v >> 1
+        else:
+            kind, length = v & 3, v >> 2
+        if length <= 0:
+            raise ValueError("empty component in container header")
         if kind == POOLED:
             pooled += length
-        else:
+            hybrid_input += length
+        elif kind == OPAQUE:
             opaque += length
-    return {"original_length": total, "segments": count,
-            "pooled_bytes": pooled, "opaque_bytes": opaque}
+        elif kind == TRANSFORMED and is_afc4(blob):
+            source_len, pos = _get_varint(blob, pos)
+            recipe_len, pos = _get_varint(blob, pos)
+            if source_len <= 0 or recipe_len <= 0:
+                raise ValueError("empty transformed component")
+            transformed += length
+            xml += source_len
+            recipes += recipe_len
+            hybrid_input += source_len + recipe_len
+        else:
+            raise ValueError("unknown component kind")
+    represented = pooled + opaque + transformed
+    if represented != total:
+        raise ValueError("component lengths do not match original length")
+    return {"magic": blob[:4].decode("ascii"),
+            "original_length": total, "segments": count,
+            # Original bytes represented through the Hybrid-Huffman side.
+            "pooled_bytes": pooled + transformed,
+            "direct_pooled_bytes": pooled, "opaque_bytes": opaque,
+            "transformed_bytes": transformed, "xml_bytes": xml,
+            "recipe_bytes": recipes, "hybrid_input_bytes": hybrid_input}
+
+
+def inner_container(blob):
+    """Return the ordinary AFC1/AFC2 payload inside AFC3 or AFC4."""
+    if not (is_afc3(blob) or is_afc4(blob)):
+        return blob
+    pos = 5
+    _total, pos = _get_varint(blob, pos)
+    count, pos = _get_varint(blob, pos)
+    if count > len(blob):
+        raise ValueError("unreasonable component count")
+    for _ in range(count):
+        value, pos = _get_varint(blob, pos)
+        if is_afc4(blob) and (value & 3) == TRANSFORMED:
+            _source, pos = _get_varint(blob, pos)
+            _recipe, pos = _get_varint(blob, pos)
+    opaque_len, pos = _get_varint(blob, pos)
+    if pos + opaque_len > len(blob):
+        raise ValueError("truncated component-aware opaque region")
+    pos += opaque_len
+    pooled_len, pos = _get_varint(blob, pos)
+    if pos + pooled_len != len(blob):
+        raise ValueError("truncated or trailing component-aware pooled region")
+    return bytes(blob[pos:pos + pooled_len])
 
 
 def decompress_afc3(blob, decompress_fn=None):
@@ -654,33 +1041,142 @@ def decompress_afc3(blob, decompress_fn=None):
     pos = 5
     total, pos = _get_varint(blob, pos)
     count, pos = _get_varint(blob, pos)
+    if count > len(blob):
+        raise ValueError("unreasonable AFC3 component count")
     segs = []
+    want_pooled = want_opaque = 0
     for _ in range(count):
         v, pos = _get_varint(blob, pos)
-        segs.append((v & 1, v >> 1))
+        kind, length = v & 1, v >> 1
+        if length <= 0:
+            raise ValueError("empty AFC3 component")
+        segs.append((kind, length))
+        if kind == POOLED:
+            want_pooled += length
+        else:
+            want_opaque += length
+    if want_pooled + want_opaque != total:
+        raise ValueError("AFC3 component lengths do not match original")
     opaque_len, pos = _get_varint(blob, pos)
+    if opaque_len != want_opaque:
+        raise ValueError("AFC3 opaque length mismatch")
     opaque = blob[pos:pos + opaque_len]
     if len(opaque) != opaque_len:
         raise ValueError("truncated AFC3 opaque region")
     pos += opaque_len
     pooled_len, pos = _get_varint(blob, pos)
     pooled_blob = blob[pos:pos + pooled_len]
-    if len(pooled_blob) != pooled_len:
-        raise ValueError("truncated AFC3 pooled region")
+    if len(pooled_blob) != pooled_len or pos + pooled_len != len(blob):
+        raise ValueError("truncated or trailing AFC3 pooled region")
     pooled = decompress_fn(pooled_blob) if pooled_len else b""
+    if len(pooled) != want_pooled:
+        raise ValueError("AFC3 pooled reconstruction length mismatch")
 
     out = bytearray()
     po = oo = 0
     for kind, length in segs:
         if kind == POOLED:
-            out += pooled[po:po + length]
+            chunk = pooled[po:po + length]
+            if len(chunk) != length:
+                raise ValueError("truncated AFC3 pooled component")
+            out += chunk
             po += length
         else:
-            out += opaque[oo:oo + length]
+            chunk = opaque[oo:oo + length]
+            if len(chunk) != length:
+                raise ValueError("truncated AFC3 opaque component")
+            out += chunk
             oo += length
-    if len(out) != total:
+    if len(out) != total or po != len(pooled) or oo != len(opaque):
         raise ValueError("AFC3 reconstruction length mismatch: %d != %d"
                          % (len(out), total))
+    return bytes(out)
+
+
+def decompress_afc4(blob, decompress_fn=None):
+    """Rebuild a byte-identical OOXML package from an AFC4 container."""
+    decompress_fn = decompress_fn or afc2.decompress_bytes
+    if not is_afc4(blob):
+        raise ValueError("not an AFC4 container")
+    if blob[4] != MODE_COMPONENT_XML:
+        raise ValueError("unknown AFC4 mode %d" % blob[4])
+    try:
+        import deflate_tokens
+    except Exception as exc:
+        raise ValueError("DEFLATE recipe parser unavailable: %s" % exc)
+
+    pos = 5
+    total, pos = _get_varint(blob, pos)
+    count, pos = _get_varint(blob, pos)
+    if count > len(blob):
+        raise ValueError("unreasonable AFC4 component count")
+    segs = []
+    want_opaque = want_pooled = 0
+    for _ in range(count):
+        value, pos = _get_varint(blob, pos)
+        kind, original_len = value & 3, value >> 2
+        if original_len <= 0:
+            raise ValueError("empty AFC4 component")
+        source_len = recipe_len = 0
+        if kind == TRANSFORMED:
+            source_len, pos = _get_varint(blob, pos)
+            recipe_len, pos = _get_varint(blob, pos)
+            if source_len <= 0 or recipe_len <= 0:
+                raise ValueError("empty AFC4 transformed source/recipe")
+            want_pooled += source_len + recipe_len
+        elif kind == POOLED:
+            want_pooled += original_len
+        elif kind == OPAQUE:
+            want_opaque += original_len
+        else:
+            raise ValueError("unknown AFC4 component kind")
+        segs.append((kind, original_len, source_len, recipe_len))
+    if sum(s[1] for s in segs) != total:
+        raise ValueError("AFC4 component lengths do not match original")
+
+    opaque_len, pos = _get_varint(blob, pos)
+    if opaque_len != want_opaque:
+        raise ValueError("AFC4 opaque length mismatch")
+    opaque = blob[pos:pos + opaque_len]
+    if len(opaque) != opaque_len:
+        raise ValueError("truncated AFC4 opaque region")
+    pos += opaque_len
+    pooled_len, pos = _get_varint(blob, pos)
+    pooled_blob = blob[pos:pos + pooled_len]
+    if len(pooled_blob) != pooled_len or pos + pooled_len != len(blob):
+        raise ValueError("truncated or trailing AFC4 pooled region")
+    pooled = decompress_fn(pooled_blob) if pooled_len else b""
+    if len(pooled) != want_pooled:
+        raise ValueError("AFC4 pooled reconstruction length mismatch")
+
+    out = bytearray()
+    po = oo = 0
+    for kind, original_len, source_len, recipe_len in segs:
+        if kind == OPAQUE:
+            chunk = opaque[oo:oo + original_len]
+            if len(chunk) != original_len:
+                raise ValueError("truncated AFC4 opaque component")
+            out += chunk
+            oo += original_len
+        elif kind == POOLED:
+            chunk = pooled[po:po + original_len]
+            if len(chunk) != original_len:
+                raise ValueError("truncated AFC4 direct component")
+            out += chunk
+            po += original_len
+        else:
+            source = pooled[po:po + source_len]
+            po += source_len
+            recipe = pooled[po:po + recipe_len]
+            po += recipe_len
+            if len(source) != source_len or len(recipe) != recipe_len:
+                raise ValueError("truncated AFC4 transformed component")
+            raw = deflate_tokens.restore(source, recipe)
+            if len(raw) != original_len:
+                raise ValueError("AFC4 transformed length mismatch")
+            out += raw
+    if (len(out) != total or po != len(pooled) or oo != len(opaque)):
+        raise ValueError("AFC4 reconstruction length mismatch")
     return bytes(out)
 
 
@@ -689,17 +1185,16 @@ def decompress_afc3(blob, decompress_fn=None):
 # ---------------------------------------------------------------------------
 
 def compress_container(data, fmt="auto", compress_fn=None, verify=True):
-    """Try container-aware compression. Returns (blob, info) or (None, info).
+    """Try AFC3/AFC4 component paths and return the smallest whole result.
 
-    Returns None when the file is not a supported container, when the analysis
-    finds nothing worth separating, or when the resulting AFC3 is not smaller
-    than the plain whole-file container (§27: the global size guard — we never
-    claim a win because one component shrank).
-
-    `verify` re-expands the produced container and compares it against the
-    input before returning it. Losslessness is proven per file, not assumed.
+    AFC3 directly pools structural/unfiltered bytes while preserving encoded
+    payloads. For ZIP/OOXML, AFC4 additionally tries the exact XML/token
+    transform. Neither candidate is emitted merely because a component got
+    smaller: the final wrapper must beat the unchanged whole-file AFC1/AFC2
+    path. Every candidate is byte-verified before it can be selected.
     """
-    info = {"applied": False, "reason": "", "afc3_bytes": 0, "plain_bytes": 0}
+    info = {"applied": False, "reason": "", "afc3_bytes": 0,
+            "afc4_bytes": 0, "plain_bytes": 0, "selected_magic": ""}
     compress_fn = compress_fn or afc2.compress_bytes
     try:
         segs = plan(data)
@@ -712,60 +1207,73 @@ def compress_container(data, fmt="auto", compress_fn=None, verify=True):
 
     stats = describe_plan(data, segs)
     info.update(stats)
-    if stats["opaque_bytes"] == 0:
-        # Nothing to exclude: the plain whole-file path does exactly the same
-        # work without a manifest, so it wins by definition.
-        info["reason"] = "no opaque components; plain path is equivalent"
-        return None, info
+    candidates = []
+    notes = []
 
-    # Cheap viability gate, before any compression happens. Attempting the
-    # container path costs a second compression pass, so it is only worth
-    # starting when there is enough opaque data to exclude and enough pooled
-    # data to compress.
-    if (stats["opaque_bytes"] < MIN_OPAQUE_BYTES
-            or stats["pooled_bytes"] < MIN_POOLED_BYTES
-            or stats["opaque_fraction"] < MIN_OPAQUE_FRACTION):
-        info["reason"] = ("below the viability gate (opaque %d B, pooled %d B, "
-                          "%.0f%% opaque)" % (stats["opaque_bytes"],
-                                              stats["pooled_bytes"],
-                                              100 * stats["opaque_fraction"]))
-        return None, info
-
-    blob = build_afc3(data, segs, fmt=fmt, compress_fn=compress_fn)
-    info["afc3_bytes"] = len(blob)
-
-    if verify:
+    # Existing AFC3 viability gate. It avoids a redundant second full pass on
+    # tiny containers where the manifest cannot plausibly pay for itself.
+    direct_viable = (
+        stats["opaque_bytes"] >= MIN_OPAQUE_BYTES
+        and stats["pooled_bytes"] >= MIN_POOLED_BYTES
+        and stats["opaque_fraction"] >= MIN_OPAQUE_FRACTION)
+    if direct_viable:
+        afc3_blob = build_afc3(data, segs, fmt=fmt, compress_fn=compress_fn)
+        info["afc3_bytes"] = len(afc3_blob)
         try:
-            if decompress_afc3(blob) != data:
-                info["reason"] = "verification failed; falling back"
-                return None, info
+            if verify and decompress_afc3(afc3_blob) != data:
+                raise ValueError("AFC3 byte comparison failed")
+            candidates.append(afc3_blob)
         except Exception as exc:
-            info["reason"] = "verification error: %s" % exc
-            return None, info
+            notes.append("AFC3 verification failed: %s" % exc)
+    else:
+        notes.append("AFC3 below viability gate")
 
-    # Global size guard (§27). We do NOT claim a win because one component got
-    # smaller: the whole produced container, manifest included, must beat the
-    # plain whole-file container or we hand back None and the engine takes its
-    # normal path. The comparison is only skipped for large, overwhelmingly
-    # opaque files, where the plain pass would burn time on data already
-    # proven incompressible and AFC3 is not in doubt (see OPAQUE_SKIP_WHOLE).
-    if (stats["opaque_fraction"] >= OPAQUE_SKIP_WHOLE
+    # New AFC4 candidate: only ZIP files with at least one fully verified
+    # method-8 XML transform reach this point. It is intentionally measured
+    # even when it later loses; the final whole-file guard remains authoritative.
+    if data.startswith(_LFH):
+        try:
+            tplan = docx_transform_plan(data)
+            if tplan:
+                tstats = describe_docx_transform(data, tplan)
+                info.update({"docx_" + k: v for k, v in tstats.items()})
+                afc4_blob = build_afc4(data, tplan, fmt=fmt,
+                                       compress_fn=compress_fn)
+                info["afc4_bytes"] = len(afc4_blob)
+                if verify and decompress_afc4(afc4_blob) != data:
+                    raise ValueError("AFC4 byte comparison failed")
+                candidates.append(afc4_blob)
+            else:
+                notes.append("no eligible exact DOCX XML transforms")
+        except Exception as exc:
+            notes.append("AFC4 declined: %s" % exc)
+
+    if not candidates:
+        info["reason"] = "; ".join(notes) or "no component candidate"
+        return None, info
+    best = min(candidates, key=len)
+
+    # Keep the proven AFC3 media-heavy shortcut. AFC4 always gets an explicit
+    # whole-file comparison because transformed XML may expand substantially.
+    if (best[:4] == MAGIC3
+            and stats["opaque_fraction"] >= OPAQUE_SKIP_WHOLE
             and len(data) >= OPAQUE_SKIP_MIN_BYTES):
-        info["plain_bytes"] = 0
-        if len(blob) >= len(data):
-            info["reason"] = "AFC3 not smaller than the original"
+        if len(best) >= len(data):
+            info["reason"] = "component container not smaller than original"
             return None, info
         info["applied"] = True
+        info["selected_magic"] = "AFC3"
         info["reason"] = "opaque-heavy and large; whole-file pass skipped"
-        return blob, info
+        return best, info
 
     plain = compress_fn(data, True, fmt=fmt)
     info["plain_bytes"] = len(plain)
-    if len(blob) >= len(plain):
-        info["reason"] = ("plain container smaller (%d <= %d)"
-                          % (len(plain), len(blob)))
+    if len(best) >= len(plain):
+        info["reason"] = ("plain container smaller (%d <= %d); %s"
+                          % (len(plain), len(best), "; ".join(notes)))
         return None, info
     info["applied"] = True
-    info["reason"] = "AFC3 smaller than plain (%d < %d)" % (len(blob),
-                                                            len(plain))
-    return blob, info
+    info["selected_magic"] = best[:4].decode("ascii")
+    info["reason"] = "%s smaller than plain (%d < %d)" % (
+        info["selected_magic"], len(best), len(plain))
+    return best, info

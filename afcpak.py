@@ -6,7 +6,7 @@ WHAT THIS IS
 ------------
 A NEUTRAL package format.  It performs NO compression of its own.  Every file
 inside is compressed independently by the existing AFC engine
-(afc2.compress_bytes) and the resulting AFC1/AFC2 payloads are stored back to
+(afc2.compress_bytes) and the resulting AFC1-AFC4 payloads are stored back to
 back.  This module only writes a manifest and concatenates bytes.
 
 WHY IT IS BUILT THIS WAY (constraint #1 / #2 of the brief)
@@ -42,7 +42,7 @@ Manifest JSON:
          "original_bytes": 1234,
          "stored_bytes": 567,       # size of the AFC payload
          "offset": 0,               # offset within the payload region
-         "container": "AFC2",       # AFC1 | AFC2 | RAW-in-AFC1 fallback
+         "container": "AFC2",       # AFC1 | AFC2 | AFC3 | AFC4
          "sha256": "…",             # of the ORIGINAL bytes
          "lossless_verified": true}
       ]

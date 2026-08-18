@@ -17,6 +17,7 @@ Usage:
     python tools/preset_bench.py                       # default corpus
     python tools/preset_bench.py FILE [FILE ...]
     python tools/preset_bench.py --runs 5 --csv out.csv
+    python tools/preset_bench.py --native-only benchmarks/large/dickens_surrogate.txt
 """
 import argparse
 import hashlib
@@ -163,11 +164,20 @@ def main():
     ap.add_argument("files", nargs="*", default=None)
     ap.add_argument("--runs", type=int, default=5)
     ap.add_argument("--csv", default=None)
+    backend = ap.add_mutually_exclusive_group()
+    backend.add_argument("--native-only", action="store_true")
+    backend.add_argument("--python-only", action="store_true")
     a = ap.parse_args()
 
     files = a.files or [os.path.join(ROOT, f) for f in DEFAULT_FILES]
     print("native library available: %s" % afc2.NATIVE)
     print("runs per measurement: %d (median reported)\n" % a.runs)
+
+    if a.native_only and not afc2.NATIVE:
+        print("--native-only requested, but the native library is unavailable")
+        return 1
+    force_modes = [False] if a.native_only else (
+        [True] if a.python_only else [True, False])
 
     rows = []
     for path in files:
@@ -179,7 +189,7 @@ def main():
               % ("preset", "backend", "bytes", "ratio", "saved%",
                  "comp ms", "dec ms", "peak RSS KB", "ok"))
         for preset in ("fast", "balanced", "maximum"):
-            for force_py in (True, False):
+            for force_py in force_modes:
                 if force_py is False and not afc2.NATIVE:
                     continue
                 r = measure(path, data, preset, force_py, a.runs)
