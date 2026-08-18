@@ -276,7 +276,8 @@ def test_archive(app):
         off = base + ent["offset"]
         magics.add(blob[off:off + 4])
     check("every archive member is an AFC container (no foreign codec)",
-          magics and magics <= {b"AFC1", b"AFC2", b"AFC3", b"AFC4"}, magics)
+          magics and magics <= {b"AFC1", b"AFC2", b"AFC3", b"AFC4", b"AFC6"},
+          magics)
 
     # extract through the app and compare SHA-256 per member
     r = c.post("/api/archive/extract",
@@ -695,8 +696,8 @@ def test_presets_have_real_effect(app):
           out["fast"][1] < out["maximum"][1],
           (out["fast"][1], out["maximum"][1]))
 
-    # engine constants must be restored after use
-    check("preset context manager restores engine constants",
+    # Production preset calls must never mutate process-wide engine state.
+    check("preset calls leave legacy engine constants unchanged",
           afc2.DP_ROUNDS == 3 and afc2.MIN_CANDIDATE_FREQ == 4
           and afc2.OPTS["dp"] is True,
           (afc2.DP_ROUNDS, afc2.MIN_CANDIDATE_FREQ, afc2.OPTS["dp"]))
@@ -878,7 +879,9 @@ def test_decompress_reports_verification(app):
     check("decompress reports the restored size",
           d["restored_bytes"] == len(data))
     check("decompress reports the container format",
-          d["container"] in ("AFC1", "AFC2"), d.get("container"))
+          d["container"] == "AFC5"
+          and d.get("payload_container") in ("AFC1", "AFC2"),
+          (d.get("container"), d.get("payload_container")))
     check("decompress detects the container mode",
           bool(d.get("container_mode")), d.get("container_mode"))
     check("decompress reports a decompression time", d["ms"] >= 0)
@@ -1092,14 +1095,11 @@ def test_preset_backend_byte_identity():
     for path in files:
         data = open(path, "rb").read()
         for name in ("fast", "balanced", "maximum"):
-            with P.applied(name):
-                saved = afc2.NATIVE
-                try:
-                    afc2.NATIVE = False
-                    py = afc2.compress_bytes(data, True, fmt="auto")
-                finally:
-                    afc2.NATIVE = saved
-                nat = afc2.compress_bytes(data, True, fmt="auto")
+            options = P.options_for(name)
+            py = afc2.compress_bytes(data, True, fmt="auto",
+                                     options=options, backend="python")
+            nat = afc2.compress_bytes(data, True, fmt="auto",
+                                      options=options, backend="native")
             if py != nat:
                 identical = False
                 print("   MISMATCH %s/%s: py=%d nat=%d"
@@ -1109,6 +1109,41 @@ def test_preset_backend_byte_identity():
                 lossless = False
     check("Python and C++ agree byte-for-byte on every preset", identical)
     check("both backends round-trip losslessly on every preset", lossless)
+
+
+def test_preset_options_are_immutable_and_isolated():
+    """Preset selection is per call, including under concurrent requests."""
+    import dataclasses
+    from concurrent.futures import ThreadPoolExecutor
+    import afc2
+    import presets as P
+
+    frozen = False
+    options = P.options_for("fast")
+    try:
+        options.dp_rounds = 99
+    except dataclasses.FrozenInstanceError:
+        frozen = True
+    check("preset options are immutable", frozen)
+
+    data = (b"thread safe structural pattern one two three\n" * 220)
+    expected = {
+        name: afc2.compress_bytes(data, options=P.options_for(name),
+                                  backend="python")
+        for name in ("fast", "balanced", "maximum")
+    }
+
+    def run(name):
+        return name, afc2.compress_bytes(
+            data, options=P.options_for(name), backend="python")
+
+    jobs = ["fast", "maximum", "balanced", "fast", "maximum", "balanced"]
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        actual = list(pool.map(run, jobs))
+    isolated = all(blob == expected[name] for name, blob in actual)
+    check("concurrent preset calls are isolated", isolated)
+    check("concurrent preset outputs remain lossless",
+          all(afc2.decompress_bytes(blob) == data for _, blob in actual))
 
 
 def test_presets_remain_distinct():
@@ -1150,20 +1185,53 @@ def test_cross_implementation_decode():
     for path in corpus_files(5):
         data = open(path, "rb").read()
         for name in ("fast", "balanced", "maximum"):
-            with P.applied(name):
-                saved = afc2.NATIVE
-                try:
-                    afc2.NATIVE = False
-                    py_blob = afc2.compress_bytes(data, True, fmt="auto")
-                finally:
-                    afc2.NATIVE = saved
-                nat_blob = afc2.compress_bytes(data, True, fmt="auto")
+            options = P.options_for(name)
+            py_blob = afc2.compress_bytes(data, True, fmt="auto",
+                                          options=options, backend="python")
+            nat_blob = afc2.compress_bytes(data, True, fmt="auto",
+                                           options=options, backend="native")
             if afc2._native.decompress(py_blob) != data:
                 ok_pn = False
             if afc.decompress_bytes(nat_blob) != data:
                 ok_np = False
     check("Python-encoded containers decode natively", ok_pn)
     check("natively-encoded containers decode in Python", ok_np)
+
+
+def test_experiment_foundation():
+    """The thesis harness must work on Windows and identify official corpora."""
+    import json
+    import sys
+    tools_dir = os.path.join(ROOT, "tools")
+    sys.path.insert(0, tools_dir)
+    try:
+        import bench_runtime
+        import experiment
+    finally:
+        sys.path.pop(0)
+
+    rss = bench_runtime.current_rss_kb()
+    check("cross-platform RSS sampler reports real process memory", rss > 0, rss)
+
+    manifest_path = os.path.join(ROOT, "benchmarks", "corpus_manifest.json")
+    with open(manifest_path, encoding="utf-8") as stream:
+        manifest = json.load(stream)
+    canterbury = manifest["canterbury"]["files"]
+    silesia = manifest["silesia"]["files"]
+    check("manifest names all 11 official Canterbury files",
+          len(canterbury) == 11 and "kennedy.xls" in canterbury)
+    check("manifest names all 12 official Silesia files",
+          len(silesia) == 12 and "dickens" in silesia and "x-ray" in silesia)
+    check("every official corpus record has a cryptographic checksum",
+          all(v.get("sha256") for v in list(canterbury.values()) +
+              list(silesia.values())))
+
+    path = os.path.join(ROOT, "benchmarks", "canterbury", "grammar.lsp")
+    row = experiment.worker(path, "fast", "python", 0)
+    check("experiment worker verifies bytes and SHA-256",
+          row["byte_equal"] and row["sha256_equal"], row)
+    check("experiment worker records peak RSS", row["peak_rss_kib"] > 0,
+          row["peak_rss_kib"])
 
 
 # ===========================================================================
@@ -1314,7 +1382,8 @@ def test_container_layer_introduces_no_codec():
     homemade = {n for n in names
                 if ("compress" in n or "encode" in n)
                 and n not in ("compress_container", "decompress_afc3",
-                              "decompress_afc4")}
+                              "decompress_afc4", "decompress_afc6",
+                              "_decompress_transformed_container")}
     check("containers.py defines no compressor of its own", not homemade,
           homemade)
 
@@ -1418,18 +1487,150 @@ def test_afc4_docx_exact_and_versioned(app):
     login(c, "alice", "correct-horse")
     result = c.post("/api/compress", data={
         "file": (io.BytesIO(data), "normal.docx")}).get_json()
-    check("web app reports AFC4 when the DOCX candidate wins",
-          result.get("container") == "AFC4", result.get("container"))
+    check("web app wraps the winning AFC4 DOCX payload in AFC5",
+          result.get("container") == "AFC5"
+          and result.get("payload_container") == "AFC4", result)
     blob = c.get("/download/" + result["token"]).data
     decoded = c.post("/api/decompress", data={
         "file": (io.BytesIO(blob), "normal.docx.afc")}).get_json()
-    check("web AFC4 decompression reports verified integrity",
+    check("web AFC5/AFC4 decompression reports verified integrity",
           decoded.get("integrity_ok") is True, decoded.get("integrity_note"))
     check("web AFC4 mode reports automatic DOCX XML handling",
           "DOCX XML" in (decoded.get("container_mode") or ""),
           decoded.get("container_mode"))
-    check("web AFC4 SHA-256 matches the recorded source",
-          decoded.get("sha256_status") == "match", decoded.get("sha256_note"))
+    check("web AFC5 SHA-256 matches its embedded source digest",
+          decoded.get("sha256_status") == "match"
+          and "inside AFC5" in decoded.get("sha256_note", ""),
+          decoded.get("sha256_note"))
+    check("AFC5 restores the embedded original filename",
+          decoded.get("restored_name") == "normal.docx",
+          decoded.get("restored_name"))
+
+
+def test_afc5_self_verifying_envelope():
+    import afc2
+    import afc5
+    import analysis
+    import filetypes
+
+    data = (b"AFC5 self verifying hybrid huffman payload\n" * 300)
+    inner = afc2.compress_bytes(data)
+    blob = afc5.wrap(data, inner, "folder/report.txt")
+    info = afc5.parse(blob)
+    restored = afc2.decompress_bytes(blob)
+    check("AFC5 records the exact original length and SHA-256",
+          info["original_length"] == len(data)
+          and info["original_sha256"] == hashlib.sha256(data).hexdigest(), info)
+    check("AFC5 records and verifies its AFC payload",
+          info["payload"] == inner and info["payload_magic"] in
+          ("AFC1", "AFC2", "AFC3", "AFC4", "AFC6"),
+          info["payload_magic"])
+    check("AFC5 round trip is byte-equal and SHA-256 equal",
+          restored == data and hashlib.sha256(restored).digest() ==
+          hashlib.sha256(data).digest())
+    check("AFC5 stores a safe path-free original name",
+          info["original_name"] == "report.txt", info["original_name"])
+    check("analysis transparently reads the AFC5 inner Huffman tree",
+          analysis.parse_container(blob)["magic"] in ("AFC1", "AFC2"))
+    check("file type detection recognizes AFC5",
+          "AFC5" in filetypes.sniff(blob)["label"])
+
+    corrupt = bytearray(blob)
+    corrupt[-1] ^= 1
+    rejected = False
+    try:
+        afc2.decompress_bytes(bytes(corrupt))
+    except Exception:
+        rejected = True
+    check("AFC5 rejects a corrupted payload before decoding", rejected)
+
+    corrupt = bytearray(blob)
+    # The original digest begins after magic/version/flags and three 1-3 byte
+    # varints. Parse tells us the payload begins at header_bytes; flipping the
+    # first digest byte is simpler to locate by rebuilding a same-size header.
+    digest_at = 6
+    for _ in range(3):
+        while corrupt[digest_at] & 0x80:
+            digest_at += 1
+        digest_at += 1
+    corrupt[digest_at] ^= 1
+    rejected = False
+    try:
+        afc2.decompress_bytes(bytes(corrupt))
+    except Exception:
+        rejected = True
+    check("AFC5 rejects an incorrect reconstructed-file digest", rejected)
+
+
+def test_afc6_pdf_flate_exact_and_versioned():
+    """AFC6 must expose PDF Flate content and reproduce the PDF bytes."""
+    import afc
+    import afc2
+    import afc5
+    import analysis
+    import containers
+    import deflate_tokens
+
+    docs = {os.path.basename(p): p for p in _doc_corpus()}
+    path = docs.get("pdf_flate_and_images.pdf") or docs.get("pdf_word_flate.pdf")
+    if not path:
+        return
+    data = open(path, "rb").read()
+    segs = containers.pdf_transform_plan(data)
+    transformed = [s for s in (segs or [])
+                   if s.kind == containers.TRANSFORMED]
+    check("PDF transform plan exposes Flate page/content streams",
+          bool(transformed), len(transformed))
+    if not transformed:
+        return
+    recipes_exact = all(
+        deflate_tokens.restore_zlib(s.source, s.recipe) == data[s.start:s.end]
+        for s in transformed)
+    check("every PDF zlib/DEFLATE recipe is bit-exact", recipes_exact)
+
+    forced = containers.build_afc6(data, segs)
+    restored = afc2.decompress_bytes(forced)
+    hi = containers.header_info(forced)
+    check("forced AFC6 reconstructs exact PDF bytes and SHA-256",
+          restored == data and hashlib.sha256(restored).digest() ==
+          hashlib.sha256(data).digest())
+    check("AFC6 header explicitly records transformed source and recipes",
+          forced[:4] == b"AFC6" and hi["magic"] == "AFC6"
+          and hi["source_bytes"] > 0 and hi["recipe_bytes"] > 0, hi)
+    check("analysis unwraps AFC6 to its Hybrid-Huffman container",
+          analysis.unwrap(forced)[:4] in (b"AFC1", b"AFC2"))
+    try:
+        afc.decompress_bytes(forced)
+        old_rejects = False
+    except Exception:
+        old_rejects = True
+    check("old AFC1/AFC2 decoder rejects AFC6 cleanly", old_rejects)
+
+    plain = afc2.compress_bytes(data, True, container_aware=False)
+    auto = afc2.compress_bytes(data, True)
+    check("automatic PDF selection never exceeds the plain path",
+          len(auto) <= len(plain), (len(auto), len(plain), auto[:4]))
+    envelope = afc5.wrap(data, forced, "normal.pdf")
+    check("AFC5 can self-verify an AFC6 PDF payload",
+          afc5.parse(envelope)["payload_magic"] == "AFC6"
+          and afc2.decompress_bytes(envelope) == data)
+
+
+def test_afc6_corrupt_input_is_safe():
+    import containers
+    bad_cases = [
+        b"AFC6", b"AFC6\x06",
+        b"AFC6\x09\x01\x01\x04\x00\x00",
+        b"AFC6\x06" + b"\xff" * 40,
+    ]
+    clean = True
+    for blob in bad_cases:
+        try:
+            containers.decompress_afc6(blob)
+            clean = False
+        except Exception:
+            pass
+    check("corrupt AFC6 containers raise instead of returning bad data", clean)
 
 
 def test_afc4_corrupt_input_is_safe():
@@ -1748,8 +1949,10 @@ def main():
         # --- V7: native acceleration for every preset ---
         test_all_presets_native_capable()
         test_preset_backend_byte_identity()
+        test_preset_options_are_immutable_and_isolated()
         test_presets_remain_distinct()
         test_cross_implementation_decode()
+        test_experiment_foundation()
         # --- V7: container-aware PDF / DOCX ---
         test_container_tiling_is_exact()
         test_pdf_docx_byte_exact()
@@ -1759,7 +1962,10 @@ def main():
         test_container_layer_introduces_no_codec()
         test_docx_member_inventory_and_exact_deflate_recipes()
         test_afc4_docx_exact_and_versioned(app)
+        test_afc5_self_verifying_envelope()
+        test_afc6_pdf_flate_exact_and_versioned()
         test_afc4_corrupt_input_is_safe()
+        test_afc6_corrupt_input_is_safe()
         test_container_corrupt_input_is_safe()
         test_container_component_classification()
         test_afc3_reporting_is_whole_file(app)

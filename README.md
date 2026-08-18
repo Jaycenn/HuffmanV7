@@ -1,4 +1,4 @@
-# Adaptive File Compression (AFC) — v8
+# Adaptive File Compression (AFC) — 1.3
 
 **This archive is the complete project: compression engine + web application
 (Parts 1 and 2 combined).** Part 2 extended Part 1 in place, so there is one
@@ -14,14 +14,16 @@ codebase, one database schema and one test suite — nothing needs merging.
   `CHANGES_v7.md`
 * V8: exact DOCX member inventory, reversible XML/token processing and AFC4 —
   `CHANGES_v8.md`
+* 1.3: immutable preset calls, reproducible corpus tooling, AFC5 integrity,
+  exact PDF Flate recipes (AFC6), and the light-first UI — `CHANGES_1_3.md`
 * Scope/constraint compliance — `SCOPE_NOTES.md`
 * File-size limits and the measured evidence behind them — `SIZE_POLICY.md`
 
 Verify everything with:
 
 ```bash
-python tests/test_app.py          # 250 checks: web app, native presets,
-                                  # PDF/DOCX AFC3/AFC4, and compatibility
+python tests/test_app.py          # 277 checks: web app, native presets,
+                                  # AFC1-AFC6, documents, integrity
 python tools/native_doctor.py     # WHY is the backend Python or C++?
 python tools/preset_bench.py      # Python vs C++ across all three presets
 python tools/doc_bench.py         # PDF/DOCX container-aware results
@@ -237,27 +239,30 @@ automatic.
 
 * **PDF:** object/page-content inventory identifies stream payloads. PDF
   syntax and suitable unfiltered content are pooled into one Hybrid-Huffman
-  call; JPEG/JPX/Flate and high-entropy payloads stay verbatim. A smaller
-  result uses the versioned **AFC3** wrapper.
+  call; JPEG/JPX and high-entropy payloads stay verbatim. Suitable textual
+  `/FlateDecode` page/content streams can be exposed as expanded source plus
+  an exact zlib/DEFLATE-token recipe in **AFC6**. No stream is re-deflated.
 * **DOCX/OOXML:** the ZIP central directory identifies members by their real
   names and methods, including `word/document.xml`. STORED XML is directly
   pooled. For suitable method-8 XML, `deflate_tokens.py` parses the producer's
   existing blocks/tokens into plain XML plus an exact reconstruction recipe;
   both go through Hybrid-Huffman in **AFC4**. It does not search for DEFLATE
   matches or build a second compressed stream.
-* **Global guard:** AFC3/AFC4 is emitted only when the complete wrapper is
+* **Global guard:** AFC3/AFC4/AFC6 is emitted only when the complete wrapper is
   smaller than the unchanged whole-file AFC1/AFC2 result. Ordinary Word XML
   is often already very compact, so it is correctly preserved when exposing
   it would lose. This is a measured limitation, not hidden as an improvement.
 
-Both wrappers reconstruct the original PDF/DOCX bytes exactly; the suite and
+All wrappers reconstruct the original PDF/DOCX bytes exactly; the suite and
 document benchmark compare bytes and SHA-256, including two-cycle tests and
 old AFC1/AFC2 decoding.
 
-### Dark mode
+### Light-first interface and dark mode
 
-Toggle in the sidebar. The preference lives in `localStorage` only and is never
-sent to the server, consistent with the local/non-cloud delimitation.
+The 1.3 interface defaults to a brighter high-contrast canvas, clearer cards,
+larger upload targets and visible keyboard focus. Dark mode remains available
+from the sidebar. The preference lives in `localStorage` only and is never sent
+to the server, consistent with the local/non-cloud delimitation.
 
 
 ## File size limits
@@ -280,8 +285,8 @@ every file in the thesis corpus.
 ## Running the tests
 
 ```bash
-python tests/test_app.py      # 250 checks: auth/web, native equivalence,
-                              # AFC1-AFC4, PDF/DOCX, byte equality + SHA-256
+python tests/test_app.py      # 277 checks: auth/web, native equivalence,
+                              # AFC1-AFC6, PDF/DOCX, byte equality + SHA-256
 python tools/run_verification.py          # engine round trips (unchanged)
 python tools/size_policy_bench.py --quick # size/memory smoke test
 ```
@@ -339,9 +344,9 @@ afc2.NATIVE   # True when the C++ core is active
 | `filetypes.py` | content-based type detection; recovers the original extension on decompress. Compresses nothing |
 | `analysis.py` | read-only entropy / container / tree / attribution analysis |
 | `presets.py` | Fast / Balanced / Maximum tunable presets |
-| `tests/test_app.py` | 250-check end-to-end suite (native presets, AFC1-AFC4, web and document paths) |
+| `tests/test_app.py` | 277-check end-to-end suite (native presets, AFC1-AFC6, web, integrity and document paths) |
 | `tools/native_doctor.py` | [v7] diagnoses why the native core is or is not loaded |
-| `containers.py` | PDF/OOXML inventory, exact tiling, AFC3/AFC4 routing and whole-file size guards |
+| `containers.py` | PDF/OOXML inventory, exact tiling, AFC3/AFC4/AFC6 routing and whole-file size guards |
 | `deflate_tokens.py` | Reversible parser/serializer for existing DOCX member tokens; makes XML available to Hybrid-Huffman without adding a compressor |
 | `tools/` | corpus generator, verification suite, size benchmark, CSS + WASM builds |
 | `benchmarks/` | corpus, Canterbury files, harness, v3 snapshot, result CSVs |
@@ -437,7 +442,7 @@ Both web apps compress and decompress, but they expose it differently:
 
 Dashboard results show original/restored sizes, space saved, ratio,
 compression or decompression time, a SHA-verified lossless badge, the engine
-badge (C++ native / pure Python), the container badge (AFC1-AFC4), and a
+badge (C++ native / pure Python), the container badge (AFC1-AFC6), and a
 download link.
 
 > **Offline note:** the dashboard's Tailwind build is local
@@ -560,6 +565,15 @@ ordinary AFC1/AFC2 inner container for pooled PDF/OOXML structure.
 transformed-member records. Plain XML and its reversible token recipe live in
 the ordinary AFC1/AFC2 inner Hybrid-Huffman container.
 
-`afc2.decompress_bytes` and the Flask app read AFC1-AFC4. The legacy
+**AFC5** (self-verifying envelope): stores original length and SHA-256, payload
+length and SHA-256, and a safe original basename around an AFC payload. This
+makes verification self-contained instead of relying on database history.
+
+**AFC6** (PDF Flate component-aware): uses transformed records for eligible
+RFC-1950 zlib-wrapped page/content streams. Expanded source plus the producer's
+exact zlib/DEFLATE-token recipe goes through Hybrid-Huffman; images, fonts and
+unsupported/high-entropy streams remain byte-for-byte raw.
+
+`afc2.decompress_bytes` and the Flask app read AFC1-AFC6. The legacy
 `afc.py`, JavaScript and native core remain AFC1/AFC2 decoders; they reject the
 new outer magics cleanly instead of misinterpreting them.

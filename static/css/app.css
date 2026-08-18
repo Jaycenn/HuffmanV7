@@ -1,0 +1,190 @@
+/* AFC 1.3 — light-first readability layer.
+   Kept separate from the generated Tailwind bundle so the thesis/demo UI can
+   be adjusted without a network dependency or build tool on the target PC. */
+:root {
+  color-scheme: light;
+  --afc-canvas: #f4f6fa;
+  --afc-surface: #ffffff;
+  --afc-surface-soft: #fafbfe;
+  --afc-ink: #18202b;
+  --afc-muted: #5d6878;
+  --afc-line: #d9dee8;
+  --afc-accent: #941f2b;
+  --afc-accent-dark: #741620;
+  --afc-accent-soft: #fbf1f2;
+  --afc-focus: #c44b58;
+  --afc-shadow: 0 1px 2px rgba(24, 32, 43, .04),
+                0 10px 30px rgba(24, 32, 43, .06);
+}
+
+html { background: var(--afc-canvas); }
+
+body {
+  background: var(--afc-canvas) !important;
+  color: var(--afc-ink) !important;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+               "Segoe UI", sans-serif;
+  letter-spacing: -.006em;
+}
+
+.font-display {
+  font-family: Georgia, "Times New Roman", serif;
+  letter-spacing: -.018em;
+}
+
+.font-data {
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  letter-spacing: -.012em;
+}
+
+#sidebar {
+  background: rgba(255, 255, 255, .97) !important;
+  border-color: var(--afc-line) !important;
+  box-shadow: 8px 0 28px rgba(24, 32, 43, .035);
+}
+
+#sidebar nav a {
+  border: 1px solid transparent;
+  color: #2f3947;
+  transition: background-color .15s ease, border-color .15s ease,
+              color .15s ease, transform .15s ease;
+}
+
+#sidebar nav a:hover {
+  background: #f5f7fb !important;
+  border-color: #e5e9f0;
+  color: var(--afc-ink);
+  transform: translateX(2px);
+}
+
+#sidebar nav a.bg-maroon {
+  background: var(--afc-accent) !important;
+  border-color: var(--afc-accent);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(148, 31, 43, .18);
+}
+
+main.flex-1 { max-width: 1680px; }
+
+.rule2 {
+  position: relative;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 1.05rem 1.25rem 1.1rem !important;
+  border-radius: .8rem;
+  background: linear-gradient(105deg, #fff 0%, #fff 72%, #fbf1f2 100%);
+  box-shadow: var(--afc-shadow) !important;
+  overflow: hidden;
+}
+
+.rule2::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: var(--afc-accent);
+}
+
+.rule2 h1 { color: #161d27; font-size: 1.7rem; }
+.text-dim { color: var(--afc-muted) !important; }
+.text-maroon { color: var(--afc-accent) !important; }
+.border-line { border-color: var(--afc-line) !important; }
+.bg-paper { background-color: var(--afc-canvas) !important; }
+.bg-white { background-color: var(--afc-surface) !important; }
+.bg-maroon { background-color: var(--afc-accent) !important; }
+.hover\:bg-maroondark:hover { background-color: var(--afc-accent-dark) !important; }
+
+.bg-white.border,
+.bg-white.rounded-lg,
+#sResult,
+#dResult {
+  box-shadow: var(--afc-shadow);
+}
+
+.rounded-lg { border-radius: .8rem; }
+.rounded-md { border-radius: .55rem; }
+
+#sDrop, #dDrop, #drop {
+  min-height: 15rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(148, 31, 43, .055), transparent 34%),
+    var(--afc-surface);
+  border-color: #cbd2de !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .8),
+              0 14px 36px rgba(24, 32, 43, .045);
+}
+
+#sDrop:hover, #dDrop:hover, #drop:hover {
+  border-color: var(--afc-accent) !important;
+  background-color: var(--afc-accent-soft);
+}
+
+button, a, select, input, textarea { outline-color: var(--afc-focus); }
+
+button.bg-maroon, a.bg-maroon {
+  box-shadow: 0 7px 18px rgba(148, 31, 43, .18);
+  transition: transform .15s ease, box-shadow .15s ease,
+              background-color .15s ease;
+}
+
+button.bg-maroon:hover:not(:disabled), a.bg-maroon:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(148, 31, 43, .24);
+}
+
+button:focus-visible, a:focus-visible, select:focus-visible,
+input:focus-visible, [role="button"]:focus-visible {
+  outline: 3px solid rgba(196, 75, 88, .26);
+  outline-offset: 2px;
+}
+
+select, input:not([type="file"]), textarea {
+  min-height: 2.6rem;
+  background: #fff !important;
+  border-color: #cfd6e2 !important;
+}
+
+select:hover, input:not([type="file"]):hover, textarea:hover {
+  border-color: #aeb8c7 !important;
+}
+
+thead { background: #f7f8fb; }
+tbody tr { transition: background-color .12s ease; }
+tbody tr:hover { background: #faf2f3; }
+
+code {
+  padding: .08rem .3rem;
+  border-radius: .3rem;
+  color: #7d1a25;
+  background: #f8e9eb;
+}
+
+/* Dark remains available, but the redesigned application intentionally opens
+   in the light theme unless the user explicitly selects dark again. */
+.dark { color-scheme: dark; }
+.dark body { background: #151719 !important; color: #eceff4 !important; }
+.dark #sidebar { background: #1c1f23 !important; border-color: #343941 !important; }
+.dark .rule2 {
+  background: linear-gradient(105deg, #1d2024 0%, #1d2024 72%, #2a1b1e 100%);
+}
+.dark .rule2 h1 { color: #f6f7f9; }
+.dark #sDrop, .dark #dDrop, .dark #drop { background-color: #1c1f23; }
+.dark thead { background: #20242a; }
+.dark tbody tr:hover { background: #272126; }
+.dark select, .dark input:not([type="file"]), .dark textarea {
+  background: #1c1f23 !important;
+  border-color: #414750 !important;
+}
+
+@media (max-width: 1023px) {
+  .rule2 { padding: .95rem 1rem 1rem !important; }
+  #sidebar { box-shadow: 14px 0 40px rgba(24, 32, 43, .2); }
+}
+
+@media (max-width: 639px) {
+  #sDrop, #dDrop, #drop { min-height: 12rem; }
+  .rule2 h1 { font-size: 1.45rem; }
+}

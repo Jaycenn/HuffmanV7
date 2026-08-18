@@ -81,7 +81,7 @@
              + '<strong>Extract archive</strong> tab above.');
         return;
       }
-      if (four !== "AFC1" && four !== "AFC2" && four !== "AFC3" && four !== "AFC4") {
+      if (four !== "AFC1" && four !== "AFC2" && four !== "AFC3" && four !== "AFC4" && four !== "AFC5" && four !== "AFC6") {
         setErr('This is not an AFC file. The Decompress page only restores '
              + '<code>.afc</code> containers — open the '
              + '<a class="underline font-semibold" href="/compress">Compress '

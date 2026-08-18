@@ -106,6 +106,20 @@ def bench_one(path, runs):
             k["preserved"] += 1
     stats["stream_kinds"] = kinds
 
+    # AFC6 measurement: suitable Flate streams are expanded through the exact
+    # token recipe and pooled with structure. Report the complete candidate,
+    # even when the global guard correctly selects AFC3/plain instead.
+    pdf_transform_plan = (containers.pdf_transform_plan(data)
+                          if data[:5] == b"%PDF-" else None)
+    pdf_transform_stats = (containers.describe_pdf_transform(
+        data, pdf_transform_plan) if pdf_transform_plan else {})
+    afc6_candidate_bytes = 0
+    if pdf_transform_plan:
+        candidate = containers.build_afc6(data, pdf_transform_plan)
+        if containers.decompress_afc6(candidate) != data:
+            raise ValueError("AFC6 benchmark candidate did not round-trip")
+        afc6_candidate_bytes = len(candidate)
+
     # DOCX/OOXML member inventory. This names word/document.xml explicitly,
     # distinguishes STORED from method-8 XML, and reports whether the exact
     # token transform was viable enough to build an AFC4 candidate.
@@ -141,6 +155,12 @@ def bench_one(path, runs):
         "compressed_stream_bytes": stats.get("compressed_stream_bytes", 0),
         "preserved_stream_bytes": stats.get("preserved_stream_bytes", 0),
         "stream_kinds": stats.get("stream_kinds", {}),
+        "transformed_pdf_entries": pdf_transform_stats.get(
+            "transformed_components", 0),
+        "transformed_pdf_source_bytes": pdf_transform_stats.get(
+            "source_bytes", 0),
+        "pdf_recipe_bytes": pdf_transform_stats.get("recipe_bytes", 0),
+        "afc6_candidate_bytes": afc6_candidate_bytes,
         "zip_entries": len(zip_entries), "xml_entries": len(xml_entries),
         "stored_xml_entries": len(stored_xml),
         "deflated_xml_entries": len(deflated_xml),
@@ -242,6 +262,14 @@ def main():
                                                  v["preserved"])
                           for name, v in sorted(r["stream_kinds"].items()))
             print("%-28s %s" % (r["file"], k or "-"))
+        print()
+        print("%-28s %10s %12s %12s %10s" % (
+            "file", "xformed", "source B", "recipe B", "AFC6 cand"))
+        for r in pdfs:
+            print("%-28s %10d %12d %12d %10s" % (
+                r["file"], r["transformed_pdf_entries"],
+                r["transformed_pdf_source_bytes"], r["pdf_recipe_bytes"],
+                str(r["afc6_candidate_bytes"] or "-")))
 
     docx = [r for r in rows if r["zip_entries"]]
     if docx:
@@ -270,6 +298,8 @@ def main():
                     "opaque_pct", "components_analyzed", "streams_analyzed",
                     "streams_compressed", "streams_preserved",
                     "compressed_stream_bytes", "preserved_stream_bytes",
+                    "transformed_pdf_entries", "transformed_pdf_source_bytes",
+                    "pdf_recipe_bytes", "afc6_candidate_bytes",
                     "zip_entries", "xml_entries", "stored_xml_entries",
                     "deflated_xml_entries", "deflated_xml_compressed_bytes",
                     "deflated_xml_expanded_bytes", "transformed_xml_entries",

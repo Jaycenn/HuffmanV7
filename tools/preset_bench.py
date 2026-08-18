@@ -31,6 +31,7 @@ sys.path.insert(0, ROOT)
 
 import afc2                                                     # noqa: E402
 import presets                                                  # noqa: E402
+import experiment                                               # noqa: E402
 
 DEFAULT_FILES = [
     "benchmarks/corpus/data.json",
@@ -53,110 +54,34 @@ def median(xs):
 
 def measure(path, data, preset, force_python, runs):
     """Compress+decompress `runs` times under one preset/backend combination."""
-    saved_native = afc2.NATIVE
     ct, dt = [], []
     blob = b""
     ok = True
-    try:
-        if force_python:
-            afc2.NATIVE = False
-        with presets.applied(preset):
-            for _ in range(runs):
-                t0 = time.perf_counter()
-                blob = afc2.compress_bytes(data, True, fmt="auto")
-                ct.append((time.perf_counter() - t0) * 1000)
-                t0 = time.perf_counter()
-                out = afc2.decompress_bytes(blob)
-                dt.append((time.perf_counter() - t0) * 1000)
-                if hashlib.sha256(out).digest() != hashlib.sha256(data).digest():
-                    ok = False
-            # Peak memory of one compress, measured in a forked child via
-            # ru_maxrss so that NATIVE (C++) allocations are counted too.
-            #
-            # tracemalloc would be wrong here: it only sees the Python heap,
-            # so the native path would report a few KB while actually
-            # allocating megabytes in C++. Reporting that as a 100x memory win
-            # would be a measurement artefact, not a result.
-            peak = _peak_rss_kb(path, preset, force_python)
-    finally:
-        afc2.NATIVE = saved_native
-    backend = "pure Python" if force_python else (
-        "C++ native" if saved_native else "pure Python (no lib)")
+    engine = "python" if force_python else "native"
+    options = presets.options_for(preset)
+    source_sha = hashlib.sha256(data).digest()
+    for _ in range(runs):
+        t0 = time.perf_counter()
+        blob = afc2.compress_bytes(data, True, fmt="auto", options=options,
+                                   backend=engine)
+        ct.append((time.perf_counter() - t0) * 1000)
+        t0 = time.perf_counter()
+        out = afc2.decompress_bytes(blob)
+        dt.append((time.perf_counter() - t0) * 1000)
+        if out != data or hashlib.sha256(out).digest() != source_sha:
+            ok = False
+    peak = _peak_rss_kb(path, preset, force_python)
+    backend = "pure Python" if force_python else "C++ native"
     return {"bytes": len(blob), "comp_ms": median(ct), "dec_ms": median(dt),
             "peak_kb": peak, "ok": ok, "backend": backend,
             "container": blob[:4].decode("ascii", "replace")}
 
 
-_RSS_CHILD = r'''
-import os, sys, threading, time
-sys.path.insert(0, {root!r})
-import afc2, presets
-afc2.NATIVE = {want_native}
-
-PAGE = os.sysconf("SC_PAGE_SIZE")
-
-def rss_kb():
-    with open("/proc/self/statm", "rb") as f:
-        return int(f.read().split()[1]) * PAGE // 1024
-
-data = open({path!r}, "rb").read()
-base = rss_kb()
-peak = [base]
-stop = threading.Event()
-
-def sampler():
-    while not stop.is_set():
-        v = rss_kb()
-        if v > peak[0]:
-            peak[0] = v
-        time.sleep(0.001)
-
-t = threading.Thread(target=sampler, daemon=True)
-t.start()
-with presets.applied({preset!r}):
-    afc2.compress_bytes(data, True, fmt="auto")
-stop.set()
-t.join(timeout=1.0)
-print(peak[0] - base)
-'''
-
-
 def _peak_rss_kb(path, preset, force_python):
-    """Peak additional RSS caused by one compression, in KB.
-
-    Two earlier attempts were wrong and are worth recording so nobody repeats
-    them:
-
-      * tracemalloc only sees the PYTHON heap, so the native backend appeared
-        to use ~30 KB while really allocating megabytes in C++.
-      * ru_maxrss is a process high-water mark. Forking inherits the parent's,
-        and even in a fresh interpreter the mark is already set by import time
-        (~21 MB), so compressing a 151 KB file never raised it and every row
-        read 0.0.
-
-    What actually works: a fresh interpreter (so no pre-grown allocator pool
-    hides the allocations), sampling /proc/self/statm — the CURRENT resident
-    size, not a high-water mark — on a 1 ms timer around the compression, and
-    reporting the growth above the pre-compression baseline. This counts
-    Python and C++ allocations alike.
-    """
-    import subprocess
-    if not os.path.exists("/proc/self/statm"):
-        return -1.0
-    src = _RSS_CHILD.format(root=ROOT, path=os.path.abspath(path),
-                            preset=preset,
-                            want_native=(not force_python))
-    try:
-        r = subprocess.run([sys.executable, "-c", src],
-                           capture_output=True, text=True, timeout=3600)
-    except subprocess.TimeoutExpired:
-        return -1.0
-    if r.returncode != 0:
-        return -1.0
-    try:
-        return float(r.stdout.strip())
-    except ValueError:
-        return -1.0
+    """Peak additional OS RSS caused by one fresh-process compression."""
+    backend = "python" if force_python else "native"
+    row = experiment.run_child(os.path.abspath(path), preset, backend, 0, 3600)
+    return float(row.get("peak_delta_kib", -1.0))
 
 
 def main():

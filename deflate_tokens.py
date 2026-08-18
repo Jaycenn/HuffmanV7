@@ -22,6 +22,7 @@ stores an AFC payload.
 """
 
 MAGIC = b"DFR1"
+ZLIB_MAGIC = b"ZLR1"
 
 _LENGTH_BASE = (
     3, 4, 5, 6, 7, 8, 9, 10,
@@ -499,3 +500,55 @@ def restore(plain, recipe):
     if plain_pos != len(plain) or produced != plain:
         raise ValueError("unused bytes in DEFLATE member reconstruction")
     return writer.finish()
+
+
+def _adler32(data):
+    """RFC 1950 Adler-32 without importing a compression library."""
+    a = 1
+    b = 0
+    for start in range(0, len(data), 5552):
+        for byte in data[start:start + 5552]:
+            a += byte
+            b += a
+        a %= 65521
+        b %= 65521
+    return (b << 16) | a
+
+
+def transform_zlib(stream, max_output=None):
+    """Expose an RFC 1950 zlib-wrapped DEFLATE stream exactly.
+
+    PDF ``/FlateDecode`` streams normally use this wrapper. The producer's
+    two-byte zlib header, Adler-32, and exact raw-DEFLATE token recipe are all
+    retained. Preset-dictionary streams are conservatively rejected.
+    """
+    stream = bytes(stream)
+    if len(stream) < 8:
+        raise ValueError("truncated zlib stream")
+    cmf, flg = stream[0], stream[1]
+    if (cmf & 0x0F) != 8 or (cmf >> 4) > 7:
+        raise ValueError("unsupported zlib compression method/window")
+    if ((cmf << 8) | flg) % 31:
+        raise ValueError("invalid zlib header check")
+    if flg & 0x20:
+        raise ValueError("zlib preset dictionaries are not supported")
+    expected_adler = int.from_bytes(stream[-4:], "big")
+    plain, raw_recipe = transform(stream[2:-4], max_output=max_output)
+    if _adler32(plain) != expected_adler:
+        raise ValueError("zlib Adler-32 mismatch")
+    recipe = ZLIB_MAGIC + stream[:2] + stream[-4:] + raw_recipe
+    if restore_zlib(plain, recipe) != stream:
+        raise ValueError("zlib recipe did not reproduce its source")
+    return plain, recipe
+
+
+def restore_zlib(plain, recipe):
+    plain = bytes(plain)
+    recipe = bytes(recipe)
+    if len(recipe) < 10 or recipe[:4] != ZLIB_MAGIC:
+        raise ValueError("not a zlib token recipe")
+    header = recipe[4:6]
+    adler = recipe[6:10]
+    if _adler32(plain) != int.from_bytes(adler, "big"):
+        raise ValueError("zlib recipe does not match the source bytes")
+    return header + restore(plain, recipe[10:]) + adler

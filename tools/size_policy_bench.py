@@ -18,13 +18,12 @@ have run a size it did not.
 """
 import argparse
 import csv
-import hashlib
 import os
 import random
-import resource
-import subprocess
 import sys
-import time
+import tempfile
+
+import experiment
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
@@ -61,51 +60,21 @@ def make_file(path, nbytes, seed=7):
     return path
 
 
-CHILD = r'''
-import hashlib, os, resource, sys, time
-sys.path.insert(0, sys.argv[1])
-import afc2
-path = sys.argv[2]
-data = open(path, "rb").read()
-ref = hashlib.sha256(data).digest()
-t0 = time.perf_counter(); blob = afc2.compress_bytes(data, True)
-ct = time.perf_counter() - t0
-t0 = time.perf_counter(); out = afc2.decompress_bytes(blob)
-dt = time.perf_counter() - t0
-ok = hashlib.sha256(out).digest() == ref
-rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
-print("RESULT %d %d %.3f %.3f %.1f %d %s" % (
-    len(data), len(blob), ct, dt, rss, int(ok),
-    "native" if afc2.NATIVE else "python"))
-'''
-
-
 def run_one(path, native, timeout):
     """Run one measurement in a FRESH subprocess so peak RSS is attributable
-    to this file alone.  Returns a dict or None on timeout/crash."""
-    env = dict(os.environ)
-    if not native:
-        env["AFC_NO_NATIVE"] = "1"
-    else:
-        env.pop("AFC_NO_NATIVE", None)
-    try:
-        r = subprocess.run([sys.executable, "-c", CHILD, ROOT, path],
-                           capture_output=True, text=True, env=env,
-                           timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return {"status": "TIMEOUT (>%ds)" % timeout}
-    if r.returncode != 0:
-        tail = (r.stderr or "").strip().splitlines()
-        return {"status": "FAILED: " + (tail[-1] if tail else
-                                        "rc=%d" % r.returncode)}
-    for line in r.stdout.splitlines():
-        if line.startswith("RESULT "):
-            _, o, c, ct, dt, rss, ok, eng = line.split()
-            return {"status": "OK", "orig": int(o), "comp": int(c),
-                    "comp_s": float(ct), "dec_s": float(dt),
-                    "rss_mb": float(rss), "lossless": bool(int(ok)),
-                    "engine": eng}
-    return {"status": "FAILED: no RESULT line"}
+    to this file alone. Returns an explicit failure row on timeout/crash."""
+    backend = "native" if native else "python"
+    row = experiment.run_child(path, "balanced", backend, 0, timeout)
+    if row.get("status") != "ok":
+        return {"status": row.get("status", "failed").upper() + ": " +
+                          row.get("error", "unknown error")}
+    return {"status": "OK", "orig": row["original_bytes"],
+            "comp": row["compressed_bytes"],
+            "comp_s": row["compression_ms"] / 1000.0,
+            "dec_s": row["decompression_ms"] / 1000.0,
+            "rss_mb": row["peak_rss_kib"] / 1024.0,
+            "lossless": row["byte_equal"] and row["sha256_equal"],
+            "engine": backend}
 
 
 def main():
@@ -115,13 +84,18 @@ def main():
     ap.add_argument("--python-large", action="store_true",
                     help="also run pure-Python at 150/250 MB (very slow)")
     ap.add_argument("--timeout", type=int, default=3600)
+    ap.add_argument("--sizes", type=int, nargs="+", default=None,
+                    help="explicit input sizes in MiB (overrides --quick)")
+    ap.add_argument("--csv", default=OUT_CSV,
+                    help="result CSV path")
     a = ap.parse_args()
 
-    sizes_mb = [8, 32] if a.quick else [8, 32, 100, 150, 250]
-    py_sizes = [8, 32] if not a.python_large else [8, 32, 150, 250]
+    sizes_mb = a.sizes or ([8, 32] if a.quick else [8, 32, 100, 150, 250])
+    py_sizes = (sizes_mb if a.sizes else
+                ([8, 32] if not a.python_large else [8, 32, 150, 250]))
 
     rows = []
-    tmp = os.environ.get("AFC_BENCH_TMP", "/tmp")
+    tmp = os.environ.get("AFC_BENCH_TMP", tempfile.gettempdir())
     for mb in sizes_mb:
         path = os.path.join(tmp, "afc_size_%dmb.bin" % mb)
         make_file(path, mb * 1024 * 1024)
@@ -147,7 +121,7 @@ def main():
             pass
 
     os.makedirs("benchmarks", exist_ok=True)
-    with open(OUT_CSV, "w", newline="") as f:
+    with open(a.csv, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["size_mb", "backend", "status", "orig_bytes",
                     "compressed_bytes", "comp_seconds", "dec_seconds",
@@ -162,7 +136,7 @@ def main():
             else:
                 w.writerow([r["size_mb"], r["backend"], r["status"],
                             "", "", "", "", "", "", ""])
-    print("\nwrote", OUT_CSV)
+    print("\nwrote", a.csv)
 
 
 if __name__ == "__main__":

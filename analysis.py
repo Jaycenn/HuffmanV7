@@ -129,9 +129,9 @@ def _byte_label(b: int) -> str:
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# Component-aware AFC3/AFC4 unwrapping
+# Component-aware AFC3/AFC4/AFC6 unwrapping
 # ---------------------------------------------------------------------------
-# AFC3/AFC4 hold an ordinary AFC1/AFC2 container inside — the one
+# AFC3/AFC4/AFC6 hold an ordinary AFC1/AFC2 container inside — the one
 # produced from the pooled, compressible components of a PDF or DOCX. All the
 # introspection below (tree, code lengths, attribution) describes THAT inner
 # container, because it is the one the Hybrid-Huffman engine actually built.
@@ -139,11 +139,17 @@ def _byte_label(b: int) -> str:
 # without duplicating their logic.
 
 def unwrap(blob: bytes) -> bytes:
-    """Return the inner coded container, following AFC3/AFC4 when present.
+    """Return the inner coded container, following AFC3/AFC4/AFC6 when present.
 
     Other input is returned unchanged, so every caller can apply this
     unconditionally."""
-    if len(blob) < 5 or blob[:4] not in (b"AFC3", b"AFC4"):
+    if len(blob) >= 5 and blob[:4] == b"AFC5":
+        try:
+            import afc5
+            blob = afc5.unwrap(blob)
+        except Exception:
+            return blob
+    if len(blob) < 5 or blob[:4] not in (b"AFC3", b"AFC4", b"AFC6"):
         return blob
     try:
         import containers
@@ -153,7 +159,13 @@ def unwrap(blob: bytes) -> bytes:
 
 
 def is_component_aware(blob: bytes) -> bool:
-    return len(blob) >= 4 and blob[:4] in (b"AFC3", b"AFC4")
+    if len(blob) >= 4 and blob[:4] == b"AFC5":
+        try:
+            import afc5
+            blob = afc5.unwrap(blob)
+        except Exception:
+            return False
+    return len(blob) >= 4 and blob[:4] in (b"AFC3", b"AFC4", b"AFC6")
 
 
 def parse_container(blob: bytes) -> dict:

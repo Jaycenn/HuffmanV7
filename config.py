@@ -130,10 +130,10 @@ ARCHIVE_MAGIC = b"AFCPAK01"
 
 # Bumped when Part 2 landed; shown in reports, the status panel and
 # /api/config, so it must describe the build actually running.
-APP_VERSION = "1.2.1"
-# The Hybrid-Huffman algorithm remains v4; AFC4 is a new outer document
-# container, not a replacement entropy codec.
-ENGINE_VERSION = "AFC v4 (AFC1-AFC4)"
+APP_VERSION = "1.3.0"
+# The Hybrid-Huffman algorithm remains v4. AFC5 is the integrity envelope and
+# AFC6 the PDF component manifest, not a replacement entropy codec.
+ENGINE_VERSION = "AFC v4 (AFC1-AFC6)"
 
 
 def public_dict():

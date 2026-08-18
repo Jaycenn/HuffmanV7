@@ -3,18 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#f7f8fb">
 <title>{% block title %}AFC{% endblock %} · Adaptive File Compression</title>
 <!-- LOCAL Tailwind build — no CDN, so the dashboard renders correctly with no
      internet (thesis demo requirement + the local/non-cloud delimitation).
      Rebuild after changing templates:  sh tools/build_css.sh -->
 <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 <script>
 // Feature 13 — dark mode. Applied before first paint to avoid a flash.
 // Preference is per-browser (localStorage); nothing is sent to the server,
 // consistent with the local/non-cloud delimitation.
 (function () {
   try {
-    var t = localStorage.getItem("afc-theme");
+    var t = localStorage.getItem("afc-theme-v2");
     if (t === "dark") document.documentElement.classList.add("dark");
   } catch (e) {}
 })();
@@ -173,7 +175,7 @@
   }
   if (tb) tb.addEventListener("click", function () {
     var dark = document.documentElement.classList.toggle("dark");
-    try { localStorage.setItem("afc-theme", dark ? "dark" : "light"); } catch (e) {}
+    try { localStorage.setItem("afc-theme-v2", dark ? "dark" : "light"); } catch (e) {}
     paintLabel();
   });
   paintLabel();

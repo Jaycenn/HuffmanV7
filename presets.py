@@ -11,9 +11,9 @@ Presets map to the engine's EXISTING tunables — no new algorithm logic:
     DP_ROUNDS            optimal-parse <-> tree iterations
     OPTS["dp"]           whether optimal parsing runs at all
 
-They are applied by assigning to afc2's module-level constants inside a
-context manager and restoring them afterwards.  afc2.py itself is NOT edited,
-per constraint #1.
+They are represented by an immutable ``afc2.EngineOptions`` value and passed
+into each compression call. This keeps concurrent requests isolated. A legacy
+context manager remains only for compatibility with older benchmark scripts.
 
 [v7] EVERY PRESET NOW RUNS NATIVELY
 -----------------------------------
@@ -138,19 +138,26 @@ def describe(name=None):
     return [describe(k) for k in ("fast", "balanced", "maximum")]
 
 
+def options_for(name):
+    """Return the immutable engine configuration for a named preset."""
+    if not is_valid(name):
+        name = DEFAULT_PRESET
+    params = PRESETS[name]["params"]
+    return afc2.EngineOptions(
+        dp=params["dp"],
+        dp_rounds=params["dp_rounds"],
+        merge_rounds_v4=params["merge_rounds"],
+        min_candidate_freq=params["min_candidate_freq"],
+    )
+
+
 @contextlib.contextmanager
 def applied(name):
-    """Temporarily apply a preset to afc2's module constants.
+    """Legacy context manager for third-party scripts.
 
-    Restores every touched value on exit, including on exception, so a failed
-    compression cannot leave the engine mistuned for the next request.
-
-    NOT thread-safe: it mutates module globals.  That is acceptable here
-    because config.MAX_CONCURRENT_JOBS is 1 and the queue is strictly
-    sequential (see app.api_batch).  If concurrency is ever introduced, this
-    must become a per-call parameter instead — which would require the engine
-    to accept one, i.e. a change to afc2.py that Part 2 is not permitted to
-    make.
+    Production compression no longer uses this mutation-based path; it is
+    retained so old benchmark extensions do not break. New callers should use
+    :func:`options_for` and pass the result to ``afc2.compress_bytes``.
     """
     if name not in PRESETS:
         name = DEFAULT_PRESET
@@ -187,15 +194,12 @@ def compress_with(data: bytes, name: str, fmt: str = "auto",
     effect. Output is byte-identical either way — only the speed differs."""
     if not is_valid(name):
         name = DEFAULT_PRESET
-    with applied(name):
-        if uses_native(name):
-            return afc2.compress_bytes(data, adaptive, fmt=fmt), name, \
-                "C++ native"
-        saved_native = afc2.NATIVE
-        try:
-            afc2.NATIVE = False          # force the tunable Python pipeline
-            blob = afc2.compress_bytes(data, adaptive, fmt=fmt)
-        finally:
-            afc2.NATIVE = saved_native
-        backend = "pure Python (preset)" if saved_native else "pure Python"
-        return blob, name, backend
+    options = options_for(name)
+    if uses_native(name):
+        blob = afc2.compress_bytes(data, adaptive, fmt=fmt, options=options,
+                                   backend="native")
+        return blob, name, "C++ native"
+    blob = afc2.compress_bytes(data, adaptive, fmt=fmt, options=options,
+                               backend="python")
+    backend = "pure Python (preset)" if afc2.NATIVE else "pure Python"
+    return blob, name, backend

@@ -1,0 +1,14 @@
+{
+  "git_commit": "6df43df0409a873fb957afe9bd997873053fea4e",
+  "machine": "AMD64",
+  "memory_policy": "OS resident working set sampled every 1 ms",
+  "native_available": true,
+  "native_library": "C:\\Users\\PC\\Documents\\Codex\\2026-08-18\\https-github-com-jaycenn-huffmanv6-git\\work\\HuffmanV6-checkout\\afc_kernels.dll",
+  "native_library_sha256": "f00a7157b6b25b1a99d120f5c0d3b909c11d01e7c1677f62cb11b3654acfa27d",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+  "python": "3.12.13 (main, Aug  7 2026, 02:26:41) [MSC v.1944 64 bit (AMD64)]",
+  "python_executable": "C:\\Users\\PC\\Documents\\Codex\\2026-08-18\\https-github-com-jaycenn-huffmanv6-git\\work\\HuffmanV6-checkout\\.venv\\Scripts\\python.exe",
+  "timestamp_utc": "2026-08-18T11:05:08Z",
+  "timing_policy": "fresh process per trial; file read before timer"
+}

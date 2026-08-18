@@ -89,6 +89,7 @@ from flask import (Blueprint, Flask, abort, flash, g, jsonify, redirect,
 
 import afc          # engine: baseline control + decoder   (READ ONLY)
 import afc2 as engine  # engine: adaptive pipeline          (READ ONLY)
+import afc5         # self-verifying metadata envelope; no compressor
 import afcpak
 import analysis     # Part 2: read-only introspection of inputs/containers
 import auth
@@ -98,9 +99,9 @@ import filetypes   # content sniffing so restored files regain their real name
 import presets     # Part 2: Fast/Balanced/Maximum tunable presets
 
 # Every container version the engine can read. AFC3 is direct component-aware
-# routing; AFC4 adds exact DOCX XML/token reconstruction. AFC1/AFC2 are
-# unchanged and still decode.
-AFC_MAGICS = (b"AFC1", b"AFC2", b"AFC3", b"AFC4")
+# routing; AFC4 adds exact DOCX XML/token reconstruction; AFC6 adds exact PDF
+# Flate/token reconstruction. AFC1/AFC2 are unchanged and still decode.
+AFC_MAGICS = (b"AFC1", b"AFC2", b"AFC3", b"AFC4", b"AFC5", b"AFC6")
 
 APP_STARTED_AT = time.time()
 
@@ -276,12 +277,14 @@ def _process_one(data, filename, fmt, adaptive, batch_id=None,
     is_container = data[:4] in AFC_MAGICS
     t0 = time.perf_counter()
     if is_container:
+        envelope = afc5.parse(data) if data[:4] == b"AFC5" else None
         restored = engine.decompress_bytes(data)
         elapsed = (time.perf_counter() - t0) * 1000
         # Recover the real name by sniffing the restored bytes, so a queued
         # `report.afc` comes back as `report.pdf` and not as `report`.
         kind = filetypes.sniff(restored)
-        name = filetypes.restored_name(filename, restored)
+        name = (envelope.get("original_name") if envelope else "") or \
+            filetypes.restored_name(filename, restored)
         token = _stash(name, restored, mimetype=kind["mime"])
         db.add_history(g.user["id"], filename, len(restored), len(data),
                        engine_name(), data[:4].decode("ascii", "replace"),
@@ -294,12 +297,17 @@ def _process_one(data, filename, fmt, adaptive, batch_id=None,
                 "output_name": name,
                 "original": len(data), "restored": len(restored),
                 "container": data[:4].decode("ascii", "replace"),
+                "payload_container": (envelope.get("payload_magic")
+                                      if envelope else
+                                      data[:4].decode("ascii", "replace")),
                 "engine": engine_name(), "ms": round(elapsed, 1),
                 "lossless": True, "token": token,
                 "detected": kind["label"]}
 
-    blob, used_preset, backend = presets.compress_with(data, preset, fmt=fmt,
-                                                       adaptive=adaptive)
+    payload, used_preset, backend = presets.compress_with(
+        data, preset, fmt=fmt, adaptive=adaptive)
+    payload_container = payload[:4].decode("ascii", "replace")
+    blob = afc5.wrap(data, payload, filename)
     elapsed = (time.perf_counter() - t0) * 1000
     # SHA-256 round trip — constraint #3. Never reported optimistically.
     sha_original = hashlib.sha256(data).hexdigest()
@@ -340,6 +348,7 @@ def _process_one(data, filename, fmt, adaptive, batch_id=None,
             "ratio": round(len(data) / len(blob), 3) if blob else 0,
             "saved": round(100.0 * (1 - len(blob) / len(data)), 2) if data else 0,
             "container": blob[:4].decode("ascii", "replace"),
+            "payload_container": payload_container,
             "engine": backend, "ms": round(elapsed, 1),
             "lossless": lossless, "token": token,
             "preset": used_preset, "explain": explain,
@@ -374,7 +383,8 @@ def api_compress():
     try:
         if action == "compress" and is_container:
             # explicit nested compression
-            blob = engine.compress_bytes(data, adaptive, fmt=fmt)
+            payload = engine.compress_bytes(data, adaptive, fmt=fmt)
+            blob = afc5.wrap(data, payload, f.filename)
             lossless = engine.decompress_bytes(blob) == data
             token = _stash(f.filename + ".afc", blob)
             db.add_history(g.user["id"], f.filename, len(data), len(blob),
@@ -385,6 +395,7 @@ def api_compress():
                            ratio=round(len(data) / len(blob), 3),
                            saved=round(100.0 * (1 - len(blob) / len(data)), 2),
                            container=blob[:4].decode("ascii", "replace"),
+                           payload_container=payload[:4].decode("ascii", "replace"),
                            engine=engine_name(), lossless=lossless, token=token)
         result = _process_one(data, f.filename, fmt, adaptive, preset=preset)
     except Exception as exc:                       # never 500 to the user
@@ -478,17 +489,34 @@ def api_decompress():
     declared = None
     mode_name = ""
     component_note = ""
-    if container in ("AFC3", "AFC4"):
+    embedded_sha = None
+    embedded_name = ""
+    payload_container = container
+    inspected = data
+    if container == "AFC5":
+        try:
+            envelope = afc5.parse(data)
+            declared = envelope["original_length"]
+            embedded_sha = envelope["original_sha256"]
+            embedded_name = envelope["original_name"]
+            payload_container = envelope["payload_magic"]
+            inspected = envelope["payload"]
+            mode_name = "self-verifying AFC5 envelope around %s" % payload_container
+        except Exception as exc:
+            return jsonify(error="This AFC5 file has an invalid envelope: %s"
+                           % exc, container=container), 400
+    if payload_container in ("AFC3", "AFC4", "AFC6"):
         # Read the outer header itself. analysis.parse_container()
         # transparently unwraps to the INNER container, whose declared length
         # covers only the pooled components — comparing that against the whole
         # restored file would report a false integrity failure.
         try:
             import containers as _c
-            hi = _c.header_info(data)
-            declared = hi["original_length"]
-            if container == "AFC4":
-                mode_name = (
+            hi = _c.header_info(inspected)
+            if declared is None:
+                declared = hi["original_length"]
+            if payload_container == "AFC4":
+                component_mode = (
                     "component-aware DOCX XML (Hybrid-Huffman on %d source bytes)"
                     % hi["hybrid_input_bytes"])
                 component_note = (
@@ -497,8 +525,18 @@ def api_decompress():
                     "data preserved verbatim."
                     % (hi["segments"], f"{hi['xml_bytes']:,}",
                        f"{hi['recipe_bytes']:,}", f"{hi['opaque_bytes']:,}"))
+            elif payload_container == "AFC6":
+                component_mode = (
+                    "component-aware PDF Flate (Hybrid-Huffman on %d source bytes)"
+                    % hi["hybrid_input_bytes"])
+                component_note = (
+                    "%d components: %s B of PDF stream data reconstructed "
+                    "through %s B of exact zlib/DEFLATE-token recipes; %s B "
+                    "of encoded/high-entropy data preserved verbatim."
+                    % (hi["segments"], f"{hi['source_bytes']:,}",
+                       f"{hi['recipe_bytes']:,}", f"{hi['opaque_bytes']:,}"))
             else:
-                mode_name = (
+                component_mode = (
                     "component-aware (Hybrid-Huffman on %d of %d bytes)" % (
                         hi["pooled_bytes"],
                         hi["pooled_bytes"] + hi["opaque_bytes"]))
@@ -507,13 +545,18 @@ def api_decompress():
                     "already-compressed and preserved verbatim."
                     % (hi["segments"], f"{hi['pooled_bytes']:,}",
                        f"{hi['opaque_bytes']:,}"))
+            mode_name = ((mode_name + "; " + component_mode)
+                         if mode_name else component_mode)
         except Exception:
             pass
-    else:
+    elif payload_container in ("AFC1", "AFC2"):
         try:
-            meta = analysis.parse_container(data)
-            declared = meta.get("original_size")
-            mode_name = _MODE_NAMES.get(meta.get("mode"), "")
+            meta = analysis.parse_container(inspected)
+            if declared is None:
+                declared = meta.get("original_size")
+            payload_mode = _MODE_NAMES.get(meta.get("mode"), "")
+            mode_name = ((mode_name + "; " + payload_mode)
+                         if mode_name else payload_mode)
         except Exception:
             pass
 
@@ -533,11 +576,16 @@ def api_decompress():
     sha_restored = hashlib.sha256(restored).hexdigest()
     sha_container = hashlib.sha256(data).hexdigest()
 
-    # SHA-256 verification against a REAL reference. We only claim a match
-    # when this app recorded the original's digest at compress time; with no
-    # record we say so rather than inventing a verdict.
+    # AFC5 carries its own original digest. Bare legacy/component payloads use the
+    # account's compression-history record when one exists.
     ref = db.find_by_container_sha(g.user["id"], sha_container)
-    if ref is not None and ref["sha256_original"]:
+    if embedded_sha:
+        sha_match = (sha_restored == embedded_sha)
+        sha_status = "match" if sha_match else "mismatch"
+        sha_note = ("Matches the original SHA-256 stored inside AFC5."
+                    if sha_match else
+                    "DOES NOT match the original SHA-256 stored inside AFC5.")
+    elif ref is not None and ref["sha256_original"]:
         sha_match = (sha_restored == ref["sha256_original"])
         sha_status = "match" if sha_match else "mismatch"
         sha_note = ("Matches the SHA-256 recorded when this file was "
@@ -551,7 +599,7 @@ def api_decompress():
                     "SHA-256 is shown above; compare it with your source.")
 
     kind = filetypes.sniff(restored)
-    out_name = filetypes.restored_name(f.filename, restored)
+    out_name = embedded_name or filetypes.restored_name(f.filename, restored)
     token = _stash(out_name, restored, mimetype=kind["mime"])
 
     verified = bool(size_ok) and (sha_match is not False)
@@ -565,7 +613,8 @@ def api_decompress():
         kind="decompress",
         afc_name=f.filename, afc_bytes=len(data),
         restored_name=out_name, restored_bytes=len(restored),
-        container=container, container_mode=mode_name,
+        container=container, payload_container=payload_container,
+        container_mode=mode_name,
         declared_bytes=declared,
         ms=round(elapsed, 2), engine=engine_name(),
         integrity_ok=bool(size_ok),

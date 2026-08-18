@@ -38,6 +38,7 @@ import os
 import sys
 import time
 from collections import Counter
+from dataclasses import dataclass
 
 import afc
 from afc import (MODE_ADAPTIVE, NOCODE_COST, est_code_len, huffman_lengths,
@@ -73,6 +74,48 @@ OPTS = {
     "refund": True,   # (e) block-growth dictionary-refund scoring
     "tune": True,     # (d) per-file parameter tuning
 }
+
+
+@dataclass(frozen=True)
+class EngineOptions:
+    """Immutable per-call configuration for the reference/native engine.
+
+    The module globals above remain as a compatibility surface for the
+    historical benchmark scripts, but production callers pass this object.
+    That prevents one request's preset from changing another request while
+    preserving the exact legacy defaults and encoded bytes.
+    """
+
+    dp: bool = True
+    llhuff: bool = True
+    hdr2: bool = True
+    refund: bool = True
+    tune: bool = True
+    dp_rounds: int = DP_ROUNDS
+    merge_rounds_v4: int = MERGE_ROUNDS_V4
+    min_candidate_freq: int = MIN_CANDIDATE_FREQ
+
+    def __post_init__(self):
+        if self.dp_rounds < 0:
+            raise ValueError("dp_rounds must be non-negative")
+        if self.merge_rounds_v4 < 0:
+            raise ValueError("merge_rounds_v4 must be non-negative")
+        if self.min_candidate_freq < 2:
+            raise ValueError("min_candidate_freq must be at least 2")
+
+
+DEFAULT_OPTIONS = EngineOptions()
+
+
+def current_options() -> EngineOptions:
+    """Snapshot the legacy module settings into an immutable option set."""
+    return EngineOptions(
+        dp=bool(OPTS["dp"]), llhuff=bool(OPTS["llhuff"]),
+        hdr2=bool(OPTS["hdr2"]), refund=bool(OPTS["refund"]),
+        tune=bool(OPTS["tune"]), dp_rounds=int(DP_ROUNDS),
+        merge_rounds_v4=int(MERGE_ROUNDS_V4),
+        min_candidate_freq=int(MIN_CANDIDATE_FREQ),
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -345,12 +388,12 @@ def _final_audit(ids: list, patterns: list, lit_bits: list) -> tuple:
 # top level
 # -----------------------------------------------------------------------------
 
-def _default_fmt() -> str:
-    return "auto" if OPTS["hdr2"] else "afc1"
+def _default_fmt(options: EngineOptions) -> str:
+    return "auto" if options.hdr2 else "afc1"
 
 
-def _build_lengths(counts: Counter) -> dict:
-    if OPTS["llhuff"]:
+def _build_lengths(counts: Counter, options: EngineOptions) -> dict:
+    if options.llhuff:
         return package_merge_lengths(counts, afc.MAX_CODE_LEN)
     return huffman_lengths(counts)
 
@@ -363,18 +406,19 @@ def _build_lengths(counts: Counter) -> dict:
 _NATIVE_FIXED_OPTS = ("llhuff", "hdr2", "refund")
 
 
-def _native_params() -> dict:
+def _native_params(options: EngineOptions) -> dict:
     """The current tunables, in the shape afc_native.compress() expects.
 
     Mirrors exactly what the pure-Python path below computes, so the two
     backends stay byte-identical under every preset."""
     return {
-        "dp": OPTS["dp"],
-        "dp_rounds": DP_ROUNDS,
-        "merge_rounds": (MERGE_ROUNDS_V4 if (OPTS["tune"] and OPTS["refund"])
+        "dp": options.dp,
+        "dp_rounds": options.dp_rounds,
+        "merge_rounds": (options.merge_rounds_v4
+                         if (options.tune and options.refund)
                          else MERGE_ROUNDS),
-        "min_freq": MIN_CANDIDATE_FREQ,
-        "tune": OPTS["tune"],
+        "min_freq": options.min_candidate_freq,
+        "tune": options.tune,
     }
 
 
@@ -394,9 +438,22 @@ def _looks_like_container(data: bytes) -> bool:
 
 
 def compress_bytes(data: bytes, adaptive: bool = True,
-                   fmt: str = None, container_aware: bool = None) -> bytes:
+                   fmt: str = None, container_aware: bool = None,
+                   options: EngineOptions = None,
+                   backend: str = "auto") -> bytes:
+    """Compress bytes with an immutable per-call engine configuration.
+
+    ``backend`` is ``auto`` (prefer native), ``native`` (require it), or
+    ``python`` (reference implementation). Existing callers that omit both
+    new arguments retain the historical module-global behavior.
+    """
+    options = current_options() if options is None else options
+    if not isinstance(options, EngineOptions):
+        raise TypeError("options must be an EngineOptions instance")
+    if backend not in ("auto", "native", "python"):
+        raise ValueError("backend must be auto, native, or python")
     if fmt is None:
-        fmt = _default_fmt()
+        fmt = _default_fmt(options)
 
     # [v7] Structured containers get their components routed first. The
     # callback below is the PLAIN path (container_aware=False), which is what
@@ -410,14 +467,18 @@ def compress_bytes(data: bytes, adaptive: bool = True,
             blob, _info = containers.compress_container(
                 data, fmt=fmt,
                 compress_fn=lambda d, a=True, fmt=fmt: compress_bytes(
-                    d, a, fmt=fmt, container_aware=False))
+                    d, a, fmt=fmt, container_aware=False, options=options,
+                    backend=backend))
             if blob is not None:
                 return blob
         except Exception:
             pass          # any analysis problem falls back to the plain path
 
-    native_ok = (NATIVE and hasattr(_native, "compress")
+    native_ok = (backend != "python" and NATIVE
+                 and hasattr(_native, "compress")
                  and fmt in ("auto", "afc1", "afc2"))
+    if backend == "native" and not native_ok:
+        raise RuntimeError("native backend requested but unavailable")
     if not adaptive:
         if native_ok and len(data) > 0:
             return _native.compress(bytes(data), False, fmt)
@@ -425,49 +486,52 @@ def compress_bytes(data: bytes, adaptive: bool = True,
     if len(data) == 0:
         return emit_raw(data, afc.MAGIC2 if fmt == "afc2" else afc.MAGIC1)
 
-    if native_ok and all(OPTS[k] for k in _NATIVE_FIXED_OPTS):
+    fixed_enabled = (options.llhuff and options.hdr2 and options.refund)
+    if native_ok and fixed_enabled:
         if getattr(_native, "TUNABLE", False):
             # [v7] any preset, natively
             return _native.compress(bytes(data), True, fmt,
-                                    params=_native_params())
-        if all(OPTS.values()) and (DP_ROUNDS, MERGE_ROUNDS_V4,
-                                   MIN_CANDIDATE_FREQ) == (3, 6, 4):
+                                    params=_native_params(options))
+        if (options == DEFAULT_OPTIONS):
             # library predates afc_compress_ex: only the compiled-in defaults
             # can be honoured, so anything else falls through to Python.
             return _native.compress(bytes(data), True, fmt)
+    if backend == "native":
+        raise RuntimeError("native backend cannot represent these options")
 
-    rounds = MERGE_ROUNDS_V4 if (OPTS["tune"] and OPTS["refund"]) \
+    rounds = options.merge_rounds_v4 if (options.tune and options.refund) \
         else MERGE_ROUNDS
     lit_bits = _tier1_lit_bits(data)
-    blob = _compress_core(data, fmt, MIN_CANDIDATE_FREQ, rounds, lit_bits)
-    if OPTS["tune"] and len(data) < TUNE_SMALL:
+    blob = _compress_core(data, fmt, options.min_candidate_freq, rounds,
+                          lit_bits, options)
+    if options.tune and len(data) < TUNE_SMALL:
         # [v4] per-file tuning by trial: small files also try the lower
         # admission floor; the smaller container wins (ties keep the v3
         # setting, so tuning can never regress).
-        alt = _compress_core(data, fmt, MIN_CANDIDATE_FREQ - 1, rounds,
-                             lit_bits)
+        alt = _compress_core(data, fmt, options.min_candidate_freq - 1,
+                             rounds, lit_bits, options)
         if len(alt) < len(blob):
             blob = alt
     return blob
 
 
 def _compress_core(data: bytes, fmt: str, min_freq: int, rounds: int,
-                   lit_bits: list) -> bytes:
+                   lit_bits: list, options: EngineOptions) -> bytes:
     patterns = _select_candidates(data, min_freq, lit_bits)
     ids = _segment_greedy(data, patterns)
-    ids, patterns = _grow_blocks(ids, patterns, rounds, OPTS["refund"],
+    ids, patterns = _grow_blocks(ids, patterns, rounds, options.refund,
                                  min_freq)
     ids, patterns = _final_audit(ids, patterns, lit_bits)
 
-    if OPTS["dp"]:
+    if options.dp:
         # [v4] optimal parsing: iterate DP parse <-> tree over actual lengths
-        lengths = _build_lengths(Counter(ids))
-        for _ in range(DP_ROUNDS):
+        lengths = _build_lengths(Counter(ids), options)
+        for _ in range(options.dp_rounds):
             ids = _segment_optimal(data, patterns, lengths)
-            lengths = _build_lengths(Counter(ids))
+            lengths = _build_lengths(Counter(ids), options)
         ids, patterns = _final_audit(ids, patterns, lit_bits)
 
-    lengths = _build_lengths(Counter(ids))
+    lengths = _build_lengths(Counter(ids), options)
     codes = canonical_codes(lengths)
     bitstream = pack_ids(ids, codes)
     return finish_container(MODE_ADAPTIVE, data, patterns, lengths,
@@ -479,13 +543,20 @@ def decompress_bytes(blob: bytes) -> bytes:
     # container is never reinterpreted under a newer format and vice versa.
     # AFC1/AFC2 keep their exact existing decode path. AFC3 is the direct
     # component wrapper; AFC4 is the explicitly versioned DOCX XML/token
-    # wrapper. Dispatch happens before the native decoder sees either magic.
+    # wrapper; AFC6 is the PDF zlib/token wrapper. Dispatch happens before the
+    # native decoder sees any component magic.
+    if blob[:4] == b"AFC5":
+        import afc5
+        return afc5.decompress(blob, decompress_fn=decompress_bytes)
     if blob[:4] == b"AFC3":
         import containers
         return containers.decompress_afc3(blob, decompress_fn=decompress_bytes)
     if blob[:4] == b"AFC4":
         import containers
         return containers.decompress_afc4(blob, decompress_fn=decompress_bytes)
+    if blob[:4] == b"AFC6":
+        import containers
+        return containers.decompress_afc6(blob, decompress_fn=decompress_bytes)
     if NATIVE:
         try:
             return _native.decompress(bytes(blob))

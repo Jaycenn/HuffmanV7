@@ -13,7 +13,7 @@ boundaries. Every claim below is enforced by a test in `tests/test_app.py`.
 API:
 
 ```python
-afc2.compress_bytes(data, adaptive, fmt=...)   # -> AFC1/AFC2 (later AFC3/AFC4)
+afc2.compress_bytes(data, adaptive, fmt=...)   # -> AFC1/AFC2/AFC3/AFC4/AFC6
 afc2.decompress_bytes(blob)                    # -> original bytes
 ```
 
@@ -39,7 +39,7 @@ per-file AFC payloads concatenated. It performs no compression of its own.
   asserted by parsing the module's AST in
   `test_archive_no_deflate`, not by grepping (a grep false-positives on this
   very paragraph). A second test asserts every member payload begins with an
-  `AFC1`/`AFC2`/`AFC3`/`AFC4` magic, which would fail if a foreign codec were
+  `AFC1`/`AFC2`/`AFC3`/`AFC4`/`AFC6` magic, which would fail if a foreign codec were
   introduced.
 * **If someone later switches to `zipfile`**, it must be `ZIP_STORED`.
   `ZIP_DEFLATED` is LZ77 + Huffman and would silently violate the constraint.
@@ -262,3 +262,23 @@ V8 corrects the V7 limitation without adding another compressor.
 6. Exactness is checked at three levels: DEFLATE recipe bytes, ZIP member
    size/CRC, and complete-file byte equality plus SHA-256. The web flow still
    accepts one normal `.docx` and returns the exact original package.
+
+## 13. AFC 1.3 — self-verification and PDF Flate components
+
+1. AFC5 is a metadata/integrity envelope, not a codec. It stores the original
+   length/SHA-256, inner payload length/SHA-256 and safe basename around an AFC
+   payload. Legacy containers remain readable.
+2. AFC6 explicitly versions PDF zlib recipes; it does not reuse AFC4's raw ZIP
+   DEFLATE semantics. Old decoders reject the distinct magic cleanly.
+3. `deflate_tokens.transform_zlib()` parses an existing RFC-1950 stream and
+   retains its header, Adler-32 and exact DEFLATE token recipe. It imports no
+   compression library, searches for no matches and chooses no replacement
+   tree. `restore_zlib()` reproduces the original stream bytes.
+4. Only suitable textual PDF page/content, metadata or object streams are
+   considered. Images, fonts, unsupported filters, malformed inputs and
+   excessive expansions stay opaque and verbatim.
+5. AFC6 must beat the complete AFC3 and whole-file AFC results and must pass a
+   full byte comparison before automatic selection. A losing component trial
+   is reported as such and cannot inflate the user's output.
+6. Preset selection uses frozen per-call `EngineOptions`; concurrent web
+   requests never share mutable DP/search tuning.

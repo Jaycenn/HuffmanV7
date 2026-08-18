@@ -55,7 +55,7 @@ Two things, both measured in benchmarks/:
    parse entirely (see §29 of the brief: a fast path for incompressible data,
    not a new algorithm).
 
-THE AFC3 / AFC4 CONTAINERS
+THE AFC3 / AFC4 / AFC6 CONTAINERS
 -------------------------
     "AFC3"                     magic
     u8                         mode (3 = component-aware)
@@ -75,6 +75,13 @@ pooled/opaque segments and adds a transformed kind for method-8 XML members.
 The transformed source is ``plain XML | exact DEFLATE recipe`` inside the
 ordinary AFC1/AFC2 inner Hybrid-Huffman container. AFC4 is likewise emitted
 only when its final whole-file size beats every applicable older path.
+
+AFC6 is the explicitly versioned PDF extension. It uses the same manifest
+shape as AFC4, but transformed components are RFC-1950 zlib streams from
+eligible ``/FlateDecode`` page/content objects. Their expanded bytes and exact
+zlib/DEFLATE token recipe are pooled through Hybrid-Huffman. Images, fonts and
+unsupported/high-entropy streams remain verbatim. AFC6 is selected only after
+a complete-size comparison and exact byte verification.
 """
 import binascii
 import re
@@ -85,8 +92,10 @@ import afc
 
 MAGIC3 = b"AFC3"
 MAGIC4 = b"AFC4"
+MAGIC6 = b"AFC6"
 MODE_COMPONENT = 3
 MODE_COMPONENT_XML = 4
+MODE_COMPONENT_PDF = 6
 
 # Segment kinds
 OPAQUE = 0      # stored verbatim: already compressed or high entropy
@@ -147,6 +156,15 @@ MIN_XML_TRANSFORM_BYTES = 1024
 # that cannot plausibly beat a highly compact producer stream. This affects
 # routing only: declined bytes remain exact and take AFC3/plain comparison.
 MAX_XML_TRANSFORM_VIABILITY_RATIO = 4
+
+# PDF Flate streams use an RFC-1950 zlib wrapper around DEFLATE. The limits
+# mirror the DOCX bomb guard. A somewhat wider viability ratio is permitted
+# because many small page streams carry repeated operators that only become
+# useful after pooling across pages; the final whole-container comparison is
+# still authoritative.
+MAX_PDF_TRANSFORM_BYTES = 64 * 1024 * 1024
+MIN_PDF_TRANSFORM_BYTES = 256
+MAX_PDF_TRANSFORM_VIABILITY_RATIO = 8
 
 
 class Segment:
@@ -748,6 +766,105 @@ def describe_plan(data, segs=None):
             "components": by_label}
 
 
+def pdf_transform_plan(data):
+    """Return an exact tiling with suitable PDF Flate streams exposed.
+
+    PDF ``/FlateDecode`` normally wraps DEFLATE in RFC 1950. Only textual
+    page/content, metadata and object streams are admitted. The original zlib
+    header, Adler checksum and producer token choices live in the recipe, so
+    reconstruction never re-compresses or rewrites the PDF. Unsupported,
+    encrypted, image/font, malformed and excessive-expansion streams remain
+    opaque.
+    """
+    components = [c for c in pdf_components(data)
+                  if c["stream_start"] >= 0 and c["stream_end"] >
+                  c["stream_start"]]
+    if not components:
+        return None
+    try:
+        import deflate_tokens
+    except Exception:
+        return None
+
+    segs = []
+    cursor = 0
+    transformed_total = 0
+    transformed_count = 0
+    transform_kinds = {"page-content", "content-stream", "metadata",
+                       "objstm"}
+    for component in sorted(components, key=lambda row: row["stream_start"]):
+        start, end = component["stream_start"], component["stream_end"]
+        if start < cursor or end > len(data):
+            return None
+        if start > cursor:
+            segs.append(Segment(POOLED, cursor, start, "pdf-structure"))
+        payload = data[start:end]
+        label_base = "%s obj %d" % (component["kind"], component["obj"])
+        segment = None
+        eligible = (
+            component["filter"] == "/FlateDecode"
+            and component["kind"] in transform_kinds
+            and len(payload) >= MIN_PDF_TRANSFORM_BYTES
+            and transformed_total < MAX_PDF_TRANSFORM_BYTES)
+        if eligible:
+            try:
+                remaining = MAX_PDF_TRANSFORM_BYTES - transformed_total
+                plain, recipe = deflate_tokens.transform_zlib(
+                    payload, max_output=remaining)
+                if (not plain or b"\x00" in plain[:1024]
+                        or not _looks_textual(plain, probe=1024)):
+                    raise ValueError("expanded PDF stream is not textual")
+                if len(plain) + len(recipe) > max(
+                        1, len(payload) * MAX_PDF_TRANSFORM_VIABILITY_RATIO):
+                    raise ValueError("PDF transform exceeds viability ratio")
+                segment = Segment(
+                    TRANSFORMED, start, end,
+                    "pdf-flate-transformed:" + label_base,
+                    source=plain, recipe=recipe)
+                transformed_total += len(plain)
+                transformed_count += 1
+            except Exception:
+                segment = None
+
+        if segment is None:
+            if component["filter"]:
+                kind = OPAQUE
+                prefix = "pdf-filtered-preserved:"
+            else:
+                kind = _classify(payload, label_base)
+                prefix = "pdf-stream:" if kind == POOLED else \
+                    "pdf-highentropy-preserved:"
+            segment = Segment(kind, start, end, prefix + label_base)
+        segs.append(segment)
+        cursor = end
+
+    if cursor < len(data):
+        segs.append(Segment(POOLED, cursor, len(data), "pdf-structure"))
+    if not transformed_count:
+        return None
+    _validate_tiling(segs, len(data))
+    return segs
+
+
+def describe_pdf_transform(data, segs=None):
+    segs = segs if segs is not None else pdf_transform_plan(data)
+    if not segs:
+        return None
+    direct = sum(s.length for s in segs if s.kind == POOLED)
+    opaque = sum(s.length for s in segs if s.kind == OPAQUE)
+    transformed = [s for s in segs if s.kind == TRANSFORMED]
+    source = sum(len(s.source) for s in transformed)
+    recipes = sum(len(s.recipe) for s in transformed)
+    return {
+        "segments": len(segs), "direct_pooled_bytes": direct,
+        "opaque_bytes": opaque,
+        "transformed_flate_bytes": sum(s.length for s in transformed),
+        "source_bytes": source, "recipe_bytes": recipes,
+        "hybrid_input_bytes": direct + source + recipes,
+        "transformed_components": len(transformed),
+    }
+
+
 def docx_transform_plan(data):
     """Return an exact tiling with suitable deflated XML exposed for AFC4.
 
@@ -898,17 +1015,13 @@ def build_afc3(data, segs, fmt="auto", compress_fn=None):
     return bytes(out)
 
 
-def build_afc4(data, segs, fmt="auto", compress_fn=None):
-    """Serialise a DOCX transform plan as an AFC4 container.
-
-    Direct structural/STORED segments and every transformed member's plain
-    XML + exact recipe are concatenated into one Hybrid-Huffman input. Opaque
-    media/unsupported members remain byte-for-byte raw.
-    """
+def _build_transformed_container(data, segs, magic, mode, fmt="auto",
+                                 compress_fn=None):
+    """Serialise an exact transformed-component manifest."""
     compress_fn = compress_fn or afc2.compress_bytes
     _validate_tiling(segs, len(data))
     if not any(s.kind == TRANSFORMED for s in segs):
-        raise ValueError("AFC4 requires at least one transformed component")
+        raise ValueError("transformed container requires a transformed component")
     pooled_parts = []
     opaque_parts = []
     for s in segs:
@@ -921,14 +1034,14 @@ def build_afc4(data, segs, fmt="auto", compress_fn=None):
                 raise ValueError("transformed component lacks source/recipe")
             pooled_parts.extend((s.source, s.recipe))
         else:
-            raise ValueError("unknown AFC4 segment kind")
+            raise ValueError("unknown transformed segment kind")
 
     pooled = b"".join(pooled_parts)
     opaque = b"".join(opaque_parts)
     pooled_blob = compress_fn(pooled, True, fmt=fmt) if pooled else b""
 
-    out = bytearray(MAGIC4)
-    out.append(MODE_COMPONENT_XML)
+    out = bytearray(magic)
+    out.append(mode)
     _put_varint(out, len(data))
     _put_varint(out, len(segs))
     for s in segs:
@@ -943,6 +1056,25 @@ def build_afc4(data, segs, fmt="auto", compress_fn=None):
     return bytes(out)
 
 
+def build_afc4(data, segs, fmt="auto", compress_fn=None):
+    """Serialise a DOCX transform plan as an AFC4 container.
+
+    Direct structural/STORED segments and every transformed member's plain
+    XML + exact recipe are concatenated into one Hybrid-Huffman input. Opaque
+    media/unsupported members remain byte-for-byte raw.
+    """
+    return _build_transformed_container(
+        data, segs, MAGIC4, MODE_COMPONENT_XML, fmt=fmt,
+        compress_fn=compress_fn)
+
+
+def build_afc6(data, segs, fmt="auto", compress_fn=None):
+    """Serialise an exact PDF Flate transform plan as AFC6."""
+    return _build_transformed_container(
+        data, segs, MAGIC6, MODE_COMPONENT_PDF, fmt=fmt,
+        compress_fn=compress_fn)
+
+
 def is_afc3(blob):
     return len(blob) >= 5 and blob[:4] == MAGIC3
 
@@ -951,8 +1083,12 @@ def is_afc4(blob):
     return len(blob) >= 5 and blob[:4] == MAGIC4
 
 
+def is_afc6(blob):
+    return len(blob) >= 5 and blob[:4] == MAGIC6
+
+
 def header_info(blob):
-    """Read an AFC3/AFC4 header without decoding the payload.
+    """Read an AFC3/AFC4/AFC6 header without decoding the payload.
 
     Returns {original_length, segments, pooled_bytes, opaque_bytes}. The
     original_length here is the length of the WHOLE reconstructed file — not
@@ -960,10 +1096,11 @@ def header_info(blob):
     that report integrity must use this one, or they will compare a whole-file
     length against a pooled length and wrongly declare a mismatch.
     """
-    if not (is_afc3(blob) or is_afc4(blob)):
-        raise ValueError("not an AFC3/AFC4 container")
+    if not (is_afc3(blob) or is_afc4(blob) or is_afc6(blob)):
+        raise ValueError("not an AFC3/AFC4/AFC6 container")
     if (is_afc3(blob) and blob[4] != MODE_COMPONENT) or \
-            (is_afc4(blob) and blob[4] != MODE_COMPONENT_XML):
+            (is_afc4(blob) and blob[4] != MODE_COMPONENT_XML) or \
+            (is_afc6(blob) and blob[4] != MODE_COMPONENT_PDF):
         raise ValueError("unknown component-aware mode")
     pos = 5
     total, pos = _get_varint(blob, pos)
@@ -984,7 +1121,7 @@ def header_info(blob):
             hybrid_input += length
         elif kind == OPAQUE:
             opaque += length
-        elif kind == TRANSFORMED and is_afc4(blob):
+        elif kind == TRANSFORMED and (is_afc4(blob) or is_afc6(blob)):
             source_len, pos = _get_varint(blob, pos)
             recipe_len, pos = _get_varint(blob, pos)
             if source_len <= 0 or recipe_len <= 0:
@@ -1004,12 +1141,13 @@ def header_info(blob):
             "pooled_bytes": pooled + transformed,
             "direct_pooled_bytes": pooled, "opaque_bytes": opaque,
             "transformed_bytes": transformed, "xml_bytes": xml,
+            "source_bytes": xml,
             "recipe_bytes": recipes, "hybrid_input_bytes": hybrid_input}
 
 
 def inner_container(blob):
-    """Return the ordinary AFC1/AFC2 payload inside AFC3 or AFC4."""
-    if not (is_afc3(blob) or is_afc4(blob)):
+    """Return the ordinary AFC1/AFC2 payload inside AFC3/AFC4/AFC6."""
+    if not (is_afc3(blob) or is_afc4(blob) or is_afc6(blob)):
         return blob
     pos = 5
     _total, pos = _get_varint(blob, pos)
@@ -1018,7 +1156,8 @@ def inner_container(blob):
         raise ValueError("unreasonable component count")
     for _ in range(count):
         value, pos = _get_varint(blob, pos)
-        if is_afc4(blob) and (value & 3) == TRANSFORMED:
+        if (is_afc4(blob) or is_afc6(blob)) and \
+                (value & 3) == TRANSFORMED:
             _source, pos = _get_varint(blob, pos)
             _recipe, pos = _get_varint(blob, pos)
     opaque_len, pos = _get_varint(blob, pos)
@@ -1093,13 +1232,15 @@ def decompress_afc3(blob, decompress_fn=None):
     return bytes(out)
 
 
-def decompress_afc4(blob, decompress_fn=None):
-    """Rebuild a byte-identical OOXML package from an AFC4 container."""
+def _decompress_transformed_container(blob, magic, mode, recipe_kind,
+                                      decompress_fn=None):
+    """Decode AFC4/AFC6 while dispatching the versioned recipe syntax."""
     decompress_fn = decompress_fn or afc2.decompress_bytes
-    if not is_afc4(blob):
-        raise ValueError("not an AFC4 container")
-    if blob[4] != MODE_COMPONENT_XML:
-        raise ValueError("unknown AFC4 mode %d" % blob[4])
+    name = magic.decode("ascii")
+    if len(blob) < 5 or blob[:4] != magic:
+        raise ValueError("not an %s container" % name)
+    if blob[4] != mode:
+        raise ValueError("unknown %s mode %d" % (name, blob[4]))
     try:
         import deflate_tokens
     except Exception as exc:
@@ -1109,45 +1250,45 @@ def decompress_afc4(blob, decompress_fn=None):
     total, pos = _get_varint(blob, pos)
     count, pos = _get_varint(blob, pos)
     if count > len(blob):
-        raise ValueError("unreasonable AFC4 component count")
+        raise ValueError("unreasonable %s component count" % name)
     segs = []
     want_opaque = want_pooled = 0
     for _ in range(count):
         value, pos = _get_varint(blob, pos)
         kind, original_len = value & 3, value >> 2
         if original_len <= 0:
-            raise ValueError("empty AFC4 component")
+            raise ValueError("empty %s component" % name)
         source_len = recipe_len = 0
         if kind == TRANSFORMED:
             source_len, pos = _get_varint(blob, pos)
             recipe_len, pos = _get_varint(blob, pos)
             if source_len <= 0 or recipe_len <= 0:
-                raise ValueError("empty AFC4 transformed source/recipe")
+                raise ValueError("empty %s transformed source/recipe" % name)
             want_pooled += source_len + recipe_len
         elif kind == POOLED:
             want_pooled += original_len
         elif kind == OPAQUE:
             want_opaque += original_len
         else:
-            raise ValueError("unknown AFC4 component kind")
+            raise ValueError("unknown %s component kind" % name)
         segs.append((kind, original_len, source_len, recipe_len))
     if sum(s[1] for s in segs) != total:
-        raise ValueError("AFC4 component lengths do not match original")
+        raise ValueError("%s component lengths do not match original" % name)
 
     opaque_len, pos = _get_varint(blob, pos)
     if opaque_len != want_opaque:
-        raise ValueError("AFC4 opaque length mismatch")
+        raise ValueError("%s opaque length mismatch" % name)
     opaque = blob[pos:pos + opaque_len]
     if len(opaque) != opaque_len:
-        raise ValueError("truncated AFC4 opaque region")
+        raise ValueError("truncated %s opaque region" % name)
     pos += opaque_len
     pooled_len, pos = _get_varint(blob, pos)
     pooled_blob = blob[pos:pos + pooled_len]
     if len(pooled_blob) != pooled_len or pos + pooled_len != len(blob):
-        raise ValueError("truncated or trailing AFC4 pooled region")
+        raise ValueError("truncated or trailing %s pooled region" % name)
     pooled = decompress_fn(pooled_blob) if pooled_len else b""
     if len(pooled) != want_pooled:
-        raise ValueError("AFC4 pooled reconstruction length mismatch")
+        raise ValueError("%s pooled reconstruction length mismatch" % name)
 
     out = bytearray()
     po = oo = 0
@@ -1155,13 +1296,13 @@ def decompress_afc4(blob, decompress_fn=None):
         if kind == OPAQUE:
             chunk = opaque[oo:oo + original_len]
             if len(chunk) != original_len:
-                raise ValueError("truncated AFC4 opaque component")
+                raise ValueError("truncated %s opaque component" % name)
             out += chunk
             oo += original_len
         elif kind == POOLED:
             chunk = pooled[po:po + original_len]
             if len(chunk) != original_len:
-                raise ValueError("truncated AFC4 direct component")
+                raise ValueError("truncated %s direct component" % name)
             out += chunk
             po += original_len
         else:
@@ -1170,14 +1311,31 @@ def decompress_afc4(blob, decompress_fn=None):
             recipe = pooled[po:po + recipe_len]
             po += recipe_len
             if len(source) != source_len or len(recipe) != recipe_len:
-                raise ValueError("truncated AFC4 transformed component")
-            raw = deflate_tokens.restore(source, recipe)
+                raise ValueError("truncated %s transformed component" % name)
+            if recipe_kind == "zlib":
+                raw = deflate_tokens.restore_zlib(source, recipe)
+            else:
+                raw = deflate_tokens.restore(source, recipe)
             if len(raw) != original_len:
-                raise ValueError("AFC4 transformed length mismatch")
+                raise ValueError("%s transformed length mismatch" % name)
             out += raw
     if (len(out) != total or po != len(pooled) or oo != len(opaque)):
-        raise ValueError("AFC4 reconstruction length mismatch")
+        raise ValueError("%s reconstruction length mismatch" % name)
     return bytes(out)
+
+
+def decompress_afc4(blob, decompress_fn=None):
+    """Rebuild a byte-identical OOXML package from an AFC4 container."""
+    return _decompress_transformed_container(
+        blob, MAGIC4, MODE_COMPONENT_XML, "raw",
+        decompress_fn=decompress_fn)
+
+
+def decompress_afc6(blob, decompress_fn=None):
+    """Rebuild a byte-identical PDF from an AFC6 container."""
+    return _decompress_transformed_container(
+        blob, MAGIC6, MODE_COMPONENT_PDF, "zlib",
+        decompress_fn=decompress_fn)
 
 
 # ---------------------------------------------------------------------------
@@ -1185,16 +1343,18 @@ def decompress_afc4(blob, decompress_fn=None):
 # ---------------------------------------------------------------------------
 
 def compress_container(data, fmt="auto", compress_fn=None, verify=True):
-    """Try AFC3/AFC4 component paths and return the smallest whole result.
+    """Try AFC3/AFC4/AFC6 paths and return the smallest whole result.
 
     AFC3 directly pools structural/unfiltered bytes while preserving encoded
     payloads. For ZIP/OOXML, AFC4 additionally tries the exact XML/token
-    transform. Neither candidate is emitted merely because a component got
-    smaller: the final wrapper must beat the unchanged whole-file AFC1/AFC2
-    path. Every candidate is byte-verified before it can be selected.
+    transform. For PDF, AFC6 exposes suitable zlib-wrapped Flate streams using
+    their exact producer token recipes. No candidate is emitted merely because
+    a component got smaller: the final wrapper must beat the unchanged
+    whole-file AFC1/AFC2 path. Every candidate is byte-verified first.
     """
     info = {"applied": False, "reason": "", "afc3_bytes": 0,
-            "afc4_bytes": 0, "plain_bytes": 0, "selected_magic": ""}
+            "afc4_bytes": 0, "afc6_bytes": 0, "plain_bytes": 0,
+            "selected_magic": ""}
     compress_fn = compress_fn or afc2.compress_bytes
     try:
         segs = plan(data)
@@ -1247,6 +1407,26 @@ def compress_container(data, fmt="auto", compress_fn=None, verify=True):
                 notes.append("no eligible exact DOCX XML transforms")
         except Exception as exc:
             notes.append("AFC4 declined: %s" % exc)
+
+    # AFC6 is a distinct version because its transformed recipe is an RFC-1950
+    # zlib stream, not AFC4's raw ZIP-member DEFLATE. Complete-size comparison
+    # and byte verification remain mandatory.
+    if data.startswith(b"%PDF-"):
+        try:
+            tplan = pdf_transform_plan(data)
+            if tplan:
+                tstats = describe_pdf_transform(data, tplan)
+                info.update({"pdf_" + k: v for k, v in tstats.items()})
+                afc6_blob = build_afc6(data, tplan, fmt=fmt,
+                                       compress_fn=compress_fn)
+                info["afc6_bytes"] = len(afc6_blob)
+                if verify and decompress_afc6(afc6_blob) != data:
+                    raise ValueError("AFC6 byte comparison failed")
+                candidates.append(afc6_blob)
+            else:
+                notes.append("no eligible exact PDF Flate transforms")
+        except Exception as exc:
+            notes.append("AFC6 declined: %s" % exc)
 
     if not candidates:
         info["reason"] = "; ".join(notes) or "no component candidate"
