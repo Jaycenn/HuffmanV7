@@ -355,7 +355,15 @@ afc2.NATIVE   # True when the C++ core is active
 ## Build
 
 The native library is **optional** — everything works in pure Python without
-it. `afc_native.py` tries to build it once automatically if `g++` is on PATH.
+it. A verified, static 64-bit Windows build now ships as `afc_kernels.dll`, so
+the normal Windows x64/Python x64 checkout uses C++ immediately even when no
+compiler is installed. Its provenance, exports, dependencies and SHA-256 are
+recorded in `NATIVE_WINDOWS_X64.md`.
+
+On other platforms, or when the prebuilt artifact does not match Python's
+architecture, `afc_native.py` tries to build the library once automatically
+with `g++`, `clang++` or MSVC and otherwise falls back to the Python reference.
+Run `python -m afc_native --diagnose` to verify the backend actually loaded.
 
 ### Linux / macOS
 

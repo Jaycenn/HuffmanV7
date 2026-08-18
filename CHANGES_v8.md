@@ -16,6 +16,17 @@ loader built a 64-bit static DLL, loaded it, found `afc_compress_ex`, and
 reported Fast/Balanced/Maximum as C++ native. This was an environment/build
 availability issue, not an algorithm or preset-routing defect.
 
+### 1.2.1 Windows deployment patch
+
+The audit build originally remained an ignored local artifact. A clean Windows
+checkout without a compiler could therefore reproduce the old pure-Python
+timings even though the native implementation itself had passed. Version
+1.2.1 includes the verified static x64 `afc_kernels.dll` beside
+`afc_native.py`. It loads without MinGW on `PATH`; unsupported architectures
+still receive the existing diagnostic build/fallback behavior. See
+`NATIVE_WINDOWS_X64.md` for the reproducible command, imports, exports and
+SHA-256. No algorithm source changed in this deployment patch.
+
 Measured on `benchmarks/large/dickens_surrogate.txt` (10,437,251 bytes), median
 of three native runs; raw CSV: `benchmarks/v8_dickens_native.csv`:
 
