@@ -267,7 +267,16 @@
         + 'speed differs.</span>';
       n.classList.remove("hidden");
     }
-    $("rContainer").textContent = (j.container || "") + " container"
+    // AFC5 is the integrity envelope, not the component-routing decision.
+    // Show both layers so a PDF/DOCX result makes the winning AFC3/AFC4/AFC6
+    // payload visible instead of presenting every new file as merely AFC5.
+    var route = j.container || "";
+    if (j.payload_container && j.payload_container !== j.container) {
+      route += " envelope \u2192 " + j.payload_container + " payload";
+    } else {
+      route += " container";
+    }
+    $("rContainer").textContent = route
       + (j.preset ? " \u00b7 " + j.preset + " preset" : "");
     $("rVerify").innerHTML = j.lossless
       ? '<span class="text-green-700 font-semibold">✓ VERIFIED — lossless '
