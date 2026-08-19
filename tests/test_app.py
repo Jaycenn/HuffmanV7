@@ -20,6 +20,7 @@ import ast
 import hashlib
 import io
 import os
+import shutil
 import sys
 import tempfile
 
@@ -50,6 +51,10 @@ def make_app():
     os.close(fd)
     os.remove(path)
     config.DATABASE_PATH = path
+    # Isolate durable files before importing app: app.py creates its default
+    # application at import time, so setting only the DB here could otherwise
+    # pair a disposable database with the real result directory.
+    config.RESULT_STORAGE_DIR = path + ".results"
     for mod in ("app", "db", "auth", "admin"):
         sys.modules.pop(mod, None)
     import app as appmod
@@ -80,16 +85,18 @@ def corpus_files(limit=4):
 def test_auth(app, appmod):
     c = app.test_client()
 
-    # anonymous users can inspect the landing page, but protected workspaces
-    # still redirect to sign in.
+    # Anonymous visitors see the genuine app shell, while work endpoints stay
+    # server-gated.
     r = c.get("/", follow_redirects=False)
-    check("anonymous reaches public landing page",
-          r.status_code == 200 and b"Structura" in r.data
-          and b"Sign in to compress" in r.data, r.status_code)
+    check("anonymous reaches real ByteSize interface",
+          r.status_code == 200 and b"ByteSize" in r.data
+          and b'id="sDrop"' in r.data
+          and b"Preview" in r.data, r.status_code)
     r = c.get("/compress", follow_redirects=False)
-    check("anonymous cannot use compression workspace",
-          r.status_code in (301, 302) and "/login" in r.headers.get("Location", ""),
-          r.status_code)
+    check("anonymous can inspect compression workspace",
+          r.status_code == 200 and b'id="sRun"' in r.data, r.status_code)
+    check("anonymous compression action remains server-gated",
+          c.post("/api/compress").status_code == 401)
 
     # register
     r = c.post("/register", data={"username": "alice", "email": "a@b.co",
@@ -105,7 +112,7 @@ def test_auth(app, appmod):
     c.post("/logout")
     r = c.get("/", follow_redirects=False)
     check("logout returns to public landing page",
-          r.status_code == 200 and b"Sign in to compress" in r.data)
+          r.status_code == 200 and b"sign in to compress" in r.data)
 
     # wrong password rejected
     r = login(c, "alice", "WRONG")
@@ -197,11 +204,27 @@ def test_role_gate(app):
     r = c.get("/admin/audit", follow_redirects=False)
     check("non-admin gets 403 on audit route", r.status_code == 403,
           r.status_code)
+    check("non-admin gets 403 on account deletion",
+          c.post("/admin/users/1/delete").status_code == 403)
+    check("non-admin gets 403 on account state change",
+          c.post("/admin/users/1/active", data={"active": "0"}).status_code
+          == 403)
 
     admin_c = app.test_client()
     login(admin_c, config.DEFAULT_ADMIN_USERNAME, "admin-new-password")
     r = admin_c.get("/admin/users")
     check("admin reaches admin route", r.status_code == 200, r.status_code)
+
+    # Disabling an account invalidates an already-issued session immediately.
+    import db
+    with app.app_context():
+        alice_id = db.get_user_by_username("alice")["id"]
+    check("admin can disable a user",
+          admin_c.post("/admin/users/%d/active" % alice_id,
+                       data={"active": "0"}).status_code in (301, 302))
+    check("disabled account loses its existing session",
+          c.get("/settings", follow_redirects=False).status_code in (301, 302))
+    admin_c.post("/admin/users/%d/active" % alice_id, data={"active": "1"})
 
 
 def test_single_roundtrip(app):
@@ -273,6 +296,9 @@ def test_archive(app):
     blob = c.get("/download/" + j["token"]).data
     check("archive uses the %s magic" % config.ARCHIVE_EXT,
           afcpak.is_archive(blob))
+    durable = c.get("/files/%d/download" % j["history_id"])
+    check("created archive is durably re-downloadable",
+          durable.status_code == 200 and durable.data == blob)
 
     # every member payload must itself be an AFC container — proves no other
     # compressor was introduced anywhere in the packaging path
@@ -302,6 +328,47 @@ def test_archive(app):
         if hashlib.sha256(got).digest() != hashlib.sha256(original).digest():
             ok = False
     check("archive members SHA-256 round trip + folder paths preserved", ok)
+
+    # A caller-controlled normal batch id may equal the returned archive id.
+    # Archive deletion must follow the parent FK, never a broad batch-id delete.
+    collision = c.post("/api/batch", data={
+        "file": (io.BytesIO(b"unrelated batch result " * 80), "separate.txt"),
+        "batch_id": j["batch_id"]}).get_json()
+    check("colliding ordinary batch result is accepted",
+          collision.get("lossless") and collision.get("history_id"), collision)
+    import db
+    with app.app_context():
+        alice_id = db.get_user_by_username("alice")["id"]
+        before = db.get_db().execute(
+            "SELECT COUNT(*) AS n FROM compression_history WHERE batch_id = ?",
+            (j["batch_id"],)).fetchone()["n"]
+        stats_before = db.history_stats(alice_id)["files"]
+        stored = db.get_stored_artifact(j["history_id"])
+        disk_path = os.path.join(config.RESULT_STORAGE_DIR,
+                                 stored["storage_key"])
+    report_before = c.get("/report.csv?batch_id=" + j["batch_id"]).data
+    deleted = c.post("/files/%d/delete" % j["history_id"],
+                     follow_redirects=False)
+    with app.app_context():
+        after = db.get_db().execute(
+            "SELECT COUNT(*) AS n FROM compression_history WHERE batch_id = ?",
+            (j["batch_id"],)).fetchone()["n"]
+        stats_after = db.history_stats(alice_id)["files"]
+    report_after = c.get("/report.csv?batch_id=" + j["batch_id"]).data
+    check("deleting an archive removes only its summary, children, and blob",
+          before == len(payload) + 2 and after == 1
+          and stats_before - stats_after == 1
+          and deleted.status_code in (301, 302)
+          and not os.path.exists(disk_path)
+          and c.get("/files/%d/download" % collision["history_id"]).status_code
+              == 200, (before, after))
+    check("batch collision remains in statistics and reports",
+          b"testpak.afcpak" in report_before
+          and b"separate.txt" in report_before
+          and b"testpak.afcpak" not in report_after
+          and b"separate.txt" in report_after,
+          (report_before, report_after))
+    c.post("/files/%d/delete" % collision["history_id"])
 
 
 def test_archive_no_deflate():
@@ -432,16 +499,19 @@ def test_reports(app):
     check("CSV report contains a TOTAL row", b"TOTAL" in r.data)
     r = c.get("/report.pdf")
     check("PDF (print view) renders", r.status_code == 200
-          and b"Structura" in r.data and b"Compression report" in r.data,
+          and b"ByteSize" in r.data and b"Compression report" in r.data,
           r.status_code)
-    check("report omits academic and version branding",
-          b"HOLY ANGEL" not in r.data and config.ENGINE_VERSION.encode() not in r.data)
+    check("PDF report carries academic title but no version branding",
+          b"Adaptive File Compression System Using Multi-Level" in r.data
+          and b"HOLY ANGEL" not in r.data
+          and config.ENGINE_VERSION.encode() not in r.data)
 
 
 def test_pages_render(app):
     c = app.test_client()
     login(c, "alice", "correct-horse")
-    for path in ("/", "/compress", "/files", "/settings"):
+    for path in ("/", "/compress", "/decompress", "/files", "/about",
+                 "/settings"):
         r = c.get(path)
         if not check("page renders: %s" % path, r.status_code == 200,
                      r.status_code):
@@ -455,94 +525,670 @@ def test_pages_render(app):
           human(config.MAX_FILE_SIZE))
 
 
+def test_public_shell_and_action_gates(app):
+    c = app.test_client()
+    for path in ("/", "/compress", "/decompress", "/files", "/about"):
+        r = c.get(path)
+        check("public app page renders: %s" % path,
+              r.status_code == 200 and b"ByteSize" in r.data, r.status_code)
+
+    root = c.get("/").data
+    check("root is the real Compress screen, not a mockup",
+          b'id="sDrop"' in root and b'id="sPreset"' in root
+          and b"Preview" in root)
+    files = c.get("/files").data
+    check("public Files view has a genuine empty state",
+          b"Sign in to see your compressed files" in files
+          and b"alice29.txt" not in files)
+
+    api_actions = [
+        ("POST", "/api/compress"), ("POST", "/api/decompress"),
+        ("POST", "/api/batch"), ("POST", "/api/archive/create"),
+        ("POST", "/api/archive/extract"), ("GET", "/api/history"),
+        ("GET", "/api/history/search"), ("GET", "/api/stats"),
+        ("POST", "/api/preview"), ("POST", "/api/entropy"),
+        ("GET", "/api/tree/not-a-token"), ("GET", "/api/presets"),
+        ("GET", "/api/status"),
+    ]
+    for method, path in api_actions:
+        status = c.open(path, method=method).status_code
+        check("anonymous API denied: %s %s" % (method, path),
+              status == 401, status)
+
+    browser_actions = [
+        ("GET", "/download/not-a-token"), ("GET", "/report.csv"),
+        ("GET", "/report.pdf"), ("GET", "/files/1/download"),
+        ("POST", "/files/1/delete"),
+        ("POST", "/admin/users/1/delete"),
+        ("POST", "/admin/users/1/active"),
+    ]
+    for method, path in browser_actions:
+        r = c.open(path, method=method, follow_redirects=False)
+        check("anonymous browser action redirects: %s %s" % (method, path),
+              r.status_code in (301, 302)
+              and "/login" in r.headers.get("Location", ""), r.status_code)
+
+    check("public config exposes durable-storage policy",
+          c.get("/api/config").get_json()["result_retention_days"]
+          == config.RESULT_RETENTION_DAYS
+          and c.get("/api/config").get_json()["max_stored_bytes_per_user"]
+          == config.MAX_STORED_BYTES_PER_USER)
+    check("public report links preserve their attempted destination in JS",
+          b"attempted.pathname + attempted.search" in c.get("/files").data)
+
+
+def test_intended_destination_preserved(app):
+    c = app.test_client()
+    attempt = c.get("/report.csv?batch_id=return-here",
+                    follow_redirects=False)
+    location = attempt.headers.get("Location", "")
+    r = c.post(location, data={"username": "alice",
+                               "password": "correct-horse"},
+               follow_redirects=False)
+    check("login returns to complete intended destination",
+          r.headers.get("Location") == "/report.csv?batch_id=return-here",
+          r.headers.get("Location"))
+
+    c2 = app.test_client()
+    r = c2.post("/register?next=/files", data={
+        "username": "returner", "email": "returner@example.com",
+        "password": "return-password", "confirm": "return-password",
+        "next": "/files"}, follow_redirects=False)
+    check("registration returns to intended destination",
+          r.status_code in (301, 302)
+          and r.headers.get("Location") == "/files", r.headers.get("Location"))
+
+    import auth
+    bad_targets = ("https://evil.example/", "//evil.example/", "\\evil")
+    check("external and backslash next targets are rejected",
+          all(auth.safe_next(target) == "" for target in bad_targets))
+    c3 = app.test_client()
+    r = c3.post("/register?next=https://evil.example/", data={
+        "username": "safereturn", "email": "safe-return@example.com",
+        "password": "return-password", "confirm": "return-password"},
+        follow_redirects=False)
+    check("registration cannot redirect to another origin",
+          r.status_code in (301, 302)
+          and r.headers.get("Location") == "/", r.headers.get("Location"))
+
+
+def test_branding_and_about_evidence(app):
+    import csv as _csv
+    c = app.test_client()
+    for path in ("/", "/compress", "/decompress", "/files", "/about",
+                 "/login", "/register"):
+        body = c.get(path).data
+        check("ByteSize brand renders: %s" % path, b"ByteSize" in body)
+        check("institution and versions absent: %s" % path,
+              b"Holy Angel University" not in body
+              and b"School of Computing" not in body
+              and config.APP_VERSION.encode() not in body
+              and config.ENGINE_VERSION.encode() not in body)
+
+    standalone = open(os.path.join(ROOT, "AFC_WebApp.html"),
+                      encoding="utf-8").read()
+    check("standalone UI is rebranded",
+          "ByteSize" in standalone and "Holy Angel University" not in standalone
+          and "School of Computing" not in standalone
+          and "afc_engine.js v4" not in standalone)
+
+    about = c.get("/about").data.decode("utf-8")
+    check("academic title appears on About",
+          "Adaptive File Compression System Using Multi-Level" in about)
+    check("About states all three pipeline stages",
+          all(term in about for term in (
+              "Multi-tier frequency scan", "Bit Cost Decision Engine",
+              "Hybrid Huffman encoding")))
+    for suite in ("canterbury", "silesia"):
+        name = "afc_1_3_%s_native_summary.csv" % suite
+        path = os.path.join(ROOT, "benchmarks", name)
+        with open(path, newline="", encoding="utf-8") as handle:
+            rows = [r for r in _csv.DictReader(handle)
+                    if r["preset"] == "balanced"]
+        original = sum(int(r["original_bytes"]) for r in rows)
+        compressed = sum(int(r["compressed_bytes"]) for r in rows)
+        saved = 100.0 * (1.0 - compressed / original)
+        check("About %s numbers trace to CSV" % suite,
+              format(original, ",") in about
+              and format(compressed, ",") in about
+              and ("%.2f%%" % saved) in about
+              and ("benchmarks/" + name) in about)
+    check("document claim distinguishes both component classes",
+          "internally uncompressed" in about
+          and "producer-compressed" in about
+          and "no general compression-percentage claim" in about)
+
+
+def test_analytics_routes_removed(app):
+    c = app.test_client()
+    login(c, "alice", "correct-horse")
+    for path in ("/analytics", "/api/analytics/summary",
+                 "/api/analytics/extensions", "/api/analytics/timeseries"):
+        check("analytics route removed: %s" % path,
+              c.get(path).status_code == 404)
+
+
+def _compress_for_storage(client, name="durable.txt"):
+    data = (b"durable hybrid huffman result\n" * 400)
+    response = client.post("/api/compress", data={
+        "file": (io.BytesIO(data), name), "preset": "fast"})
+    return response, data
+
+
+def test_persistent_artifact_access(app, appmod):
+    import db
+    c = app.test_client()
+    login(c, "alice", "correct-horse")
+    response, _ = _compress_for_storage(c)
+    result = response.get_json()
+    check("compressed result is durably recorded",
+          response.status_code == 200 and result.get("history_id")
+          and result.get("stored_download"), result)
+    row_id = result["history_id"]
+    transient = c.get("/download/" + result["token"]).data
+    with app.app_context():
+        stored = db.get_stored_artifact(row_id)
+        disk_path = os.path.join(config.RESULT_STORAGE_DIR,
+                                 stored["storage_key"])
+    check("compressed artifact exists outside static storage",
+          os.path.isfile(disk_path)
+          and os.path.commonpath([os.path.abspath(disk_path),
+                                  os.path.abspath(config.RESULT_STORAGE_DIR)])
+              == os.path.abspath(config.RESULT_STORAGE_DIR)
+          and "static" not in os.path.relpath(
+              disk_path, ROOT).replace("\\", "/").split("/"))
+
+    # Memory is deliberately insufficient: the durable route must still work.
+    appmod.RESULTS.clear()
+    durable = c.get("/files/%d/download" % row_id)
+    check("owner can download after transient cache is cleared",
+          durable.status_code == 200 and durable.data == transient,
+          durable.status_code)
+
+    restarted = appmod.create_app(
+        db_path=config.DATABASE_PATH, testing=True,
+        storage_dir=config.RESULT_STORAGE_DIR)
+    restarted.secret_key = "restart-key"
+    owner = restarted.test_client()
+    login(owner, "alice", "correct-horse")
+    after_restart = owner.get("/files/%d/download" % row_id)
+    check("stored download survives application restart",
+          after_restart.status_code == 200
+          and after_restart.data == transient, after_restart.status_code)
+
+    other = restarted.test_client()
+    login(other, "bob", "bob-password-1")
+    check("other user receives 404 for stored row",
+          other.get("/files/%d/download" % row_id).status_code == 404)
+    anonymous = restarted.test_client()
+    check("anonymous stored download is rejected",
+          anonymous.get("/files/%d/download" % row_id,
+                        follow_redirects=False).status_code in (301, 302))
+    admin_client = restarted.test_client()
+    login(admin_client, config.DEFAULT_ADMIN_USERNAME, "admin-new-password")
+    check("administrator may retrieve a stored artifact",
+          admin_client.get("/files/%d/download" % row_id).status_code == 200)
+
+    with open(disk_path, "ab") as handle:
+        handle.write(b"tampered")
+    corrupt = owner.get("/files/%d/download" % row_id)
+    check("tampered artifact is refused before download",
+          corrupt.status_code == 409 and b"SHA-256" in corrupt.data,
+          corrupt.status_code)
+    with restarted.app_context():
+        check("integrity failure is recorded",
+              db.get_stored_artifact(row_id)["integrity_status"] == "corrupt")
+
+    deleted = owner.post("/files/%d/delete" % row_id,
+                         follow_redirects=False)
+    check("owner can delete stored artifact from Files route",
+          deleted.status_code in (301, 302) and not os.path.exists(disk_path))
+    check("deleted artifact history no longer resolves",
+          owner.get("/files/%d/download" % row_id).status_code == 404)
+
+
+def test_storage_quota_and_transient_restore(app):
+    import db
+    c = app.test_client()
+    login(c, "alice", "correct-horse")
+    first, source = _compress_for_storage(c, "transient-check.txt")
+    result = first.get_json()
+    blob = c.get("/download/" + result["token"]).data
+    with app.app_context():
+        before_restore = db.stored_bytes_for_user(gid := db.get_user_by_username("alice")["id"])
+    restored = c.post("/api/decompress", data={
+        "file": (io.BytesIO(blob), "transient-check.txt.afc")})
+    with app.app_context():
+        after_restore = db.stored_bytes_for_user(gid)
+    check("decompressed original is not persisted",
+          restored.status_code == 200 and before_restore == after_restore)
+
+    old_limit = config.MAX_STORED_BYTES_PER_USER
+    try:
+        config.MAX_STORED_BYTES_PER_USER = before_restore + 1
+        with app.app_context():
+            rows_before = len(db.list_history(gid, limit=10000))
+        denied, _ = _compress_for_storage(c, "over-quota.txt")
+        with app.app_context():
+            rows_after = len(db.list_history(gid, limit=10000))
+        body = denied.get_json()
+        check("quota refuses new result without eviction",
+              denied.status_code == 507 and body.get("quota_exceeded")
+              and "Files" in body.get("error", "")
+              and rows_before == rows_after, body)
+    finally:
+        config.MAX_STORED_BYTES_PER_USER = old_limit
+
+
+def test_missing_artifact_is_not_reported_verified(app, appmod):
+    import db
+    c = app.test_client()
+    login(c, "alice", "correct-horse")
+    response, _ = _compress_for_storage(c, "missing-result.txt")
+    row_id = response.get_json()["history_id"]
+    with app.app_context():
+        item = db.get_stored_artifact(row_id)
+        path = os.path.join(config.RESULT_STORAGE_DIR, item["storage_key"])
+    os.remove(path)
+    restarted = appmod.create_app(
+        db_path=config.DATABASE_PATH, testing=True,
+        storage_dir=config.RESULT_STORAGE_DIR)
+    owner = restarted.test_client()
+    login(owner, "alice", "correct-horse")
+    page = owner.get("/files").data
+    # The row content is populated by the JSON endpoint; verify both the stored
+    # status and the renderer's non-verified branch.
+    with restarted.app_context():
+        status = db.get_stored_artifact(row_id)["integrity_status"]
+    check("restart marks a missing artifact instead of claiming verification",
+          status == "missing" and b'artifact_integrity !== "verified"' in page,
+          status)
+    check("missing durable artifact download is refused",
+          owner.get("/files/%d/download" % row_id).status_code == 409)
+
+
+def test_retention_policy(app, appmod):
+    import db
+    c = app.test_client()
+    login(c, "alice", "correct-horse")
+    result, _ = _compress_for_storage(c, "expired-result.txt")
+    row_id = result.get_json()["history_id"]
+    with app.app_context():
+        stored = db.get_stored_artifact(row_id)
+        disk_path = os.path.join(config.RESULT_STORAGE_DIR,
+                                 stored["storage_key"])
+        conn = db.get_db()
+        conn.execute("UPDATE stored_artifacts SET created_at = '2000-01-01'"
+                     " WHERE history_id = ?", (row_id,))
+        conn.commit()
+    old_days = config.RESULT_RETENTION_DAYS
+    try:
+        config.RESULT_RETENTION_DAYS = 1
+        c.get("/files")  # before_request enforces retention without a restart
+        with app.app_context():
+            metadata_gone = db.get_stored_artifact(row_id) is None
+        check("positive retention runs live and removes expired result",
+              metadata_gone and not os.path.exists(disk_path))
+
+        archive = c.post("/api/archive/create", data={
+            "files": [(io.BytesIO(b"archive member A " * 80), "a.txt"),
+                      (io.BytesIO(b"archive member B " * 80), "b.txt")],
+            "archive_name": "expires-together"}).get_json()
+        with app.app_context():
+            conn = db.get_db()
+            conn.execute(
+                "UPDATE stored_artifacts SET created_at = '2000-01-01'"
+                " WHERE history_id = ?", (archive["history_id"],))
+            conn.commit()
+        c.get("/files")
+        with app.app_context():
+            members_left = db.get_db().execute(
+                "SELECT COUNT(*) AS n FROM compression_history"
+                " WHERE batch_id = ?", (archive["batch_id"],)).fetchone()["n"]
+        check("archive retention removes summary and all member rows",
+              members_left == 0, members_left)
+    finally:
+        config.RESULT_RETENTION_DAYS = old_days
+
+
+def test_storage_migration_is_additive():
+    import db
+    import sqlite3
+    fd, path = tempfile.mkstemp(suffix=".sqlite3")
+    os.close(fd)
+    os.remove(path)
+    try:
+        # Build a genuine pre-storage/pre-parent-column database.  This catches
+        # schema.sql indexes that would otherwise run before _migrate can add a
+        # new column to an existing installation.
+        conn = sqlite3.connect(path)
+        conn.executescript("""
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user',
+                must_change_password INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_login_at TEXT);
+            CREATE TABLE compression_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                filename TEXT NOT NULL, operation TEXT NOT NULL DEFAULT 'compress',
+                original_bytes INTEGER NOT NULL, compressed_bytes INTEGER NOT NULL,
+                ratio REAL NOT NULL, space_saved_pct REAL NOT NULL,
+                engine TEXT NOT NULL, container_format TEXT NOT NULL DEFAULT '',
+                lossless_verified INTEGER NOT NULL DEFAULT 0,
+                duration_ms REAL NOT NULL DEFAULT 0, batch_id TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')));
+            INSERT INTO users (username,email,password_hash)
+                VALUES ('legacy','legacy@example.com','hash');
+            INSERT INTO compression_history
+                (user_id,filename,original_bytes,compressed_bytes,ratio,
+                 space_saved_pct,engine)
+                VALUES (1,'legacy.txt',100,50,2.0,50.0,'pure Python');
+        """)
+        conn.commit()
+        conn.close()
+
+        db.init_db(path, seed_admin=False)
+        db.init_db(path, seed_admin=False)
+        conn = db.connect(path)
+        tables = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        legacy = conn.execute(
+            "SELECT filename FROM compression_history WHERE user_id = ?",
+            (1,)).fetchone()
+        columns = {r["name"] for r in conn.execute(
+            "PRAGMA table_info(compression_history)")}
+        conn.close()
+        check("durable-storage migration is additive and idempotent",
+              "stored_artifacts" in tables
+              and "parent_history_id" in columns
+              and legacy is not None and legacy["filename"] == "legacy.txt")
+    finally:
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                os.remove(path + suffix)
+            except OSError:
+                pass
+
+
+def test_security_controls(app, appmod):
+    """Exercise production CSRF and verification-failure behavior."""
+    import db
+    c = app.test_client()
+    app.config["CSRF_PROTECT"] = True
+    try:
+        page = c.get("/login")
+        with c.session_transaction() as sess:
+            token = sess.get("_csrf_token")
+        check("production forms receive a CSRF token",
+              bool(token) and b'name="csrf_token"' in page.data)
+        missing = c.post("/login", data={
+            "username": "alice", "password": "correct-horse"})
+        check("login without CSRF token is rejected with a visible error",
+              missing.status_code == 400
+              and b"Security token missing" in missing.data
+              and b"ByteSize" in missing.data)
+        signed_in = c.post("/login", data={
+            "username": "alice", "password": "correct-horse",
+            "csrf_token": token}, follow_redirects=False)
+        check("login with CSRF token succeeds",
+              signed_in.status_code in (301, 302), signed_in.status_code)
+        workspace = c.get("/files")
+        check("workspace fetch and XHR calls carry the CSRF header",
+              b'X-CSRF-Token' in workspace.data)
+        with c.session_transaction() as sess:
+            signed_token = sess.get("_csrf_token")
+        missing_api = c.post("/api/preview", data={
+            "file": (io.BytesIO(b"csrf preview"), "preview.txt")})
+        check("authenticated API POST without CSRF is rejected",
+              missing_api.status_code == 400)
+        accepted_api = c.post(
+            "/api/preview",
+            data={"file": (io.BytesIO(b"csrf preview"), "preview.txt")},
+            headers={"X-CSRF-Token": signed_token})
+        check("same-origin API CSRF header is accepted",
+              accepted_api.status_code == 200, accepted_api.status_code)
+        check("logout is POST-only and CSRF protected",
+              c.get("/logout").status_code == 405
+              and c.post("/logout").status_code == 400
+              and c.post("/logout", data={"csrf_token": signed_token},
+                         follow_redirects=False).status_code in (301, 302))
+    finally:
+        app.config["CSRF_PROTECT"] = False
+
+    c = app.test_client()
+    login(c, "alice", "correct-horse")
+    with app.app_context():
+        uid = db.get_user_by_username("alice")["id"]
+        before_rows = len(db.list_history(uid, limit=10000))
+        before_bytes = db.stored_bytes_for_user(uid)
+    real_decompress = appmod.engine.decompress_bytes
+    appmod.engine.decompress_bytes = lambda _blob: b"verification mismatch"
+    try:
+        failed, _ = _compress_for_storage(c, "must-not-save.txt")
+    finally:
+        appmod.engine.decompress_bytes = real_decompress
+    with app.app_context():
+        after_rows = len(db.list_history(uid, limit=10000))
+        after_bytes = db.stored_bytes_for_user(uid)
+    check("failed round trip is neither downloadable nor persisted",
+          failed.status_code == 500 and before_rows == after_rows
+          and before_bytes == after_bytes, failed.get_json())
+
+    real_write = appmod.artifact_store.write
+    appmod.artifact_store.write = lambda _blob: (_ for _ in ()).throw(
+        OSError("simulated storage failure"))
+    with app.app_context():
+        before_rows = len(db.list_history(uid, limit=10000))
+    try:
+        failed_archive = c.post("/api/archive/create", data={
+            "files": [(io.BytesIO(b"first member " * 50), "one.txt"),
+                      (io.BytesIO(b"second member " * 50), "two.txt")],
+            "archive_name": "must-not-orphan"})
+    finally:
+        appmod.artifact_store.write = real_write
+    with app.app_context():
+        after_rows = len(db.list_history(uid, limit=10000))
+    check("archive storage failure leaves no summary or member history",
+          failed_archive.status_code == 500 and before_rows == after_rows,
+          failed_archive.get_json())
+
+
+def test_installation_secret_and_storage_safety(appmod):
+    temp = tempfile.mkdtemp(prefix="bytesize-security-")
+    old_db = config.DATABASE_PATH
+    old_store = config.RESULT_STORAGE_DIR
+    old_secret = config.SECRET_KEY_PATH
+    try:
+        config.SECRET_KEY_PATH = os.path.join(temp, "install.secret")
+        db_path = os.path.join(temp, "app.sqlite3")
+        store = os.path.join(temp, "private-results")
+        first = appmod.create_app(
+            db_path=db_path, testing=False, storage_dir=store)
+        second = appmod.create_app(
+            db_path=db_path, testing=False, storage_dir=store)
+        check("installation secret is strong, private, and stable",
+              first.secret_key == second.secret_key
+              and first.secret_key != "afc-local-dev-secret"
+              and len(first.secret_key.encode("utf-8")) >= 32
+              and os.path.isfile(config.SECRET_KEY_PATH))
+        unsafe = os.path.join(os.path.dirname(appmod.__file__), "static",
+                              "should-never-store-results")
+        try:
+            appmod.artifact_store.ensure_dir.__globals__["config"] \
+                .RESULT_STORAGE_DIR = unsafe
+            appmod.artifact_store.ensure_dir()
+            rejected = False
+        except ValueError:
+            rejected = True
+        check("artifact storage beneath static is rejected", rejected)
+    finally:
+        config.DATABASE_PATH = old_db
+        config.RESULT_STORAGE_DIR = old_store
+        config.SECRET_KEY_PATH = old_secret
+        shutil.rmtree(temp, ignore_errors=True)
+
+
+def test_quota_serialization_and_reset_scope(appmod):
+    import db
+    import threading
+    temp = tempfile.mkdtemp(prefix="bytesize-quota-")
+    old_db = config.DATABASE_PATH
+    old_store = config.RESULT_STORAGE_DIR
+    try:
+        config.DATABASE_PATH = os.path.join(temp, "main.sqlite3")
+        config.RESULT_STORAGE_DIR = os.path.join(temp, "main-results")
+        db.init_db(config.DATABASE_PATH, seed_admin=False)
+        conn = db.connect(config.DATABASE_PATH)
+        conn.execute("INSERT INTO users (username,email,password_hash)"
+                     " VALUES ('quota','quota@example.com','hash')")
+        uid = conn.execute("SELECT id FROM users WHERE username='quota'") \
+            .fetchone()["id"]
+        row_ids = []
+        for index in range(2):
+            cur = conn.execute(
+                "INSERT INTO compression_history (user_id,filename,"
+                "original_bytes,compressed_bytes,ratio,space_saved_pct,engine)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (uid, "q%d.afc" % index, 100, 60, 1.66, 40, "test"))
+            row_ids.append(cur.lastrowid)
+        conn.commit()
+        conn.close()
+        barrier = threading.Barrier(2)
+        results = []
+
+        def reserve(index):
+            barrier.wait()
+            try:
+                with db.storage_reservation(uid, 60, 100) as tx:
+                    db.add_stored_artifact(
+                        row_ids[index], uid, "%032x" % (index + 1),
+                        "q%d.afc" % index, "application/octet-stream", 60,
+                        "0" * 64, connection=tx)
+                results.append("stored")
+            except db.StorageQuotaExceeded:
+                results.append("quota")
+
+        workers = [threading.Thread(target=reserve, args=(i,))
+                   for i in range(2)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(10)
+        conn = db.connect(config.DATABASE_PATH)
+        used = conn.execute(
+            "SELECT COALESCE(SUM(byte_size),0) AS n FROM stored_artifacts"
+            " WHERE user_id=?", (uid,)).fetchone()["n"]
+        conn.close()
+        check("concurrent quota reservations cannot exceed the hard cap",
+              sorted(results) == ["quota", "stored"] and used == 60,
+              (results, used))
+
+        import artifact_store
+        key, _ = artifact_store.write(b"keep while resetting another DB")
+        unrelated = os.path.join(temp, "unrelated.sqlite3")
+        db.reset_db(unrelated)
+        check("resetting an unrelated database cannot wipe the active store",
+              artifact_store.exists(key))
+
+        real_delete = artifact_store.delete
+        artifact_store.delete = lambda _key: (_ for _ in ()).throw(
+            PermissionError("simulated locked artifact"))
+        try:
+            try:
+                db.reset_db()
+                reset_aborted = False
+            except RuntimeError:
+                reset_aborted = True
+        finally:
+            artifact_store.delete = real_delete
+        conn = db.connect(config.DATABASE_PATH)
+        user_survives = conn.execute(
+            "SELECT 1 FROM users WHERE id = ?", (uid,)).fetchone() is not None
+        conn.close()
+        check("reset aborts before ownership metadata is lost on file error",
+              reset_aborted and user_survives and artifact_store.exists(key))
+
+        db.reset_db()
+        check("supported reset removes configured durable result blobs",
+              not artifact_store.exists(key))
+
+        # Even with the same Flask signing key and reused numeric user id, a
+        # database reset must invalidate every pre-reset session cookie.
+        epoch_app = appmod.create_app(
+            db_path=config.DATABASE_PATH, testing=True,
+            storage_dir=config.RESULT_STORAGE_DIR)
+        epoch_app.secret_key = "stable-secret-across-reset"
+        old_client = epoch_app.test_client()
+        old_client.post("/register", data={
+            "username": "before-reset", "email": "before@example.com",
+            "password": "before-reset-password",
+            "confirm": "before-reset-password"})
+        with epoch_app.app_context():
+            old_id = db.get_user_by_username("before-reset")["id"]
+        db.reset_db()
+        new_client = epoch_app.test_client()
+        new_client.post("/register", data={
+            "username": "after-reset", "email": "after@example.com",
+            "password": "after-reset-password",
+            "confirm": "after-reset-password"})
+        with epoch_app.app_context():
+            new_id = db.get_user_by_username("after-reset")["id"]
+        stale = old_client.get("/settings", follow_redirects=False)
+        check("database reset invalidates old cookies despite reused user ids",
+              old_id == new_id and stale.status_code in (301, 302)
+              and "/login" in stale.headers.get("Location", ""),
+              (old_id, new_id, stale.status_code))
+    finally:
+        config.DATABASE_PATH = old_db
+        config.RESULT_STORAGE_DIR = old_store
+        shutil.rmtree(temp, ignore_errors=True)
+
+
+def test_account_deletion_removes_artifacts(app):
+    import db
+    user = app.test_client()
+    user.post("/register", data={
+        "username": "eraseme", "email": "eraseme@example.com",
+        "password": "erase-password", "confirm": "erase-password"})
+    result, _ = _compress_for_storage(user, "erase.txt")
+    row_id = result.get_json()["history_id"]
+    with app.app_context():
+        target = db.get_user_by_username("eraseme")
+        target_id = target["id"]
+        stored = db.get_stored_artifact(row_id)
+        disk_path = os.path.join(config.RESULT_STORAGE_DIR,
+                                 stored["storage_key"])
+    admin_client = app.test_client()
+    login(admin_client, config.DEFAULT_ADMIN_USERNAME, "admin-new-password")
+    import artifact_store
+    real_delete = artifact_store.delete
+    artifact_store.delete = lambda _key: (_ for _ in ()).throw(
+        PermissionError("simulated locked user artifact"))
+    try:
+        refused = admin_client.post("/admin/users/%d/delete" % target_id)
+    finally:
+        artifact_store.delete = real_delete
+    with app.app_context():
+        still_owned = db.get_user_by_id(target_id) is not None
+    check("account deletion failure preserves ownership metadata",
+          refused.status_code == 500 and still_owned and os.path.exists(disk_path))
+
+    response = admin_client.post("/admin/users/%d/delete" % target_id)
+    with app.app_context():
+        gone = db.get_user_by_id(target_id) is None
+    check("deleting an account removes its artifact files",
+          response.status_code in (301, 302) and gone
+          and not os.path.exists(disk_path))
+
+
 
 # ===========================================================================
 # PART 2 — analytics, algorithm showcase, presets
 # ===========================================================================
-
-def _seed_for_analytics(app):
-    """Compress a spread of real file types so the analytics have real rows."""
-    c = app.test_client()
-    login(c, "alice", "correct-horse")
-    import glob
-    picks = []
-    for pat in ("benchmarks/canterbury/alice29.txt",
-                "benchmarks/corpus/data.json",
-                "benchmarks/corpus/data.csv",
-                "benchmarks/corpus/random.bin",
-                "benchmarks/canterbury/fields.c"):
-        fp = os.path.join(ROOT, pat)
-        if os.path.exists(fp):
-            picks.append(fp)
-    for fp in picks:
-        c.post("/api/compress", data={
-            "file": (io.BytesIO(open(fp, "rb").read()), os.path.basename(fp))})
-    return c, picks
-
-
-def test_analytics_match_database(app):
-    """Every displayed stat must be derivable from compression_history rows."""
-    c, picks = _seed_for_analytics(app)
-    summary = c.get("/api/analytics/summary").get_json()
-    rows = [r for r in c.get("/api/history").get_json()
-            if r["operation"] == "compress"]
-
-    exp_files = len(rows)
-    exp_orig = sum(r["original_bytes"] for r in rows)
-    exp_comp = sum(r["compressed_bytes"] for r in rows)
-    check("analytics file count matches history rows",
-          summary["files"] == exp_files, (summary["files"], exp_files))
-    check("analytics total_original matches sum of rows",
-          summary["total_original"] == exp_orig,
-          (summary["total_original"], exp_orig))
-    check("analytics total_compressed matches sum of rows",
-          summary["total_compressed"] == exp_comp,
-          (summary["total_compressed"], exp_comp))
-    check("analytics total_saved is original minus compressed",
-          summary["total_saved"] == exp_orig - exp_comp)
-    exp_avg = sum(r["ratio"] for r in rows) / max(1, len(rows))
-    check("analytics avg_ratio matches mean of row ratios",
-          abs(summary["avg_ratio"] - exp_avg) < 1e-6,
-          (summary["avg_ratio"], exp_avg))
-
-    # transfer-time estimate must follow the documented formula + config
-    expect_sec = (summary["total_saved"] * 8.0) / (config.ASSUMED_LINK_MBPS * 1_000_000)
-    check("transfer time saved uses the configured link speed",
-          abs(summary["transfer_seconds_saved"] - expect_sec) < 0.02
-          and summary["assumed_link_mbps"] == config.ASSUMED_LINK_MBPS)
-
-
-def test_analytics_extensions(app):
-    c = app.test_client()
-    login(c, "alice", "correct-horse")
-    exts = c.get("/api/analytics/extensions").get_json()
-    rows = [r for r in c.get("/api/history").get_json()
-            if r["operation"] == "compress"]
-    from collections import Counter
-    expect = Counter(os.path.splitext(r["filename"])[1].lstrip(".").lower()
-                     for r in rows)
-    got = {e["ext"]: e["files"] for e in exts}
-    ok = all(got.get(k) == v for k, v in expect.items() if k)
-    check("file-type distribution matches history filenames", ok,
-          (got, dict(expect)))
-    check("extension rows carry real byte totals",
-          all(e["total_original"] >= e["total_compressed"] for e in exts))
-
-
-def test_analytics_timeseries_reference(app):
-    c = app.test_client()
-    login(c, "alice", "correct-horse")
-    ts = c.get("/api/analytics/timeseries").get_json()
-    check("timeseries returns rows", len(ts) > 0, len(ts))
-    have_ref = [r for r in ts if r["gzip_ratio"] is not None]
-    check("gzip reference measured for at least one file", len(have_ref) > 0)
-    # the reference must be a real measurement, not a copy of the AFC number
-    differing = [r for r in have_ref if abs(r["gzip_ratio"] - r["afc_ratio"]) > 1e-9]
-    check("gzip reference differs from AFC (it is really measured)",
-          len(differing) > 0)
-    check("huffman reference present and >= 0",
-          all((r["huffman_ratio"] is None or r["huffman_ratio"] > 0) for r in ts))
-
 
 def test_history_search_filter_paginate(app):
     c = app.test_client()
@@ -745,24 +1391,6 @@ def test_compare_view(app):
           r2.status_code == 200 and b"Difference" not in r2.data)
 
 
-def test_admin_scope_gate(app):
-    """?scope=system must be honoured for admins and ignored for users."""
-    c = app.test_client()
-    login(c, "alice", "correct-horse")
-    mine = c.get("/api/analytics/summary").get_json()
-    forced = c.get("/api/analytics/summary?scope=system").get_json()
-    check("non-admin cannot widen analytics scope",
-          forced["scope"] == "user"
-          and forced["files"] == mine["files"], (forced["scope"],))
-
-    a = app.test_client()
-    login(a, config.DEFAULT_ADMIN_USERNAME, "admin-new-password")
-    sysv = a.get("/api/analytics/summary?scope=system").get_json()
-    check("admin can request system-wide analytics",
-          sysv["scope"] == "system" and sysv["files"] >= mine["files"],
-          (sysv["scope"], sysv["files"], mine["files"]))
-
-
 def test_status_and_preview(app):
     c = app.test_client()
     login(c, "alice", "correct-horse")
@@ -792,8 +1420,8 @@ def test_part1_still_works(app):
     login(c, "alice", "correct-horse")
     for path in ("/dashboard", "/compress", "/files", "/settings", "/compare"):
         check("page still renders: %s" % path, c.get(path).status_code == 200)
-    check("retired analytics page redirects to workspace",
-          c.get("/analytics", follow_redirects=False).status_code in (301, 302))
+    check("retired analytics page is gone",
+          c.get("/analytics", follow_redirects=False).status_code == 404)
     r = c.get("/report.csv")
     check("CSV report still exports", r.status_code == 200
           and b"TOTAL" in r.data)
@@ -1931,17 +2559,26 @@ def main():
         test_history_isolation(app)
         test_reports(app)
         test_pages_render(app)
-        # --- Part 2 ---
-        test_analytics_match_database(app)
-        test_analytics_extensions(app)
-        test_analytics_timeseries_reference(app)
+        test_public_shell_and_action_gates(app)
+        test_intended_destination_preserved(app)
+        test_branding_and_about_evidence(app)
+        test_analytics_routes_removed(app)
+        test_persistent_artifact_access(app, appmod)
+        test_storage_quota_and_transient_restore(app)
+        test_missing_artifact_is_not_reported_verified(app, appmod)
+        test_retention_policy(app, appmod)
+        test_storage_migration_is_additive()
+        test_security_controls(app, appmod)
+        test_installation_secret_and_storage_safety(appmod)
+        test_quota_serialization_and_reset_scope(appmod)
+        test_account_deletion_removes_artifacts(app)
+        # --- surviving Part 2 features ---
         test_history_search_filter_paginate(app)
         test_entropy_reflects_file_type(app)
         test_tree_and_attribution(app)
         test_presets_have_real_effect(app)
         test_preset_recorded_and_used(app)
         test_compare_view(app)
-        test_admin_scope_gate(app)
         test_status_and_preview(app)
         test_part1_still_works(app)
         # --- separate Compress / Decompress pages ---
@@ -1989,6 +2626,7 @@ def main():
                 os.remove(dbpath + suffix)
             except OSError:
                 pass
+        shutil.rmtree(dbpath + ".results", ignore_errors=True)
 
     print("\n%d passed, %d failed" % (len(PASSES), len(FAILURES)))
     if FAILURES:

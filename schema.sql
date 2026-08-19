@@ -32,6 +32,14 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
 
+-- Changes on every destructive database reset.  Signed sessions carry this
+-- value so an old numeric user id can never authenticate as a new post-reset
+-- account that happens to receive the same id.
+CREATE TABLE IF NOT EXISTS app_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 -- ---------------------------------------------------------------------------
 -- compression_history
 -- ---------------------------------------------------------------------------
@@ -59,12 +67,38 @@ CREATE TABLE IF NOT EXISTS compression_history (
     lossless_verified INTEGER NOT NULL DEFAULT 0,
     duration_ms       REAL    NOT NULL DEFAULT 0,
     batch_id          TEXT,
+    parent_history_id INTEGER REFERENCES compression_history (id)
+                              ON DELETE CASCADE,
     created_at        TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_history_user    ON compression_history (user_id);
 CREATE INDEX IF NOT EXISTS idx_history_created ON compression_history (created_at);
 CREATE INDEX IF NOT EXISTS idx_history_batch   ON compression_history (batch_id);
+
+-- ---------------------------------------------------------------------------
+-- stored_artifacts
+-- ---------------------------------------------------------------------------
+-- Only produced compressed AFC/AFCPAK bytes are durable.  User uploads and
+-- decompressed originals are intentionally absent from this table and disk.
+-- storage_key is an opaque server-generated filename in RESULT_STORAGE_DIR.
+CREATE TABLE IF NOT EXISTS stored_artifacts (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    history_id       INTEGER NOT NULL UNIQUE
+                             REFERENCES compression_history (id) ON DELETE CASCADE,
+    user_id          INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    storage_key      TEXT    NOT NULL UNIQUE,
+    download_name    TEXT    NOT NULL,
+    mimetype         TEXT    NOT NULL DEFAULT 'application/octet-stream',
+    byte_size        INTEGER NOT NULL CHECK (byte_size >= 0),
+    sha256           TEXT    NOT NULL,
+    integrity_status TEXT    NOT NULL DEFAULT 'verified',
+    last_verified_at TEXT,
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifacts_user_created
+    ON stored_artifacts (user_id, created_at);
 
 -- ---------------------------------------------------------------------------
 -- audit_log

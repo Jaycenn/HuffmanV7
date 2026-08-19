@@ -47,12 +47,27 @@
         b.classList.toggle("font-semibold", on);
         b.classList.toggle("border-transparent", !on);
         b.classList.toggle("text-dim", !on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+        b.tabIndex = on ? 0 : -1;
       });
       document.querySelectorAll(".dpane").forEach(function (p) {
         p.classList.add("hidden");
       });
       var pane = $("dpane-" + btn.dataset.dtab);
       if (pane) pane.classList.remove("hidden");
+    });
+    btn.addEventListener("keydown", function (event) {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight"
+          && event.key !== "Home" && event.key !== "End") return;
+      event.preventDefault();
+      var tabs = Array.prototype.slice.call(document.querySelectorAll(".dtab"));
+      var index = tabs.indexOf(btn);
+      if (event.key === "Home") index = 0;
+      else if (event.key === "End") index = tabs.length - 1;
+      else index = (index + (event.key === "ArrowRight" ? 1 : -1)
+                    + tabs.length) % tabs.length;
+      tabs[index].focus();
+      tabs[index].click();
     });
   });
 
@@ -188,8 +203,8 @@
     $("dEngine").textContent = j.engine || "";
 
     $("dIntegrity").innerHTML = j.integrity_ok
-      ? '<span class="text-green-700">✓ VERIFIED</span>'
-      : '<span class="text-maroon">✗ FAILED</span>';
+      ? '<span class="status-ok">✓ VERIFIED</span>'
+      : '<span class="status-error">✗ FAILED</span>';
     $("dIntegrityNote").textContent =
       (j.integrity_note || "") + (j.component_note ? " " + j.component_note : "");
 
@@ -197,9 +212,9 @@
     // without a recorded digest there is nothing to compare against.
     var v = $("dShaVerdict");
     if (j.sha256_status === "match") {
-      v.innerHTML = '<span class="text-green-700">✓ MATCH</span>';
+      v.innerHTML = '<span class="status-ok">✓ MATCH</span>';
     } else if (j.sha256_status === "mismatch") {
-      v.innerHTML = '<span class="text-maroon">✗ MISMATCH</span>';
+      v.innerHTML = '<span class="status-error">✗ MISMATCH</span>';
     } else {
       v.innerHTML = '<span class="text-dim dark:text-[#9c968a]">— no reference '
                   + 'on file</span>';

@@ -26,7 +26,10 @@ werkzeug PBKDF2.  No file data is ever encrypted — the thesis Delimitations
 exclude encryption of compressed output.  See SCOPE_NOTES.md.
 """
 import functools
+import hmac
 import re
+import secrets
+from urllib.parse import urlsplit
 
 from flask import (Blueprint, abort, flash, g, redirect, render_template,
                    request, session, url_for)
@@ -49,12 +52,48 @@ def current_user():
     uid = session.get("user_id")
     if uid is None:
         return None
-    return db.get_user_by_id(uid)
+    if session.get("auth_epoch") != db.session_epoch():
+        session.clear()
+        return None
+    user = db.get_user_by_id(uid)
+    # Account changes take effect for already-issued cookies.  A disabled or
+    # deleted account must not retain access until the session expires.
+    if user is None or not user["is_active"]:
+        session.clear()
+        return None
+    return user
 
 
 def client_ip():
-    return (request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-            or request.remote_addr or "")
+    # Do not trust a caller-supplied X-Forwarded-For value.  Deployments behind
+    # a trusted proxy can install Werkzeug's ProxyFix with an explicit hop
+    # count; the local application uses the peer address directly.
+    return request.remote_addr or ""
+
+
+def csrf_token():
+    """Return the per-session CSRF token used by forms and same-origin JS."""
+    token = session.get("_csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+def csrf_is_valid(value):
+    expected = session.get("_csrf_token")
+    return bool(expected and value and hmac.compare_digest(expected, value))
+
+
+def safe_next(value):
+    """Return a same-site absolute path, or an empty string."""
+    if not value or "\\" in value:
+        return ""
+    parts = urlsplit(value)
+    if parts.scheme or parts.netloc or not parts.path.startswith("/") \
+            or parts.path.startswith("//"):
+        return ""
+    return value
 
 
 def login_required(view):
@@ -64,7 +103,8 @@ def login_required(view):
             if request.accept_mimetypes.best == "application/json" or \
                     request.path.startswith("/api/"):
                 abort(401)
-            return redirect(url_for("auth.login", next=request.path))
+            return redirect(url_for(
+                "auth.login", next=request.full_path.rstrip("?")))
         return view(*a, **kw)
     return wrapped
 
@@ -81,7 +121,8 @@ def role_required(*roles):
             if user is None:
                 if request.path.startswith("/api/"):
                     abort(401)
-                return redirect(url_for("auth.login", next=request.path))
+                return redirect(url_for(
+                    "auth.login", next=request.full_path.rstrip("?")))
             if user["role"] not in roles:
                 db.audit("forbidden", user_id=user["id"],
                          username=user["username"],
@@ -155,20 +196,22 @@ def login():
     db.clear_login_failures(username, ip)
     session.clear()
     session["user_id"] = user["id"]
+    session["auth_epoch"] = db.session_epoch()
     session.permanent = True
     db.touch_last_login(user["id"])
     db.audit("login", user_id=user["id"], username=username, ip_address=ip)
 
+    nxt = safe_next(request.args.get("next") or request.form.get("next"))
     if user["must_change_password"]:
+        if nxt:
+            session["post_auth_next"] = nxt
         return redirect(url_for("auth.change_password"))
-    nxt = request.args.get("next") or request.form.get("next")
-    # only allow same-site relative redirects
-    if nxt and nxt.startswith("/") and not nxt.startswith("//"):
+    if nxt:
         return redirect(nxt)
-    return redirect(url_for("main.dashboard"))
+    return redirect(url_for("main.landing"))
 
 
-@bp.route("/logout", methods=("POST", "GET"))
+@bp.post("/logout")
 def logout():
     user = getattr(g, "user", None)
     if user is not None:
@@ -189,14 +232,20 @@ def register():
     err = validate_registration(username, email, password, confirm)
     if err:
         return render_template("register.html", error=err,
-                               username=username, email=email), 400
+                               username=username, email=email,
+                               next_path=(request.args.get("next") or
+                                          request.form.get("next") or "")), 400
     uid = db.create_user(username, email, password, role="user")
     db.audit("register", user_id=uid, username=username,
              ip_address=client_ip())
     session.clear()
     session["user_id"] = uid
+    session["auth_epoch"] = db.session_epoch()
     session.permanent = True
-    return redirect(url_for("main.dashboard"))
+    nxt = safe_next(request.args.get("next") or request.form.get("next"))
+    if nxt:
+        return redirect(nxt)
+    return redirect(url_for("main.landing"))
 
 
 @bp.route("/change-password", methods=("GET", "POST"))
@@ -228,4 +277,7 @@ def change_password():
     db.audit("password_change", user_id=user["id"], username=user["username"],
              ip_address=client_ip())
     flash("Password updated.")
-    return redirect(url_for("main.dashboard"))
+    nxt = safe_next(session.pop("post_auth_next", None))
+    if nxt:
+        return redirect(nxt)
+    return redirect(url_for("main.landing"))

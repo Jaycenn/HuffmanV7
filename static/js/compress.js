@@ -47,12 +47,27 @@
         b.classList.toggle("font-semibold", on);
         b.classList.toggle("border-transparent", !on);
         b.classList.toggle("text-dim", !on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+        b.tabIndex = on ? 0 : -1;
       });
       document.querySelectorAll(".pane").forEach(function (p) {
         p.classList.add("hidden");
       });
       var pane = $("pane-" + btn.dataset.tab);
       if (pane) pane.classList.remove("hidden");
+    });
+    btn.addEventListener("keydown", function (event) {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight"
+          && event.key !== "Home" && event.key !== "End") return;
+      event.preventDefault();
+      var tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
+      var index = tabs.indexOf(btn);
+      if (event.key === "Home") index = 0;
+      else if (event.key === "End") index = tabs.length - 1;
+      else index = (index + (event.key === "ArrowRight" ? 1 : -1)
+                    + tabs.length) % tabs.length;
+      tabs[index].focus();
+      tabs[index].click();
     });
   });
 
@@ -252,11 +267,11 @@
     // slower with identical output, so when it happens the reason is shown
     // right here rather than left for the user to discover.
     if (j.native_available) {
-      $("rEngine").innerHTML = '<span class="text-green-700 font-semibold">'
+      $("rEngine").innerHTML = '<span class="status-ok font-semibold">'
         + 'C++ Native \u2713</span>';
       $("rNative").classList.add("hidden");
     } else {
-      $("rEngine").innerHTML = '<span class="text-maroon font-semibold">'
+      $("rEngine").innerHTML = '<span class="status-warning font-semibold">'
         + 'Pure Python \u26a0</span>';
       var n = $("rNative");
       n.innerHTML = '<strong>Native backend unavailable.</strong><br>'
@@ -279,9 +294,9 @@
     $("rContainer").textContent = route
       + (j.preset ? " \u00b7 " + j.preset + " preset" : "");
     $("rVerify").innerHTML = j.lossless
-      ? '<span class="text-green-700 font-semibold">✓ VERIFIED — lossless '
+      ? '<span class="status-ok font-semibold">✓ VERIFIED — lossless '
         + 'SHA-256 round trip</span>'
-      : '<span class="text-maroon font-semibold">✗ VERIFICATION FAILED — '
+      : '<span class="status-error font-semibold">✗ VERIFICATION FAILED — '
         + 'do not rely on this file</span>';
     $("rSha").textContent = j.sha256_original
       ? "SHA-256 of original: " + j.sha256_original : "";

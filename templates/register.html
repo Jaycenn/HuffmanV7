@@ -6,9 +6,10 @@
     <p class="eyebrow">Local by design</p>
     <h1>Create a private workspace on this machine.</h1>
     <p>Your account and processing history stay in the local database. Uploaded file contents are not sent to an external service.</p>
-    <a href="{{ url_for('main.landing') }}">← Back to overview</a>
+    <a href="{{ url_for('main.landing') }}">← Back to ByteSize</a>
   </section>
   <form method="post" class="auth-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div><p class="eyebrow">Get started</p><h2>Create account</h2></div>
     {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
     <label for="username">Username
@@ -25,8 +26,10 @@
     <label for="confirm">Confirm password
       <input id="confirm" name="confirm" type="password" required autocomplete="new-password">
     </label>
+    <input type="hidden" name="next"
+           value="{{ next_path or request.args.get('next', '') }}">
     <button class="button button-primary button-full">Create account</button>
-    <p class="auth-switch">Already registered? <a href="{{ url_for('auth.login') }}">Sign in</a></p>
+    <p class="auth-switch">Already registered? <a href="{{ url_for('auth.login', next=(next_path or request.args.get('next', ''))) }}">Sign in</a></p>
   </form>
 </div>
 {% endblock %}

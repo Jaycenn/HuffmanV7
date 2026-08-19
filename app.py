@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-app.py — Structura, the local AFC Flask application.
+app.py — ByteSize, the local AFC Flask application.
 
 MAP OF THE APPLICATION (read this first if you are picking it up cold)
 ----------------------------------------------------------------------
@@ -32,12 +32,13 @@ SEPARATE COMPRESS AND DECOMPRESS PAGES
 
 PUBLIC AND WORKSPACE ROUTES
 ---------------------------
-  GET  /                     -> public product landing page
+  GET  /                     -> real Compress interface (public preview)
   GET  /dashboard            -> signed-in workspace + recent files
-  GET  /compress             -> Compress Files (single + queue + archive)
-  GET  /decompress           -> Decompress Files (single + extract archive)
+  GET  /compress             -> public shell; actions remain login-gated
+  GET  /decompress           -> public shell; actions remain login-gated
   POST /api/decompress       -> .afc -> original, with SHA-256 verification
-  GET  /files                -> history table for the current user
+  GET  /files                -> public empty state / owner's stored files
+  GET  /about                -> public method + CSV-backed benchmark evidence
   GET  /settings             -> account settings
   GET  /admin/users          -> admin only
   GET  /admin/audit          -> admin only
@@ -53,11 +54,7 @@ PUBLIC AND WORKSPACE ROUTES
 
 ANALYSIS AND COMPATIBILITY API
 ------------------------------
-  GET  /analytics                 -> compatibility redirect to /dashboard
   GET  /compare                   -> side-by-side diff of two history entries
-  GET  /api/analytics/summary     -> full stats (?scope=system for admins)
-  GET  /api/analytics/extensions  -> file-type distribution
-  GET  /api/analytics/timeseries  -> AFC vs gzip vs Huffman ratios over time
   GET  /api/history/search        -> filtered/sorted/paginated history
   POST /api/entropy               -> pre-compression compressibility estimate
   POST /api/preview               -> text head / hex view before compressing
@@ -80,6 +77,7 @@ import hashlib
 import sys
 import io
 import os
+import secrets
 import time
 import uuid
 from datetime import timedelta
@@ -92,6 +90,7 @@ import afc2 as engine  # engine: adaptive pipeline          (READ ONLY)
 import afc5         # self-verifying metadata envelope; no compressor
 import afcpak
 import analysis     # Part 2: read-only introspection of inputs/containers
+import artifact_store
 import auth
 import config
 import db
@@ -107,19 +106,163 @@ APP_STARTED_AT = time.time()
 
 main = Blueprint("main", __name__)
 
-# In-memory artefact store: token -> (download_name, bytes, mimetype).
-# Deliberately NOT persisted — produced files live only for the session that
-# made them, matching the local/non-cloud delimitation (SCOPE_NOTES.md).
+# Short-lived result cache: token -> (owner_id, download_name, bytes, mimetype).
+# Decompressed originals exist only here.  Compressed AFC/AFCPAK outputs are
+# additionally persisted by ``artifact_store`` and linked to history rows.
 RESULTS = {}
 MAX_KEEP = 60
 
 
 def _stash(name, blob, mimetype="application/octet-stream"):
     token = uuid.uuid4().hex
-    RESULTS[token] = (name, blob, mimetype)
+    RESULTS[token] = (g.user["id"], name, blob, mimetype)
     while len(RESULTS) > MAX_KEEP:
         RESULTS.pop(next(iter(RESULTS)))
     return token
+
+
+class StorageQuotaError(RuntimeError):
+    pass
+
+
+def _safe_download_name(name):
+    """Keep the display basename as metadata; never use it as a disk path."""
+    return os.path.basename(str(name or "download.afc").replace("\\", "/")) \
+        or "download.afc"
+
+
+def _ensure_storage_capacity(user_id, new_bytes):
+    used = db.stored_bytes_for_user(user_id)
+    limit = config.MAX_STORED_BYTES_PER_USER
+    if int(new_bytes) > limit - used:
+        raise StorageQuotaError(
+            "This result would exceed your %s stored-file limit. Delete an "
+            "older compressed file from Files, then try again."
+            % human(limit))
+
+
+def _persist_history_artifact(history_id, user_id, name, blob,
+                              mimetype="application/octet-stream"):
+    """Persist one compressed result and attach it to an existing history row.
+
+    The advisory caller check gives a fast error, while the SQLite reservation
+    below is authoritative across concurrent requests.  A partial failure
+    removes the opaque file and the complete logical history group.
+    """
+    key = None
+    try:
+        with db.storage_reservation(
+                user_id, len(blob), config.MAX_STORED_BYTES_PER_USER) as conn:
+            key, digest = artifact_store.write(blob)
+            db.add_stored_artifact(
+                history_id, user_id, key, _safe_download_name(name), mimetype,
+                len(blob), digest, connection=conn)
+    except db.StorageQuotaExceeded:
+        db.delete_history_group(history_id, user_id)
+        raise StorageQuotaError(
+            "This result would exceed your %s stored-file limit. Delete an "
+            "older compressed file from Files, then try again."
+            % human(config.MAX_STORED_BYTES_PER_USER))
+    except Exception:
+        if key:
+            try:
+                artifact_store.delete(key)
+            except Exception:
+                pass
+        db.delete_history_group(history_id, user_id)
+        raise
+    return digest
+
+
+def _prune_expired_artifacts():
+    """Apply the configured age policy; zero means keep forever."""
+    days = config.RESULT_RETENTION_DAYS
+    if days <= 0:
+        return
+    conn = db.connect(config.DATABASE_PATH)
+    try:
+        rows = conn.execute(
+            "SELECT a.history_id, a.storage_key, a.user_id "
+            "FROM stored_artifacts a "
+            "WHERE created_at < datetime('now', ?)",
+            ("-%d days" % days,)).fetchall()
+        for row in rows:
+            try:
+                artifact_store.delete(row["storage_key"])
+            except (OSError, ValueError):
+                continue
+            db.delete_history_group(
+                row["history_id"], row["user_id"], connection=conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _reconcile_artifact_store():
+    """Clean stale partial writes and mark missing durable files explicitly.
+
+    Complete unreferenced blobs are deliberately preserved: a temporarily
+    missing or misconfigured database must never make startup erase the only
+    remaining copy of user data.
+    """
+    artifact_store.remove_stale_temporary_files()
+    conn = db.connect(config.DATABASE_PATH)
+    try:
+        rows = conn.execute(
+            "SELECT history_id, storage_key FROM stored_artifacts").fetchall()
+        for row in rows:
+            if not artifact_store.exists(row["storage_key"]):
+                conn.execute(
+                    "UPDATE stored_artifacts SET integrity_status = 'missing',"
+                    " last_verified_at = datetime('now') WHERE history_id = ?",
+                    (row["history_id"],))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _installation_secret():
+    """Load or create a private installation-specific Flask signing key."""
+    configured = os.environ.get("AFC_SECRET_KEY")
+    if configured:
+        if len(configured.encode("utf-8")) < 32:
+            raise RuntimeError("AFC_SECRET_KEY must contain at least 32 bytes.")
+        return configured
+    path = os.path.abspath(config.SECRET_KEY_PATH)
+    static_root = os.path.realpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "static"))
+    try:
+        if os.path.commonpath((os.path.realpath(path), static_root)) == static_root:
+            raise RuntimeError("AFC_SECRET_KEY_PATH must be outside static.")
+    except ValueError:
+        pass
+    parent = os.path.dirname(path)
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    try:
+        descriptor = os.open(
+            path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        descriptor = None
+    if descriptor is not None:
+        value = secrets.token_hex(32)
+        with os.fdopen(descriptor, "w", encoding="ascii") as handle:
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+    try:
+        with open(path, encoding="ascii") as handle:
+            value = handle.read().strip()
+    except OSError as exc:
+        raise RuntimeError(
+            "Set AFC_SECRET_KEY or provide a writable AFC_SECRET_KEY_PATH.") \
+            from exc
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    if len(value.encode("ascii")) < 32:
+        raise RuntimeError("The persisted Flask secret is invalid or too short.")
+    return value
 
 
 
@@ -185,8 +328,16 @@ def human(n):
 
 @main.route("/")
 def landing():
-    """Public product overview. Compression remains authentication-gated."""
-    return render_template("landing.html")
+    """The real Compress interface, publicly viewable and server-gated."""
+    return render_template("compress.html", app_shell=True,
+                           preview=g.get("user") is None)
+
+
+@main.route("/about")
+def about_page():
+    """Public methodology and repository-traceable benchmark evidence."""
+    return render_template("about.html", app_shell=True,
+                           preview=g.get("user") is None)
 
 
 @main.route("/dashboard")
@@ -198,29 +349,32 @@ def dashboard():
 
 
 @main.route("/compress")
-@auth.login_required
 def compress_page():
     """Compress Files — normal file in, .afc out. Compression only."""
-    return render_template("compress.html")
+    return render_template("compress.html", app_shell=True,
+                           preview=g.get("user") is None)
 
 
 @main.route("/decompress")
-@auth.login_required
 def decompress_page():
     """Decompress Files — .afc in, original file out. Decompression only.
 
     A separate destination in the primary navigation rather than a mode inside
     the compress box, so a first-time user never has to work out which
     operation an ambiguous upload will perform."""
-    return render_template("decompress.html")
+    return render_template("decompress.html", app_shell=True,
+                           preview=g.get("user") is None)
 
 
 @main.route("/files")
-@auth.login_required
 def files_page():
-    rows = db.list_history(g.user["id"], limit=500)
-    return render_template("files.html", rows=rows,
-                           stats=db.history_stats(g.user["id"]))
+    if g.get("user") is None:
+        return render_template("files.html", rows=[], stats=None,
+                               app_shell=True, preview=True)
+    # The authenticated table is fetched with server-side search/pagination;
+    # avoid loading hundreds of unused rows into the initial HTML response.
+    return render_template("files.html", rows=[], stats=None,
+                           app_shell=True, preview=False)
 
 
 @main.route("/settings")
@@ -291,13 +445,25 @@ def _process_one(data, filename, fmt, adaptive, batch_id=None,
         kind = filetypes.sniff(restored)
         name = (envelope.get("original_name") if envelope else "") or \
             filetypes.restored_name(filename, restored)
+        restored_sha = hashlib.sha256(restored).hexdigest()
+        container_sha = hashlib.sha256(data).hexdigest()
+        ref = db.find_by_container_sha(g.user["id"], container_sha)
+        if envelope:
+            verified = (len(restored) == envelope["original_length"] and
+                        restored_sha == envelope["original_sha256"])
+        elif ref is not None and ref["sha256_original"]:
+            verified = restored_sha == ref["sha256_original"]
+        else:
+            # A bare legacy container can decode successfully but carries no
+            # original digest.  Do not label that as a proven byte match.
+            verified = False
         token = _stash(name, restored, mimetype=kind["mime"])
         db.add_history(g.user["id"], filename, len(restored), len(data),
                        engine_name(), data[:4].decode("ascii", "replace"),
-                       lossless_verified=True, operation="decompress",
+                       lossless_verified=verified, operation="decompress",
                        duration_ms=elapsed, batch_id=batch_id,
-                       sha256_original=hashlib.sha256(restored).hexdigest(),
-                       sha256_container=hashlib.sha256(data).hexdigest(),
+                       sha256_original=restored_sha,
+                       sha256_container=container_sha,
                        detected_type=kind["label"])
         return {"kind": "decompress", "name": filename,
                 "output_name": name,
@@ -307,7 +473,7 @@ def _process_one(data, filename, fmt, adaptive, batch_id=None,
                                       if envelope else
                                       data[:4].decode("ascii", "replace")),
                 "engine": engine_name(), "ms": round(elapsed, 1),
-                "lossless": True, "token": token,
+                "lossless": verified, "token": token,
                 "detected": kind["label"]}
 
     payload, used_preset, backend = presets.compress_with(
@@ -319,13 +485,14 @@ def _process_one(data, filename, fmt, adaptive, batch_id=None,
     sha_original = hashlib.sha256(data).hexdigest()
     lossless = (hashlib.sha256(engine.decompress_bytes(blob)).hexdigest()
                 == sha_original)
+    if not lossless:
+        raise RuntimeError(
+            "Internal round-trip verification failed; the result was not saved.")
     sha_container = hashlib.sha256(blob).hexdigest()
     kind = filetypes.sniff(data)
     # `report.pdf` -> `report.pdf.afc`, so the original extension survives in
     # the name as well as in the sniffable bytes. Decompress restores either
     # way; carrying it here just makes the round trip obvious to the user.
-    token = _stash(filename + ".afc", blob)
-
     # Read-only analytics derived from the input and the produced container.
     gz, hz = _reference_sizes(data)
     try:
@@ -341,13 +508,18 @@ def _process_one(data, filename, fmt, adaptive, batch_id=None,
     except Exception:
         block_share, explain = 0.0, ""
 
-    db.add_history(g.user["id"], filename, len(data), len(blob), backend,
-                   blob[:4].decode("ascii", "replace"), lossless_verified=lossless,
-                   operation="compress", duration_ms=elapsed, batch_id=batch_id,
-                   gzip_bytes=gz, huffman_bytes=hz, entropy_bits=entropy_bits,
-                   block_share_pct=block_share, preset=used_preset,
-                   sha256_original=sha_original, sha256_container=sha_container,
-                   detected_type=kind["label"])
+    _ensure_storage_capacity(g.user["id"], len(blob))
+    history_id = db.add_history(
+        g.user["id"], filename, len(data), len(blob), backend,
+        blob[:4].decode("ascii", "replace"), lossless_verified=lossless,
+        operation="compress", duration_ms=elapsed, batch_id=batch_id,
+        gzip_bytes=gz, huffman_bytes=hz, entropy_bits=entropy_bits,
+        block_share_pct=block_share, preset=used_preset,
+        sha256_original=sha_original, sha256_container=sha_container,
+        detected_type=kind["label"])
+    _persist_history_artifact(
+        history_id, g.user["id"], filename + ".afc", blob)
+    token = _stash(filename + ".afc", blob)
     return {"kind": "compress", "name": filename,
             "output_name": filename + ".afc",
             "original": len(data), "compressed": len(blob),
@@ -357,6 +529,9 @@ def _process_one(data, filename, fmt, adaptive, batch_id=None,
             "payload_container": payload_container,
             "engine": backend, "ms": round(elapsed, 1),
             "lossless": lossless, "token": token,
+            "history_id": history_id,
+            "stored_download": url_for("main.download_stored",
+                                       row_id=history_id),
             "preset": used_preset, "explain": explain,
             "entropy_bits": entropy_bits, "block_share_pct": block_share,
             "gzip_bytes": gz, "huffman_bytes": hz,
@@ -392,18 +567,37 @@ def api_compress():
             payload = engine.compress_bytes(data, adaptive, fmt=fmt)
             blob = afc5.wrap(data, payload, f.filename)
             lossless = engine.decompress_bytes(blob) == data
+            if not lossless:
+                raise RuntimeError(
+                    "Internal round-trip verification failed; the result was "
+                    "not saved.")
+            _ensure_storage_capacity(g.user["id"], len(blob))
+            sha_original = hashlib.sha256(data).hexdigest()
+            sha_container = hashlib.sha256(blob).hexdigest()
+            history_id = db.add_history(
+                g.user["id"], f.filename, len(data), len(blob), engine_name(),
+                blob[:4].decode("ascii", "replace"),
+                lossless_verified=lossless, operation="compress",
+                sha256_original=sha_original,
+                sha256_container=sha_container,
+                detected_type=filetypes.sniff(data)["label"])
+            _persist_history_artifact(
+                history_id, g.user["id"], f.filename + ".afc", blob)
             token = _stash(f.filename + ".afc", blob)
-            db.add_history(g.user["id"], f.filename, len(data), len(blob),
-                           engine_name(), blob[:4].decode("ascii", "replace"),
-                           lossless_verified=lossless, operation="compress")
             return jsonify(kind="compress", name=f.filename,
                            original=len(data), compressed=len(blob),
                            ratio=round(len(data) / len(blob), 3),
                            saved=round(100.0 * (1 - len(blob) / len(data)), 2),
                            container=blob[:4].decode("ascii", "replace"),
                            payload_container=payload[:4].decode("ascii", "replace"),
-                           engine=engine_name(), lossless=lossless, token=token)
+                           engine=engine_name(), lossless=lossless, token=token,
+                           history_id=history_id,
+                           stored_download=url_for(
+                               "main.download_stored", row_id=history_id))
         result = _process_one(data, f.filename, fmt, adaptive, preset=preset)
+    except StorageQuotaError as exc:
+        return jsonify(error=str(exc), quota_exceeded=True,
+                       files_url=url_for("main.files_page")), 507
     except Exception as exc:                       # never 500 to the user
         return jsonify(error="Processing failed: %s" % exc), 500
 
@@ -444,6 +638,9 @@ def api_batch():
     try:
         return jsonify(**_process_one(data, f.filename, fmt, adaptive,
                                       batch_id=batch_id, preset=preset))
+    except StorageQuotaError as exc:
+        return jsonify(error=str(exc), name=f.filename, quota_exceeded=True,
+                       files_url=url_for("main.files_page")), 507
     except Exception as exc:
         return jsonify(error="Processing failed: %s" % exc,
                        name=f.filename), 500
@@ -608,7 +805,9 @@ def api_decompress():
     out_name = embedded_name or filetypes.restored_name(f.filename, restored)
     token = _stash(out_name, restored, mimetype=kind["mime"])
 
-    verified = bool(size_ok) and (sha_match is not False)
+    # Structural length agreement is useful, but only a real digest reference
+    # can prove exact equality with the original source bytes.
+    verified = bool(size_ok) and (sha_match is True)
     db.add_history(g.user["id"], f.filename, len(restored), len(data),
                    engine_name(), container, lossless_verified=verified,
                    operation="decompress", duration_ms=elapsed,
@@ -674,18 +873,54 @@ def api_archive_create():
     except Exception as exc:
         return jsonify(error="Archive creation failed: %s" % exc), 500
 
+    if not all(ent["lossless_verified"] for ent in entries):
+        return jsonify(
+            error="Archive round-trip verification failed; nothing was saved."), 500
+
+    try:
+        _ensure_storage_capacity(g.user["id"], len(blob))
+    except StorageQuotaError as exc:
+        return jsonify(error=str(exc), quota_exceeded=True,
+                       files_url=url_for("main.files_page")), 507
+
     batch_id = db.new_batch_id()
-    for ent in entries:
-        db.add_history(g.user["id"], ent["path"], ent["original_bytes"],
-                       ent["stored_bytes"], engine_name(), ent["container"],
-                       lossless_verified=ent["lossless_verified"],
-                       operation="compress", batch_id=batch_id)
-    token = _stash(name + config.ARCHIVE_EXT, blob)
+    archive_name = name + config.ARCHIVE_EXT
+    history_id = db.add_history(
+        g.user["id"], archive_name, total, len(blob), engine_name(), "AFCPAK",
+        lossless_verified=all(e["lossless_verified"] for e in entries),
+        operation="compress", batch_id=batch_id,
+        sha256_container=hashlib.sha256(blob).hexdigest(),
+        detected_type="AFC archive")
+    try:
+        _persist_history_artifact(
+            history_id, g.user["id"], archive_name, blob)
+        for ent in entries:
+            db.add_history(
+                g.user["id"], ent["path"], ent["original_bytes"],
+                ent["stored_bytes"], engine_name(), ent["container"],
+                lossless_verified=True, operation="compress",
+                batch_id=batch_id, parent_history_id=history_id)
+    except StorageQuotaError as exc:
+        return jsonify(error=str(exc), quota_exceeded=True,
+                       files_url=url_for("main.files_page")), 507
+    except Exception as exc:
+        item = db.get_stored_artifact(history_id)
+        if item is not None:
+            try:
+                artifact_store.delete(item["storage_key"])
+            except (OSError, ValueError):
+                pass
+        db.delete_history_group(history_id, g.user["id"])
+        return jsonify(error="Could not store the archive: %s" % exc), 500
+    token = _stash(archive_name, blob)
     return jsonify(kind="archive", name=name + config.ARCHIVE_EXT,
                    files=len(entries), original=total, compressed=len(blob),
                    ratio=round(total / len(blob), 3) if blob else 0,
                    saved=round(100.0 * (1 - len(blob) / total), 2) if total else 0,
                    engine=engine_name(), batch_id=batch_id, token=token,
+                   history_id=history_id,
+                   stored_download=url_for("main.download_stored",
+                                           row_id=history_id),
                    entries=entries)
 
 
@@ -723,28 +958,11 @@ def api_archive_extract():
 
 
 # ===========================================================================
-# PART 2 — analytics, algorithm showcase, and small additions
+# Analysis helpers and compatibility views
 # ===========================================================================
 # Everything here reads the LOCAL SQLite database or performs read-only
 # analysis of a container. No engine file is modified (constraint #1) and no
 # new datastore is introduced (constraint #4).
-
-def _admin_scope():
-    """Admins may request system-wide analytics with ?scope=system.
-    Anyone else is silently restricted to their own rows — the scope parameter
-    can never be used to widen access."""
-    want_system = request.args.get("scope") == "system"
-    if want_system and g.user["role"] == "admin":
-        return None, True
-    return g.user["id"], False
-
-
-@main.route("/analytics")
-@auth.login_required
-def analytics_page():
-    """Compatibility redirect for bookmarks from the retired analytics page."""
-    return redirect(url_for("main.dashboard"))
-
 
 @main.route("/compare")
 @auth.login_required
@@ -769,43 +987,6 @@ def compare_page():
         }
     return render_template("compare.html", rows=rows, left=left, right=right,
                            diff=diff)
-
-
-@main.get("/api/analytics/summary")
-@auth.login_required
-def api_analytics_summary():
-    """Feature 1 — full stat cards. Time saved is a derived ESTIMATE from an
-    assumed link speed, and is labelled as such in the UI."""
-    uid, system = _admin_scope()
-    stats = db.analytics_stats(uid)
-    mbps = config.ASSUMED_LINK_MBPS
-    seconds = (stats["total_saved"] * 8.0) / (mbps * 1_000_000) if mbps else 0.0
-    stats["transfer_seconds_saved"] = round(seconds, 2)
-    stats["assumed_link_mbps"] = mbps
-    stats["scope"] = "system" if system else "user"
-    stats["processing_seconds"] = round(stats.get("total_ms", 0) / 1000.0, 2)
-    return jsonify(stats)
-
-
-@main.get("/api/analytics/extensions")
-@auth.login_required
-def api_analytics_extensions():
-    """Feature 3 — file-type distribution."""
-    uid, _ = _admin_scope()
-    return jsonify(db.analytics_by_extension(uid))
-
-
-@main.get("/api/analytics/timeseries")
-@auth.login_required
-def api_analytics_timeseries():
-    """Feature 2 — AFC vs gzip vs single-tier Huffman ratios over time.
-
-    gzip and Huffman are REFERENCE MEASUREMENTS shown for context. They are
-    not part of the compression pipeline and the UI does not claim AFC beats
-    them; where AFC is behind, the chart shows that."""
-    uid, _ = _admin_scope()
-    return jsonify(db.analytics_timeseries(
-        uid, limit=int(request.args.get("limit", 60))))
 
 
 @main.get("/api/history/search")
@@ -903,7 +1084,9 @@ def api_tree(token):
     if item is None:
         return jsonify(error="That result has expired. Compress the file "
                              "again to inspect its tree."), 404
-    _, blob, _ = item
+    owner_id, _, blob, _ = item
+    if owner_id != g.user["id"]:
+        return jsonify(error="Not found."), 404
     try:
         depth = min(12, max(4, request.args.get("depth", 9, type=int)))
         tree = analysis.tree_report(blob, max_depth=depth)
@@ -987,14 +1170,70 @@ def download(token):
     item = RESULTS.get(token)
     if item is None:
         abort(404)
-    name, blob, mime = item
+    owner_id, name, blob, mime = item
+    if owner_id != g.user["id"]:
+        abort(404)
     return send_file(io.BytesIO(blob), as_attachment=True,
                      download_name=name, mimetype=mime)
 
 
+def _authorized_artifact(row_id):
+    item = db.get_stored_artifact(row_id)
+    if item is None:
+        abort(404)
+    if item["user_id"] != g.user["id"] and g.user["role"] != "admin":
+        abort(404)
+    return item
+
+
+@main.get("/files/<int:row_id>/download")
+@auth.login_required
+def download_stored(row_id):
+    """Owner/admin re-download with a fresh SHA-256 check on every request."""
+    item = _authorized_artifact(row_id)
+    try:
+        blob = artifact_store.read_verified(
+            item["storage_key"], item["sha256"], item["byte_size"])
+    except artifact_store.ArtifactIntegrityError as exc:
+        try:
+            status = ("corrupt" if artifact_store.exists(item["storage_key"])
+                      else "missing")
+        except ValueError:
+            status = "corrupt"
+        db.set_artifact_integrity(row_id, status)
+        return render_template(
+            "error.html", code=409,
+            message="Download refused: %s" % exc), 409
+    db.set_artifact_integrity(row_id, "verified")
+    return send_file(io.BytesIO(blob), as_attachment=True,
+                     download_name=item["download_name"],
+                     mimetype=item["mimetype"])
+
+
+@main.post("/files/<int:row_id>/delete")
+@auth.login_required
+def delete_stored(row_id):
+    """Remove the owner's blob and its linked processing-history row."""
+    item = _authorized_artifact(row_id)
+    try:
+        artifact_store.delete(item["storage_key"])
+    except OSError as exc:
+        return render_template(
+            "error.html", code=500,
+            message="The stored file could not be deleted: %s" % exc), 500
+    db.delete_history_group(row_id, item["user_id"])
+    db.audit("artifact_delete", user_id=g.user["id"],
+             username=g.user["username"],
+             detail="history_id=%d" % row_id,
+             ip_address=auth.client_ip())
+    flash("Stored compressed file deleted.")
+    return redirect(url_for("main.files_page"))
+
+
 def _report_rows(batch_id=None):
     rows = db.list_history(g.user["id"], limit=1000, batch_id=batch_id)
-    return [r for r in rows if r["operation"] == "compress"]
+    return [r for r in rows if r["operation"] == "compress"
+            and r["parent_history_id"] is None]
 
 
 @main.get("/report.csv")
@@ -1055,18 +1294,30 @@ def report_pdf():
 # app factory
 # ---------------------------------------------------------------------------
 
-def create_app(db_path=None, testing=False):
+def create_app(db_path=None, testing=False, storage_dir=None):
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = config.MAX_CONTENT_LENGTH
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(
         minutes=config.SESSION_LIFETIME_MINUTES)
     app.config["TESTING"] = testing
-    # Local single-user demo app: a stable dev key is fine, but allow override.
-    app.secret_key = os.environ.get("AFC_SECRET_KEY", "afc-local-dev-secret")
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["CSRF_PROTECT"] = not testing
+    app.secret_key = ("afc-test-secret-not-for-production-0001"
+                      if testing else _installation_secret())
     if db_path:
         config.DATABASE_PATH = db_path
+    if storage_dir:
+        config.RESULT_STORAGE_DIR = storage_dir
+    elif testing and db_path:
+        # Keep test artifacts beside the disposable test database rather than
+        # touching the real application store.
+        config.RESULT_STORAGE_DIR = db_path + ".results"
 
     db.init_db(config.DATABASE_PATH)
+    artifact_store.ensure_dir()
+    _reconcile_artifact_store()
+    _prune_expired_artifacts()
     app.teardown_appcontext(db.close_db)
 
     app.register_blueprint(auth.bp)
@@ -1075,8 +1326,37 @@ def create_app(db_path=None, testing=False):
     app.register_blueprint(admin.bp)
 
     @app.before_request
-    def _load_user():
+    def _protect_request_and_apply_retention():
+        # Resolve account state before CSRF so a disabled/deleted account is
+        # treated as anonymous immediately, even on a POST request.
         g.user = auth.current_user()
+        # Retention is enforced during a long-running server, not only at boot.
+        if config.RESULT_RETENTION_DAYS > 0:
+            _prune_expired_artifacts()
+        if not app.config.get("CSRF_PROTECT", True) or \
+                request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return None
+        # Let the authentication decorators produce their normal 401/redirect
+        # for anonymous protected endpoints. Login and registration themselves
+        # still require a token to prevent login CSRF.
+        auth_entry = request.endpoint in {"auth.login", "auth.register"}
+        if not session.get("user_id") and not auth_entry:
+            return None
+        supplied = (request.form.get("csrf_token") or
+                    request.headers.get("X-CSRF-Token"))
+        if auth.csrf_is_valid(supplied):
+            return None
+        message = "Security token missing or expired. Refresh the page and try again."
+        if request.path.startswith("/api/"):
+            return jsonify(error=message), 400
+        return render_template(
+            "error.html", code=400, message=message,
+            app_shell=g.user is not None), 400
+
+    @app.before_request
+    def _load_user():
+        if "user" not in g:
+            g.user = auth.current_user()
         # Force the password change before anything else is reachable.
         if g.user is not None and g.user["must_change_password"]:
             allowed = {"auth.change_password", "auth.logout", "static",
@@ -1087,7 +1367,9 @@ def create_app(db_path=None, testing=False):
     @app.context_processor
     def _inject():
         # Templates render limits from here — never a literal in the HTML.
-        return {"cfg": config, "human": human, "current_user": g.get("user")}
+        return {"cfg": config, "human": human,
+                "current_user": g.get("user"),
+                "csrf_token": auth.csrf_token()}
 
     @app.errorhandler(401)
     def _401(_):
@@ -1108,7 +1390,8 @@ def create_app(db_path=None, testing=False):
         if request.path.startswith("/api/") or request.path.startswith("/download/"):
             return jsonify(error="Not found, or that download has expired."), 404
         return render_template("error.html", code=404,
-                               message="Page not found."), 404
+                               message="Page not found.", app_shell=True,
+                               preview=g.get("user") is None), 404
 
     @app.errorhandler(413)
     def _413(_):

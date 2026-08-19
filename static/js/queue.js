@@ -121,12 +121,12 @@
     $("queueTotal").textContent = queue.length + " file(s) · " + human(total)
       + (over ? " — OVER the " + human(CFG.max_batch_size) + " batch limit" : "");
     $("queueTotal").className = "font-data text-xs ml-auto "
-      + (over ? "text-maroon font-bold" : "text-dim");
+      + (over ? "status-error font-bold" : "text-dim");
   }
 
   function statusClass(s) {
-    return s === "Done" ? "text-green-700"
-      : s === "Error" ? "text-maroon"
+    return s === "Done" ? "status-ok"
+      : s === "Error" ? "status-error"
       : s === "Compressing" ? "text-gold" : "text-dim";
   }
   function progressOf(item) {
@@ -260,8 +260,8 @@
         '<td class="px-3 py-2 font-data text-xs">' + escapeHtml(r.engine || "") + '</td>' +
         '<td class="px-3 py-2 font-data text-xs">' + escapeHtml(r.container || "") + '</td>' +
         '<td class="px-3 py-2">' + (r.lossless
-            ? '<span class="text-green-700">✓ verified</span>'
-            : '<span class="text-maroon">✗ FAILED</span>') + '</td>' +
+            ? '<span class="status-ok">✓ verified</span>'
+            : '<span class="status-error">✗ FAILED</span>') + '</td>' +
         '<td class="px-3 py-2 text-right"><a class="text-xs text-maroon underline"' +
           ' href="/download/' + r.token + '">download</a></td>';
       body.appendChild(tr);
@@ -283,7 +283,7 @@
       '<td class="px-3 py-2 text-right font-data tabular">' +
         (to ? (100 * (1 - tc / to)).toFixed(2) : "0") + '%</td>' +
       '<td colspan="2" class="px-3 py-2"></td>' +
-      '<td class="px-3 py-2 ' + ((fails + errored) ? "text-maroon" : "") + '">' +
+      '<td class="px-3 py-2 ' + ((fails + errored) ? "status-error" : "") + '">' +
         (fails + errored) + ' failure(s)</td><td></td></tr>';
 
     $("csvBtn").href = "/report.csv?batch_id=" + encodeURIComponent(batchId);
@@ -407,8 +407,8 @@
             '<td class="px-3 py-2 break-all font-data text-xs">' + escapeHtml(m.path) + '</td>' +
             '<td class="px-3 py-2 text-right font-data tabular">' + human(m.bytes) + '</td>' +
             '<td class="px-3 py-2">' + (m.sha256_ok
-                ? '<span class="text-green-700">✓ match</span>'
-                : '<span class="text-maroon">✗</span>') + '</td>' +
+                ? '<span class="status-ok">✓ match</span>'
+                : '<span class="status-error">✗</span>') + '</td>' +
             '<td class="px-3 py-2 text-right"><a class="text-xs text-maroon underline"' +
               ' href="/download/' + m.token + '">download</a></td>';
           body.appendChild(tr);

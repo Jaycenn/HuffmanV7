@@ -32,8 +32,12 @@
 
   <section class="settings-card settings-wide">
     <p class="eyebrow">Privacy</p>
-    <h2>Local processing</h2>
-    <p>Accounts and processing history stay in the local SQLite database. Produced files are held for the current session, and the application does not send file contents to an external service.</p>
+    <h2>Local processing and storage</h2>
+    <p>Accounts and processing history stay in the local SQLite database. ByteSize stores only completed compressed AFC files in private local storage so you can download them later. Uploaded originals and decompressed output are never persisted, and file contents are not sent to an external service.</p>
+    <dl>
+      <div><dt>Stored-file quota</dt><dd>{{ human(cfg.MAX_STORED_BYTES_PER_USER) }}</dd></div>
+      <div><dt>Retention</dt><dd>{{ 'Until owner deletion' if cfg.RESULT_RETENTION_DAYS == 0 else cfg.RESULT_RETENTION_DAYS ~ ' days' }}</dd></div>
+    </dl>
   </section>
 
   <section class="settings-card settings-wide">

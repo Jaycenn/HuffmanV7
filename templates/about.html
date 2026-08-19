@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}How it works{% endblock %}
+{% block content %}
+<header class="about-hero">
+  <p class="eyebrow">Method and evidence</p>
+  <h1>Adaptive File Compression System Using Multi-Level Frequency Analysis &amp; Hybrid Huffman</h1>
+  <p>ByteSize is the working interface for the thesis system. It keeps the
+     project’s Hybrid Huffman pipeline intact and verifies every completed
+     compression round trip with SHA-256.</p>
+</header>
+
+<section class="about-section" aria-labelledby="pipelineTitle">
+  <div class="section-row">
+    <div><p class="eyebrow">Pipeline</p><h2 id="pipelineTitle">Three decisions, one lossless stream</h2></div>
+  </div>
+  <ol class="pipeline-list">
+    <li><span>01</span><div><h3>Multi-tier frequency scan</h3><p>Counts individual bytes and repeated multi-byte structures at several candidate lengths.</p></div></li>
+    <li><span>02</span><div><h3>Bit Cost Decision Engine</h3><p>Compares the encoded cost of structural blocks against literal-byte coding and keeps only useful candidates.</p></div></li>
+    <li><span>03</span><div><h3>Hybrid Huffman encoding</h3><p>Builds a canonical Huffman code over the selected structural blocks and remaining literal bytes, then records enough metadata for exact reconstruction.</p></div></li>
+  </ol>
+</section>
+
+<section class="about-section" aria-labelledby="evidenceTitle">
+  <div class="section-row">
+    <div><p class="eyebrow">Measured evidence</p><h2 id="evidenceTitle">Balanced preset, native backend</h2></div>
+  </div>
+  <p class="evidence-note">Aggregated size results from the repository’s one-trial-per-file correctness audit. Every included row records byte equality and SHA-256 equality; no speed claim is made from a single trial.</p>
+  <div class="table-shell">
+    <table class="w-full text-sm">
+      <thead><tr><th>Corpus</th><th class="text-right">Files</th><th class="text-right">Original bytes</th><th class="text-right">AFC bytes</th><th class="text-right">Saved</th><th>Source</th></tr></thead>
+      <tbody>
+        <tr><td>Canterbury</td><td class="metric-cell">11</td><td class="metric-cell">2,810,784</td><td class="metric-cell">826,154</td><td class="metric-cell">70.61%</td><td class="source-cell">benchmarks/afc_1_3_canterbury_native_summary.csv</td></tr>
+        <tr><td>Silesia</td><td class="metric-cell">12</td><td class="metric-cell">211,938,580</td><td class="metric-cell">91,315,157</td><td class="metric-cell">56.91%</td><td class="source-cell">benchmarks/afc_1_3_silesia_native_summary.csv</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="document-note"><strong>PDF and DOCX need class-qualified interpretation.</strong>
+     Files with internally uncompressed streams can provide substantial structure for Hybrid Huffman, while ordinary producer-compressed files may offer very little additional reduction. ByteSize therefore makes no general compression-percentage claim for either format; both are reconstructed byte for byte.</p>
+</section>
+{% endblock %}

@@ -24,12 +24,16 @@
   <button class="tab px-4 py-2 text-sm border-b-2 -mb-px
                  {% if loop.first %}border-maroon text-maroon font-semibold
                  {% else %}border-transparent text-dim dark:text-[#9c968a] hover:text-ink{% endif %}"
-          data-tab="{{ id }}" role="tab">{{ label|safe }}</button>
+          id="tab-{{ id }}" data-tab="{{ id }}" role="tab"
+          aria-controls="pane-{{ id }}"
+          aria-selected="{{ 'true' if loop.first else 'false' }}"
+          tabindex="{{ '0' if loop.first else '-1' }}">{{ label|safe }}</button>
   {% endfor %}
 </div>
 
 <!-- ================= SINGLE FILE ================= -->
-<section id="pane-single" class="pane mt-5">
+<section id="pane-single" class="pane mt-5" role="tabpanel"
+         aria-labelledby="tab-single">
   <div class="grid gap-5 lg:grid-cols-3">
     <div class="lg:col-span-2">
       <div id="sDrop" tabindex="0" role="button"
@@ -73,7 +77,8 @@
                 class="px-6 py-3 rounded-md bg-maroon text-white text-sm font-semibold
                        hover:bg-maroondark disabled:opacity-40
                        disabled:cursor-not-allowed">Compress File</button>
-        <span id="sStatus" class="font-data text-xs text-dim dark:text-[#9c968a]"></span>
+        <span id="sStatus" role="status" aria-live="polite"
+              class="font-data text-xs text-dim dark:text-[#9c968a]"></span>
       </div>
 
       <!-- progress -->
@@ -82,8 +87,7 @@
           <div id="sProg" class="h-2 bg-maroon transition-all" style="width:0%"></div></div>
       </div>
 
-      <p id="sErr" class="hidden text-sm text-maroon mt-3 border border-maroon/30
-                          bg-maroon/5 rounded-md px-3 py-2" role="alert"></p>
+      <p id="sErr" class="hidden error-panel text-sm mt-3 rounded-md px-3 py-2" role="alert"></p>
 
       <!-- ---------------- RESULT ---------------- -->
       <div id="sResult" class="hidden mt-5 bg-white dark:bg-[#1c1b18] border border-line
@@ -120,7 +124,7 @@
               <p class="font-data text-sm mt-2" id="rEngine">—</p>
               <p class="font-data text-[10px] text-dim dark:text-[#9c968a]" id="rContainer"></p></div>
           </div>
-          <div id="rNative" class="hidden mt-4 border border-maroon/40 bg-maroon/5
+          <div id="rNative" class="hidden warning-panel mt-4 border
                                    rounded-md px-3 py-2 text-sm" role="alert">
           </div>
 
@@ -199,7 +203,8 @@
 </section>
 
 <!-- ================= QUEUE ================= -->
-<section id="pane-queue" class="pane hidden mt-5">
+<section id="pane-queue" class="pane hidden mt-5" role="tabpanel"
+         aria-labelledby="tab-queue">
   <div id="drop" tabindex="0" role="button"
        class="border border-dashed border-line dark:border-[#35322c] rounded-md px-4 py-10 text-center
               cursor-pointer hover:border-maroon focus:outline-none
@@ -263,8 +268,7 @@
       </select></label>
     <span id="queueTotal" class="font-data text-xs text-dim dark:text-[#9c968a] ml-auto"></span>
   </div>
-  <p id="err" class="hidden text-sm text-maroon mt-3 border border-maroon/30
-                     bg-maroon/5 rounded-md px-3 py-2" role="alert"></p>
+  <p id="err" class="hidden error-panel text-sm mt-3 rounded-md px-3 py-2" role="alert"></p>
 
   <!-- queue rows -->
   <div id="queueWrap" class="hidden mt-4 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg
@@ -315,11 +319,11 @@
     <p id="explainLine" class="mt-3 text-sm"></p>
     <div class="mt-3 flex flex-wrap gap-4 text-xs font-data">
       <span><span class="inline-block w-3 h-3 align-middle rounded-sm"
-        style="background:#8E1F1F"></span> structural block (multi-byte)</span>
+        style="background:#146C5E"></span> structural block (multi-byte)</span>
       <span><span class="inline-block w-3 h-3 align-middle rounded-sm"
-        style="background:#B57A17"></span> literal byte</span>
+        style="background:#9A6614"></span> literal byte</span>
       <span><span class="inline-block w-3 h-3 align-middle rounded-sm"
-        style="background:#E4E0D6"></span> collapsed subtree</span>
+        style="background:#DCE2DC"></span> collapsed subtree</span>
     </div>
     <div class="mt-3 overflow-x-auto">
       <svg id="treeSvg" width="100%" height="330" viewBox="0 0 980 330"
@@ -330,7 +334,8 @@
 </section>
 
 <!-- ================= ARCHIVE ================= -->
-<section id="pane-archive" class="pane hidden mt-5">
+<section id="pane-archive" class="pane hidden mt-5" role="tabpanel"
+         aria-labelledby="tab-archive">
   <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-6">
     <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Folder or multiple files
       → one {{ cfg.ARCHIVE_EXT }}</h2>
@@ -355,8 +360,7 @@
                      hover:bg-maroondark disabled:opacity-40">Create archive</button>
     </div>
     <p id="archInfo" class="font-data text-xs text-dim dark:text-[#9c968a] mt-3"></p>
-    <p id="archErr" class="hidden text-sm text-maroon mt-3 border border-maroon/30
-                           bg-maroon/5 rounded-md px-3 py-2" role="alert"></p>
+    <p id="archErr" class="hidden error-panel text-sm mt-3 rounded-md px-3 py-2" role="alert"></p>
     <div id="archResult" class="hidden mt-4 border border-line dark:border-[#35322c] rounded-md p-4">
       <p class="text-sm" id="archSummary"></p>
       <a id="archDl" href="#" class="inline-block mt-3 px-5 py-2 rounded-md

@@ -27,6 +27,7 @@ import os
 # --------------------------------------------------------------------------
 
 MB = 1024 * 1024
+GB = 1024 * MB
 
 # Minimum accepted file size.
 #
@@ -77,6 +78,28 @@ MAX_CONCURRENT_JOBS = int(os.environ.get("AFC_MAX_CONCURRENT_JOBS", 1))
 DATABASE_PATH = os.environ.get(
     "AFC_DB_PATH",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "afc_app.sqlite3"))
+
+# Installation-specific Flask signing key.  AFC_SECRET_KEY may supply the key
+# directly; otherwise app.py creates this private file once and reuses it so
+# sessions survive a normal restart without sharing a public default secret.
+SECRET_KEY_PATH = os.environ.get(
+    "AFC_SECRET_KEY_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".afc_secret"))
+
+# Produced compressed artifacts are durable and private.  This directory is
+# deliberately outside ``static/`` so Flask can never serve a blob without an
+# authenticated ownership check.  Originals and restored files are not stored.
+RESULT_STORAGE_DIR = os.environ.get(
+    "AFC_RESULT_STORAGE_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "afc_results"))
+
+# 0 means keep compressed artifacts until the owner deletes them.
+RESULT_RETENTION_DAYS = int(os.environ.get("AFC_RESULT_RETENTION_DAYS", 0))
+
+# Refuse a new durable result when it would exceed this per-user ceiling.
+# Existing files are never silently evicted.
+MAX_STORED_BYTES_PER_USER = int(os.environ.get(
+    "AFC_MAX_STORED_BYTES_PER_USER", 2 * GB))
 
 # Seed admin. README documents these; first login forces a password change.
 DEFAULT_ADMIN_USERNAME = os.environ.get("AFC_ADMIN_USER", "admin")
@@ -152,4 +175,6 @@ def public_dict():
         "reference_codec_max_bytes": REFERENCE_CODEC_MAX_BYTES,
         "entropy_sample_bytes": ENTROPY_SAMPLE_BYTES,
         "assumed_link_mbps": ASSUMED_LINK_MBPS,
+        "result_retention_days": RESULT_RETENTION_DAYS,
+        "max_stored_bytes_per_user": MAX_STORED_BYTES_PER_USER,
     }

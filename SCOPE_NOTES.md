@@ -69,22 +69,32 @@ plainly to an adviser:
    outbound calls, no telemetry, no analytics beacons, and (since Part 1) not
    even a CDN request — Tailwind is compiled to `static/css/tailwind.css` and
    served locally, so the dashboard works with the network cable unplugged.
-3. **Deleting the file deletes the data.** `python -c "import db;
-   db.reset_db()"` returns the system to a clean state. There is no remote
-   copy to also delete.
-4. **The alternative is worse for the study.** Keeping accounts and history in
-   memory only would make Part 2's analytics impossible to demonstrate across
-   sessions, and writing them to a cloud service is what the delimitation
+3. **The data stays inspectable and removable on the same machine.** Account
+   metadata lives in `afc_app.sqlite3`; compressed results live in the private
+   `RESULT_STORAGE_DIR`. There is no remote copy to also delete.
+4. **The alternative is worse for the study.** Keeping accounts, Files history,
+   reports, and completed compressed results in memory would make them vanish
+   between sessions; writing them to a cloud service is what the delimitation
    actually excludes.
 
 In short: the delimitation rules out *cloud* persistence, not *persistence*.
 A single-file embedded database is the most local persistence available.
 
-**Produced files are deliberately NOT persisted.** Compressed output,
-archives, and extracted members live in an in-memory dict (`app.RESULTS`,
-capped at 60 entries) and disappear when the process stops. Only *metadata*
-(sizes, ratio, engine, verification status) is written to SQLite. The app
-never stores user file contents on disk.
+**Only produced compressed files are persisted.** Completed `.afc` and
+`.afcpak` results are written beneath `config.RESULT_STORAGE_DIR`, which is
+outside `static/`, using opaque server-generated identifiers. The database
+links each blob to its owner and processing-history row. Uploaded originals,
+decompressed originals, and extracted members remain in the owner-bound
+in-memory `app.RESULTS` cache and disappear when the process stops.
+
+Access is authenticated and owner-scoped; administrators may also retrieve a
+stored result. A different user receives 404 so the row's existence is not
+disclosed. SHA-256 and byte length are checked again before every durable
+download. `RESULT_RETENTION_DAYS=0` keeps results until owner deletion; a
+positive value enables age cleanup. `MAX_STORED_BYTES_PER_USER` defaults to
+2 GB and refuses a new result instead of evicting an older one. The Files page
+provides Download and Delete controls, and deleting an account removes its
+stored blobs before the database row is removed.
 
 ## 5. Password hashing is not file encryption
 
@@ -111,44 +121,45 @@ asserts the Settings page renders the configured value.
 
 ## 7. Explicitly excluded, and still excluded
 
-Not implemented, per the brief: two-factor auth, data export / right-to-delete
-flows, multi-language support, webhooks, scheduled or watched-folder
+Not implemented, per the brief: two-factor auth, broad personal-data export,
+multi-language support, webhooks, scheduled or watched-folder
 automation, and any form of file encryption.
 
 ---
 
-## 8. Part 2 status (completed)
+## 8. Part 2 history and current scope
 
-Part 2 is built. It added analytics, the algorithm-showcase features and the
-small additions, **without modifying any engine file**. Two constraint-relevant
-findings from that work:
+Part 2 originally added analytics and algorithm-showcase features without
+modifying engine files. The analytics page and `/api/analytics/*` views were
+later removed as a scope reduction. Processing history, reports, previews,
+entropy inspection, and the algorithm evidence remain.
 
 * **The engine has no stats API.** Features 6-8 could not read engine
   internals because every tier function is private. `analysis.py` therefore
   derives entropy from the input bytes and the tree/attribution from the
   produced container -- reading only, which constraint #1 allows.
-* **The native core ignores the Python tunables** (measured: byte-identical
-  output at DP_ROUNDS 1/3/6). Presets other than Balanced therefore run on the
-  pure-Python path. This is documented in `presets.py` and stated in the UI so
-  nobody reads "Fast" as the quickest route to a compressed file.
+* **Historical Part 2 limitation, resolved in V7:** the native core originally
+  ignored Python tunables. V7 added the tunable native ABI without changing the
+  algorithm; Fast, Balanced, and Maximum now run natively when the library is
+  available and are checked byte-for-byte against the Python reference. See
+  §11 for the measured current behavior.
 
-`gzip` now appears in the codebase as a **reference measurement for the
-comparison chart only** (`app._reference_sizes`). It never produces user
-output, and the UI labels it as a reference. This does not introduce a second
-compression mechanism -- the archive path still refuses every compression
-library, as the AST test enforces.
+Legacy history rows can still carry gzip and single-tier-Huffman reference
+sizes from the removed analytics view. Neither reference ever produces user
+output or participates in an AFC container. Removing their now-unused upload
+measurement is listed as a proposed cleanup rather than silently changing the
+recording path in this UI/storage change.
 
 ## 9. What Part 2 inherited (and what a Part 3 would)
 
-**Schema** (`schema.sql`): `users`, `compression_history`, `audit_log`,
-`login_attempts`. The history table already carries everything an analytics
-view needs — `ratio`, `space_saved_pct`, `engine`, `container_format`,
-`lossless_verified`, `duration_ms`, `created_at`, and a `batch_id` that groups
-one queue/archive run. Add analytics queries to `db.py`, not to templates.
+**Schema** (`schema.sql`): `users`, `compression_history`, `stored_artifacts`,
+`audit_log`, `login_attempts`, and `app_meta`. `stored_artifacts` is additive
+and linked by foreign keys; `app_meta.session_epoch` invalidates signed sessions
+after a destructive reset. Existing history rows and databases migrate in place.
 
 **Routes already available** (see the map at the top of `app.py`):
-`/api/history` and `/api/stats` return JSON for the logged-in user, which is
-enough to build charts without a new backend aggregation layer.
+`/api/history` and `/api/stats` return JSON for the logged-in user, supporting
+the cross-session Files view and report evidence without cloud storage.
 
 ## 11. V7 — what changed in the engine, and what did not
 
@@ -175,13 +186,13 @@ The constraint-relevant facts for a panel:
    and defines no function that compresses — both asserted by AST tests, the
    same argument used for `afcpak.py` in §2. Every byte it compresses goes
    through `afc2.compress_bytes`; every byte it does not is copied verbatim.
-4. **DOCX is not solved with ZIP/DEFLATE.** Deflated members are never
-   inflated and re-deflated — that would introduce DEFLATE as a second stage
-   and could not guarantee byte-exact reconstruction. They are preserved
-   verbatim instead. The consequence is reported rather than hidden: a
-   Word-generated DOCX gains little, because its XML is already compressed and
-   cannot be reached losslessly. Where the XML *is* reachable (a STORED
-   package) the engine compresses it by 90.2%.
+4. **DOCX is not compressed with ZIP/DEFLATE.** For suitable XML members, AFC4
+   reversibly parses the *existing* DEFLATE token stream into source XML plus
+   an exact reconstruction recipe. The XML goes through Hybrid Huffman; the
+   recipe rebuilds the original compressed bytes exactly. Unsupported,
+   high-entropy, and media members are preserved verbatim. No inflate/re-deflate
+   compressor is introduced, and producer-compressed DOCX files may therefore
+   yield little additional reduction.
 5. **Byte-exactness is structural, not hopeful.** The segment plan must
    exactly tile the input — validated before anything is written — so
    reconstruction is a concatenation and cannot drift even if the PDF/ZIP
@@ -192,18 +203,20 @@ The constraint-relevant facts for a panel:
    misreading it. AFC3 is only emitted when it is smaller than the plain
    container.
 
-Nothing in §7 was un-excluded: still no two-factor auth, no export /
-right-to-delete flows, no multi-language support, no webhooks, no scheduled
-automation, and no file encryption.
+Nothing in §7 was un-excluded: still no two-factor auth, broad personal-data
+export, multi-language support, webhooks, scheduled automation, or file
+encryption. Files and account administration now provide scoped deletion of
+locally stored compressed results.
 
 ## 10. The Compress/Decompress page split (Part 3) is UI only
 
 The dashboard now has two pages, `/compress` and `/decompress`, instead of one
 combined upload box. For the panel, the constraint-relevant facts are:
 
-1. **No engine file changed.** `afc.py`, `afc2.py`, `afc_native.cpp`,
+1. **The page split changed no engine file.** `afc.py`, `afc2.py`, `afc_native.cpp`,
    `afc_native.py` and `afc_engine.js` are byte-for-byte identical, as are
-   `afcpak.py`, `analysis.py`, `presets.py`, `config.py` and `schema.sql`.
+   `afcpak.py`, `analysis.py`, and `presets.py`. The later ByteSize persistence
+   layer changes only web/config/database files, not compression behavior.
    Both pages call `afc2.compress_bytes` / `afc2.decompress_bytes` — the same
    entry points the combined page used. A test parses `app.py`'s AST and fails
    if it ever calls anything else on an engine module.
@@ -212,14 +225,13 @@ combined upload box. For the panel, the constraint-relevant facts are:
    extension; a test asserts it defines no function whose name contains
    "compress", and a second test asserts it imports no compression library —
    the same AST argument used for `afcpak.py` in §2, and for the same reason.
-3. **No format-specific processing was added.** "Container-aware" here means
-   the user hands over a whole PDF/DOCX and gets a whole PDF/DOCX back: the
-   file is compressed as one byte stream, exactly as before. Nothing extracts
-   PDF page streams or DOCX package parts, because doing so would be a
-   second, format-specific algorithm — which the brief forbids.
-4. **The container format is unchanged.** Filename recovery reads the restored
-   *output*; nothing new is written into AFC1 or AFC2, so every existing
-   decoder (Python, C++, JavaScript, WASM) still reads these files.
+3. **The UI page split itself added no format-specific processing.** That was
+   true of this earlier change only. The current AFC4/AFC6 paths described in
+   §§12–13 do process suitable DOCX/PDF components, while still routing their
+   bytes through Hybrid-Huffman and preserving exact reconstruction.
+4. **The UI page split did not change the then-current container format.** The
+   later component-aware work introduced explicitly versioned AFC4/AFC6 paths;
+   the backward-compatible AFC1/AFC2 decoders remain available.
 5. **SHA-256 verification is never fabricated.** The Decompress page can only
    claim a match against a digest this account actually recorded at compression
    time. With no record it says "no reference on file" and shows the restored
@@ -227,9 +239,11 @@ combined upload box. For the panel, the constraint-relevant facts are:
    the header — is reported separately and is always available. A test asserts
    that a foreign container yields *no reference*, not a green check.
 
-Nothing in §7 was un-excluded: still no two-factor auth, no export/right-to-
-delete flows, no multi-language support, no webhooks, no scheduled automation,
-and no file encryption.
+Nothing in §7 was broadly un-excluded: there is still no two-factor auth,
+personal-data export, self-service account-erasure workflow, multi-language
+support, webhooks, scheduled automation, or file encryption. The implemented
+scope is narrower: owners can delete stored compressed artifacts, and an
+administrator can delete an account together with its owned artifacts.
 
 **Conventions worth keeping:**
 * every new admin route gets `@auth.role_required("admin")` — it returns a

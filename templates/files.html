@@ -1,15 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Activity{% endblock %}
+{% block title %}Files{% endblock %}
 {% block content %}
 <div class="rule2 pt-4">
-  <p class="eyebrow">Processing record</p>
-  <h1 class="font-display text-2xl">Activity</h1>
-  <p class="text-dim text-sm mt-1">Search the compression and restoration records stored on this machine.</p>
+  <p class="eyebrow">Stored results</p>
+  <h1 class="font-display text-2xl">Files</h1>
+  <p class="text-dim text-sm mt-1">Re-download or delete your compressed AFC files. Uploaded originals and restored files are never stored.</p>
+  <p class="font-data text-[11px] text-dim mt-2">
+    Storage limit: {{ human(cfg.MAX_STORED_BYTES_PER_USER) }} per account ·
+    Retention: {{ 'until you delete it' if cfg.RESULT_RETENTION_DAYS == 0 else cfg.RESULT_RETENTION_DAYS ~ ' days' }}
+  </p>
 </div>
 
-<!-- Feature 4: search / filter controls (extends Part 1's static table) -->
-<form id="filters" class="mt-5 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4
-                          grid gap-3 sm:grid-cols-2 lg:grid-cols-5 items-end"
+<form id="filters" data-auth-action
+      class="mt-5 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4
+             grid gap-3 sm:grid-cols-2 lg:grid-cols-5 items-end"
       onsubmit="return false">
   <label class="font-data text-xs text-dim dark:text-[#9c968a]">filename contains
     <input id="fq" type="search" placeholder="e.g. .json"
@@ -25,22 +29,18 @@
             class="mt-1 w-full border border-line dark:border-[#35322c] rounded-md px-2 py-2 text-sm bg-white dark:bg-[#1c1b18]">
       <option value="">any</option></select></label>
   <div class="flex gap-2">
-    <button id="applyBtn"
-            class="px-4 py-2 rounded-md bg-maroon text-white text-sm
+    <button id="applyBtn" class="px-4 py-2 rounded-md bg-maroon text-white text-sm
                    font-semibold hover:bg-maroondark">Apply</button>
-    <button id="resetBtn"
-            class="px-3 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
-                   hover:border-maroon">Reset</button>
+    <button id="resetBtn" class="px-3 py-2 rounded-md border border-line
+                   dark:border-[#35322c] text-sm hover:border-maroon">Reset</button>
   </div>
 </form>
 
 <div class="flex flex-wrap gap-3 mt-4 items-center">
-  <a href="{{ url_for('main.report_csv') }}"
-     class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">
-     Export CSV</a>
-  <a href="{{ url_for('main.report_pdf') }}" target="_blank"
-     class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">
-     Export PDF</a>
+  <a href="{{ url_for('main.report_csv') }}" data-auth-action
+     class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">Export CSV</a>
+  <a href="{{ url_for('main.report_pdf') }}" target="_blank" data-auth-action
+     class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">Export PDF</a>
   <span id="resultCount" class="font-data text-xs text-dim dark:text-[#9c968a] ml-auto"></span>
 </div>
 
@@ -48,28 +48,31 @@
   <table class="w-full text-sm" id="histTable">
     <thead class="text-left border-b border-line dark:border-[#35322c]">
       <tr class="text-[11px] uppercase text-dim dark:text-[#9c968a]">
-        {% for label, col in [('File','filename'), ('Op',''), ('Original','original_bytes'),
-                              ('Result','compressed_bytes'), ('Ratio','ratio'),
-                              ('Saved %','space_saved_pct'), ('Engine',''),
-                              ('Preset',''), ('Lossless',''), ('When','created_at')] %}
+        {% for label, col in [('File','filename'), ('Original','original_bytes'),
+                              ('Stored','compressed_bytes'), ('Ratio','ratio'),
+                              ('Saved','space_saved_pct'), ('Engine',''),
+                              ('Verification',''), ('When','created_at'), ('Actions','')] %}
         <th class="px-3 py-2 {% if col %}cursor-pointer select-none hover:text-maroon{% endif %}"
-            {% if col %}data-sortcol="{{ col }}"{% endif %}>{{ label }}{% if col %}
+            {% if col %}data-sortcol="{{ col }}" tabindex="0" role="button"
+            {% if preview %}data-auth-action aria-label="Sign in to sort by {{ label }}"{% endif %}{% endif %}>{{ label }}{% if col %}
           <span class="opacity-40">&#8645;</span>{% endif %}</th>
         {% endfor %}
       </tr>
     </thead>
-    <tbody id="histBody"></tbody>
+    <tbody id="histBody">
+      {% if preview %}
+      <tr><td colspan="9" class="empty-state">Sign in to see your compressed files.</td></tr>
+      {% endif %}
+    </tbody>
   </table>
 </div>
 
-<div class="flex flex-wrap items-center gap-3 mt-4">
-  <button id="prevBtn"
-          class="px-3 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
-                 hover:border-maroon disabled:opacity-40">Previous</button>
+<div class="flex flex-wrap items-center gap-3 mt-4" data-auth-action>
+  <button id="prevBtn" class="px-3 py-2 rounded-md border border-line dark:border-[#35322c]
+          text-sm hover:border-maroon disabled:opacity-40">Previous</button>
   <span id="pageInfo" class="font-data text-xs text-dim dark:text-[#9c968a]"></span>
-  <button id="nextBtn"
-          class="px-3 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
-                 hover:border-maroon disabled:opacity-40">Next</button>
+  <button id="nextBtn" class="px-3 py-2 rounded-md border border-line dark:border-[#35322c]
+          text-sm hover:border-maroon disabled:opacity-40">Next</button>
   <label class="font-data text-xs text-dim dark:text-[#9c968a] ml-auto">per page
     <select id="perPage" class="ml-1 border border-line dark:border-[#35322c] rounded-md px-2 py-1 bg-white dark:bg-[#1c1b18]">
       <option>15</option><option>25</option><option>50</option><option>100</option>
@@ -78,13 +81,12 @@
 {% endblock %}
 
 {% block scripts %}
+{% if not preview %}
 <script>
-/* Feature 4 — server-side search / filter / sort / pagination.
- * Queries /api/history/search, which whitelists the sort column, so no user
- * input is ever interpolated into SQL. */
 (function () {
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
+  var csrf = {{ csrf_token|tojson }};
   var state = { page: 1, per_page: 15, sort: "created_at", dir: "desc" };
 
   function human(n) {
@@ -99,7 +101,24 @@
       return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
     });
   }
-
+  function verification(row) {
+    if (!row.lossless_verified) return '<span class="failed-mark">Not verified</span>';
+    if (!row.artifact_available) return '<span class="verified-mark">Round trip verified</span>';
+    if (row.artifact_integrity !== "verified") {
+      return '<span class="failed-mark">Stored file ' +
+        esc(row.artifact_integrity || "unavailable") + '</span>';
+    }
+    return '<span class="verified-mark">SHA-256 verified</span>';
+  }
+  function actions(row) {
+    if (!row.artifact_available) return '<span class="text-dim text-xs">Not stored</span>';
+    return '<div class="file-actions">' +
+      '<a href="/files/' + row.id + '/download">Download</a>' +
+      '<form method="post" action="/files/' + row.id + '/delete" ' +
+      'onsubmit="return confirm(\'Delete this stored compressed file?\')">' +
+      '<input type="hidden" name="csrf_token" value="' + csrf + '">' +
+      '<button>Delete</button></form></div>';
+  }
   function load() {
     var p = new URLSearchParams({
       q: $("fq").value, from: $("ffrom").value, to: $("fto").value,
@@ -115,25 +134,22 @@
           var tr = document.createElement("tr");
           tr.className = "border-b border-line/60 dark:border-[#35322c]/60";
           tr.innerHTML =
-            '<td class="px-3 py-2 break-all">' + esc(r.filename) + '</td>' +
-            '<td class="px-3 py-2 font-data text-xs">' + esc(r.operation) + '</td>' +
+            '<td class="px-3 py-2 break-all"><strong>' + esc(r.filename) +
+              '</strong><small class="history-operation">' + esc(r.operation) + '</small></td>' +
             '<td class="px-3 py-2 text-right font-data tabular">' + human(r.original_bytes) + '</td>' +
             '<td class="px-3 py-2 text-right font-data tabular">' + human(r.compressed_bytes) + '</td>' +
             '<td class="px-3 py-2 text-right font-data tabular">' + (r.ratio || 0).toFixed(3) + '×</td>' +
             '<td class="px-3 py-2 text-right font-data tabular">' + (r.space_saved_pct || 0).toFixed(1) + '%</td>' +
             '<td class="px-3 py-2 font-data text-xs">' + esc(r.engine) + '</td>' +
-            '<td class="px-3 py-2 font-data text-xs">' + esc(r.preset || "—") + '</td>' +
-            '<td class="px-3 py-2">' + (r.lossless_verified
-                ? '<span class="text-green-700">✓</span>'
-                : '<span class="text-maroon">✗</span>') + '</td>' +
-            '<td class="px-3 py-2 font-data text-xs text-dim dark:text-[#9c968a]">' + esc(r.created_at) + '</td>';
+            '<td class="px-3 py-2">' + verification(r) + '</td>' +
+            '<td class="px-3 py-2 font-data text-xs text-dim dark:text-[#9c968a]">' + esc(r.created_at) + '</td>' +
+            '<td class="px-3 py-2">' + actions(r) + '</td>';
           body.appendChild(tr);
         });
         if (!j.rows.length) {
-          body.innerHTML = '<tr><td colspan="10" class="px-4 py-6 text-center' +
-            ' text-dim dark:text-[#9c968a] text-sm">No rows match those filters.</td></tr>';
+          body.innerHTML = '<tr><td colspan="9" class="empty-state">No files match those filters.</td></tr>';
         }
-        $("resultCount").textContent = j.total + " row(s)";
+        $("resultCount").textContent = j.total + " record(s)";
         $("pageInfo").textContent = "page " + j.page + " of " + j.pages;
         $("prevBtn").disabled = j.page <= 1;
         $("nextBtn").disabled = j.page >= j.pages;
@@ -141,43 +157,43 @@
         if (sel.options.length <= 1 && j.engines.length) {
           j.engines.forEach(function (e) {
             var o = document.createElement("option");
-            o.value = e; o.textContent = e;
-            sel.appendChild(o);
+            o.value = e; o.textContent = e; sel.appendChild(o);
           });
         }
       });
   }
-
+  function sortFrom(th) {
+    var col = th.dataset.sortcol;
+    if (state.sort === col) state.dir = state.dir === "asc" ? "desc" : "asc";
+    else { state.sort = col; state.dir = "desc"; }
+    state.page = 1; load();
+  }
   document.querySelectorAll("th[data-sortcol]").forEach(function (th) {
-    th.addEventListener("click", function () {
-      var col = th.dataset.sortcol;
-      if (state.sort === col) {
-        state.dir = state.dir === "asc" ? "desc" : "asc";
-      } else {
-        state.sort = col; state.dir = "desc";
+    th.addEventListener("click", function () { sortFrom(th); });
+    th.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault(); sortFrom(th);
       }
-      state.page = 1;
-      load();
     });
   });
   $("applyBtn").addEventListener("click", function () { state.page = 1; load(); });
   $("resetBtn").addEventListener("click", function () {
     $("fq").value = ""; $("ffrom").value = ""; $("fto").value = "";
-    $("fengine").value = "";
-    state.page = 1; state.sort = "created_at"; state.dir = "desc";
-    load();
+    $("fengine").value = ""; state.page = 1;
+    state.sort = "created_at"; state.dir = "desc"; load();
   });
   $("fq").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { state.page = 1; load(); }
   });
   $("prevBtn").addEventListener("click", function () {
-    if (state.page > 1) { state.page--; load(); } });
-  $("nextBtn").addEventListener("click", function () {
-    state.page++; load(); });
+    if (state.page > 1) { state.page--; load(); }
+  });
+  $("nextBtn").addEventListener("click", function () { state.page++; load(); });
   $("perPage").addEventListener("change", function () {
-    state.per_page = +$("perPage").value; state.page = 1; load(); });
-
+    state.per_page = +$("perPage").value; state.page = 1; load();
+  });
   load();
 })();
 </script>
+{% endif %}
 {% endblock %}

@@ -23,12 +23,16 @@
   <button class="dtab px-4 py-2 text-sm border-b-2 -mb-px
                  {% if loop.first %}border-maroon text-maroon font-semibold
                  {% else %}border-transparent text-dim dark:text-[#9c968a] hover:text-ink{% endif %}"
-          data-dtab="{{ id }}" role="tab">{{ label }}</button>
+          id="dtab-{{ id }}" data-dtab="{{ id }}" role="tab"
+          aria-controls="dpane-{{ id }}"
+          aria-selected="{{ 'true' if loop.first else 'false' }}"
+          tabindex="{{ '0' if loop.first else '-1' }}">{{ label }}</button>
   {% endfor %}
 </div>
 
 <!-- ================= SINGLE .afc ================= -->
-<section id="dpane-dsingle" class="dpane mt-5">
+<section id="dpane-dsingle" class="dpane mt-5" role="tabpanel"
+         aria-labelledby="dtab-dsingle">
   <div class="max-w-3xl">
     <div id="dDrop" tabindex="0" role="button"
          aria-label="Drop an AFC file here or click to choose one"
@@ -65,7 +69,8 @@
               class="px-6 py-3 rounded-md bg-maroon text-white text-sm font-semibold
                      hover:bg-maroondark disabled:opacity-40
                      disabled:cursor-not-allowed">Decompress File</button>
-      <span id="dStatus" class="font-data text-xs text-dim dark:text-[#9c968a]"></span>
+      <span id="dStatus" role="status" aria-live="polite"
+            class="font-data text-xs text-dim dark:text-[#9c968a]"></span>
     </div>
 
     <div id="dProgWrap" class="hidden mt-4">
@@ -73,8 +78,7 @@
         <div id="dProg" class="h-2 bg-maroon transition-all" style="width:0%"></div></div>
     </div>
 
-    <p id="dErr" class="hidden text-sm text-maroon mt-3 border border-maroon/30
-                        bg-maroon/5 rounded-md px-3 py-2" role="alert"></p>
+    <p id="dErr" class="hidden error-panel text-sm mt-3 rounded-md px-3 py-2" role="alert"></p>
 
     <!-- ---------------- RESULT ---------------- -->
     <div id="dResult" class="hidden mt-5 bg-white dark:bg-[#1c1b18] border border-line
@@ -141,7 +145,8 @@
 </section>
 
 <!-- ================= EXTRACT ARCHIVE ================= -->
-<section id="dpane-dextract" class="dpane hidden mt-5">
+<section id="dpane-dextract" class="dpane hidden mt-5" role="tabpanel"
+         aria-labelledby="dtab-dextract">
   <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-6 max-w-3xl">
     <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Extract a
       {{ cfg.ARCHIVE_EXT }} archive</h2>
@@ -160,8 +165,7 @@
                      hover:bg-maroondark disabled:opacity-40">Extract</button>
     </div>
     <p id="pakInfo" class="font-data text-xs text-dim dark:text-[#9c968a] mt-3"></p>
-    <p id="pakErr" class="hidden text-sm text-maroon mt-3 border border-maroon/30
-                          bg-maroon/5 rounded-md px-3 py-2" role="alert"></p>
+    <p id="pakErr" class="hidden error-panel text-sm mt-3 rounded-md px-3 py-2" role="alert"></p>
     <div id="pakResult" class="hidden mt-4 overflow-x-auto">
       <table class="w-full text-sm"><thead class="border-b border-line dark:border-[#35322c] text-left">
         <tr class="text-[11px] uppercase text-dim dark:text-[#9c968a]">

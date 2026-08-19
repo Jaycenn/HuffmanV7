@@ -1,4 +1,4 @@
-# Adaptive File Compression (AFC) — 1.3
+# ByteSize — Adaptive File Compression (AFC)
 
 **This archive is the complete project: compression engine + web application
 (Parts 1 and 2 combined).** Part 2 extended Part 1 in place, so there is one
@@ -8,7 +8,7 @@ codebase, one database schema and one test suite — nothing needs merging.
   hybrid Huffman, AFC1/AFC2 containers) — `CHANGES_v4_engine.md`
 * Web app Part 1 (accounts, queue, batch, `.afcpak` archives, reports, size
   policy, responsive layout) — `CHANGES.md`, first half
-* Web app Part 2 (analytics, entropy estimate, hybrid-tree visualiser,
+* Web app Part 2 (entropy estimate, hybrid-tree visualiser,
   explainer, presets, dark mode) — `CHANGES.md`, second half
 * V7: native acceleration for every preset, and container-aware PDF/DOCX —
   `CHANGES_v7.md`
@@ -22,7 +22,7 @@ codebase, one database schema and one test suite — nothing needs merging.
 Verify everything with:
 
 ```bash
-python tests/test_app.py          # 277 checks: web app, native presets,
+python tests/test_app.py          # web app, storage, native presets,
                                   # AFC1-AFC6, documents, integrity
 python tools/native_doctor.py     # WHY is the backend Python or C++?
 python tools/preset_bench.py      # Python vs C++ across all three presets
@@ -82,11 +82,12 @@ Regular accounts self-register at `/register` and get the `user` role.
 ### Resetting the database
 
 ```bash
-python -c "import db; db.reset_db()"     # DESTRUCTIVE: wipes users + history
+python -c "import db; db.reset_db()"     # DESTRUCTIVE: users, history, stored AFC files
 ```
 
-Deleting `afc_app.sqlite3` (plus any `-wal`/`-shm` files) does the same. There
-is no remote copy — see `SCOPE_NOTES.md` §4.
+Use the command rather than deleting SQLite by hand: it also removes opaque
+compressed results from the configured private result directory. There is no
+remote copy — see `SCOPE_NOTES.md` §4.
 
 ### Rebuilding the stylesheet
 
@@ -104,14 +105,10 @@ combined "compress or decompress?" upload box, so a first-time user picks the
 page that names the operation they want:
 
 ```text
-Dashboard
-Analytics
-History
-Compare
-────────────────
 Compress      normal file → .afc
 Decompress    .afc → original file
-────────────────
+Files         stored AFC results and processing history
+About         method and repository-backed evidence
 Settings
 ```
 
@@ -169,25 +166,18 @@ or a finished batch. The PDF button opens a print-styled page — use your
 browser's "Save as PDF". Batch buttons export only that run
 (`?batch_id=…`); the dashboard buttons export your whole history.
 
-**Files & History** (`/files`). Every file you have processed, sortable, with
-export buttons.
+**Files** (`/files`). Processing history is searchable and sortable. Every
+durable `.afc` or `.afcpak` result has owner-scoped Download and Delete actions.
 
 **Admin** (admin role only): `/admin/users` lists accounts with per-user
 totals and lets you enable/disable an account; `/admin/audit` shows logins,
 failed logins and admin actions. Non-admins receive a 403.
 
-## Analytics & algorithm showcase (Part 2)
+## Algorithm inspection (surviving Part 2 features)
 
-**Analytics** (`/analytics`) — stat cards (files, average ratio, space saved,
-estimated transfer time saved), a ratio-over-time chart comparing AFC against
-gzip and single-tier Huffman, a file-type breakdown, and a system status panel.
-Admins get a *system-wide* checkbox; everyone else sees only their own rows.
-
-> The gzip and Huffman lines are **reference measurements shown for context**.
-> gzip is an LZ77+Huffman codec and is never used to produce output here. Where
-> AFC is behind, the chart shows it. References are measured only for files up
-> to `REFERENCE_CODEC_MAX_BYTES` (8 MB); larger files leave a gap in the chart
-> rather than a fabricated value.
+The former analytics page and `/api/analytics/*` views were removed to keep
+the interface focused on compression, restoration, files, and evidence. The
+underlying `compression_history` data and report exports remain intact.
 
 **Compare** (`/compare`) — pick two history entries and diff sizes, ratio,
 saved %, duration, engine, container and preset side by side.
@@ -290,7 +280,7 @@ every file in the thesis corpus.
 ## Running the tests
 
 ```bash
-python tests/test_app.py      # 277 checks: auth/web, native equivalence,
+python tests/test_app.py      # auth/web/storage, native equivalence,
                               # AFC1-AFC6, PDF/DOCX, byte equality + SHA-256
 python tools/run_verification.py          # engine round trips (unchanged)
 python tools/size_policy_bench.py --quick # size/memory smoke test
@@ -298,9 +288,12 @@ python tools/size_policy_bench.py --quick # size/memory smoke test
 
 ## Privacy
 
-Everything is local: the app binds to `127.0.0.1`, makes no outbound requests,
-and stores only *metadata* in SQLite. Compressed output and extracted files
-live in memory for the session and are never written to disk by the server.
+Everything is local: the app binds to `127.0.0.1` and makes no outbound
+requests. Account/history metadata stays in SQLite. Only produced compressed
+`.afc` and `.afcpak` artifacts are persisted under the private
+`RESULT_STORAGE_DIR`, with opaque disk names, owner checks, a configured quota,
+and SHA-256 verification before every download. Uploaded originals,
+decompressed originals, and extracted archive members stay in memory only.
 
 ---
 
@@ -342,14 +335,14 @@ afc2.NATIVE   # True when the C++ core is active
 | `AFC_WebApp.html` | standalone browser app (WASM core if present, JS otherwise) |
 | `app.py` | Flask app factory + page/API routes (map at top of file) |
 | `config.py` | all tunables incl. size policy — the only place limits live |
-| `db.py`, `schema.sql` | local SQLite: users, history, audit, login attempts |
+| `db.py`, `schema.sql` | local SQLite: users, history, durable-artifact ownership, audit, login attempts, and the session epoch that invalidates cookies after a destructive reset |
 | `auth.py`, `admin.py` | auth blueprint (login/roles) and admin blueprint |
 | `afcpak.py` | `.afcpak` archive container (manifest + AFC payloads, no DEFLATE) |
 | `templates/`, `static/` | responsive dashboard; `compress.html`/`decompress.html` are the two separate workflow pages, with `compress.js`/`decompress.js` driving them and `queue.js` the multi-file panes |
 | `filetypes.py` | content-based type detection; recovers the original extension on decompress. Compresses nothing |
 | `analysis.py` | read-only entropy / container / tree / attribution analysis |
 | `presets.py` | Fast / Balanced / Maximum tunable presets |
-| `tests/test_app.py` | 277-check end-to-end suite (native presets, AFC1-AFC6, web, integrity and document paths) |
+| `tests/test_app.py` | 366-check end-to-end suite (native presets, AFC1-AFC6, web, integrity and document paths) |
 | `tools/native_doctor.py` | [v7] diagnoses why the native core is or is not loaded |
 | `containers.py` | PDF/OOXML inventory, exact tiling, AFC3/AFC4/AFC6 routing and whole-file size guards |
 | `deflate_tokens.py` | Reversible parser/serializer for existing DOCX member tokens; makes XML available to Hybrid-Huffman without adding a compressor |

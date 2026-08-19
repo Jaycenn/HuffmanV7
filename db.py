@@ -17,6 +17,7 @@ import os
 import sqlite3
 import time
 import uuid
+from contextlib import contextmanager
 
 import config
 
@@ -94,6 +95,10 @@ _MIGRATIONS = [
     ("sha256_original", "TEXT NOT NULL DEFAULT ''"),
     ("sha256_container", "TEXT NOT NULL DEFAULT ''"),
     ("detected_type", "TEXT NOT NULL DEFAULT ''"),
+    # Archive member rows are children of their durable AFCPAK summary.  The
+    # self-reference lets deletion/retention remove the complete logical run.
+    ("parent_history_id", "INTEGER REFERENCES compression_history(id)"
+                          " ON DELETE CASCADE"),
 ]
 
 
@@ -104,6 +109,58 @@ def _migrate(conn):
         if col not in have:
             conn.execute("ALTER TABLE compression_history ADD COLUMN %s %s"
                          % (col, decl))
+    # Explicit additive migration for databases created before durable result
+    # storage existed.  CREATE IF NOT EXISTS keeps repeated startups harmless.
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS stored_artifacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            history_id INTEGER NOT NULL UNIQUE
+                REFERENCES compression_history (id) ON DELETE CASCADE,
+            user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+            storage_key TEXT NOT NULL UNIQUE,
+            download_name TEXT NOT NULL,
+            mimetype TEXT NOT NULL DEFAULT 'application/octet-stream',
+            byte_size INTEGER NOT NULL CHECK (byte_size >= 0),
+            sha256 TEXT NOT NULL,
+            integrity_status TEXT NOT NULL DEFAULT 'verified',
+            last_verified_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_artifacts_user_created
+            ON stored_artifacts (user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_history_parent
+            ON compression_history (parent_history_id);
+        CREATE TABLE IF NOT EXISTS app_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+    """)
+    conn.execute(
+        "INSERT OR IGNORE INTO app_meta (key, value) VALUES"
+        " ('session_epoch', ?)", (uuid.uuid4().hex,))
+    # Backfill pre-parent archive members narrowly: real member rows had no
+    # durable artifact of their own.  Normal batch outputs do, so a caller-
+    # supplied batch-id collision is not adopted by the archive summary.
+    conn.execute("""
+        UPDATE compression_history AS child
+        SET parent_history_id = (
+            SELECT summary.id FROM compression_history AS summary
+            WHERE summary.user_id = child.user_id
+              AND summary.batch_id = child.batch_id
+              AND summary.container_format = 'AFCPAK'
+            ORDER BY summary.id DESC LIMIT 1)
+        WHERE child.parent_history_id IS NULL
+          AND child.operation = 'compress'
+          AND child.batch_id IS NOT NULL
+          AND child.container_format <> 'AFCPAK'
+          AND NOT EXISTS (
+              SELECT 1 FROM stored_artifacts a WHERE a.history_id = child.id)
+          AND EXISTS (
+              SELECT 1 FROM compression_history AS summary
+              WHERE summary.user_id = child.user_id
+                AND summary.batch_id = child.batch_id
+                AND summary.container_format = 'AFCPAK')
+    """)
     conn.commit()
 
 
@@ -111,11 +168,30 @@ def reset_db(path=None):
     """DESTRUCTIVE: delete the database file and recreate it from schema.sql.
     README documents this as the supported reset procedure."""
     target = path or config.DATABASE_PATH
+    # The supported reset operation wipes the private result store as well as
+    # SQLite.  Only opaque keys inside the configured store are touched.
+    if os.path.abspath(target) == os.path.abspath(config.DATABASE_PATH):
+        try:
+            import artifact_store
+            for storage_key in artifact_store.list_keys():
+                artifact_store.delete(storage_key)
+            artifact_store.remove_stale_temporary_files(min_age_seconds=0)
+        except (OSError, ValueError) as exc:
+            # Never destroy ownership metadata while a user blob remains.  A
+            # reset failure is explicit and leaves the database available for
+            # recovery/retry.
+            raise RuntimeError(
+                "Reset aborted: private stored files could not be removed.") \
+                from exc
     for suffix in ("", "-wal", "-shm"):
         try:
             os.remove(target + suffix)
-        except OSError:
+        except FileNotFoundError:
             pass
+        except OSError as exc:
+            raise RuntimeError(
+                "Reset could not remove the database file %s." %
+                (target + suffix)) from exc
     init_db(target)
 
 
@@ -142,7 +218,13 @@ def _seed_admin(conn):
 
 def get_user_by_id(uid):
     return get_db().execute("SELECT * FROM users WHERE id = ?",
-                            (uid,)).fetchone()
+                             (uid,)).fetchone()
+
+
+def session_epoch():
+    row = get_db().execute(
+        "SELECT value FROM app_meta WHERE key = 'session_epoch'").fetchone()
+    return row["value"] if row else ""
 
 
 def get_user_by_username(username):
@@ -198,10 +280,13 @@ def list_users():
                u.last_login_at,
                COUNT(h.id)                        AS file_count,
                COALESCE(SUM(h.original_bytes), 0) AS total_original,
-               COALESCE(SUM(h.compressed_bytes), 0) AS total_compressed
+               COALESCE(SUM(h.compressed_bytes), 0) AS total_compressed,
+               COALESCE((SELECT SUM(a.byte_size) FROM stored_artifacts a
+                         WHERE a.user_id = u.id), 0) AS stored_bytes
         FROM users u
         LEFT JOIN compression_history h
                ON h.user_id = u.id AND h.operation = 'compress'
+              AND h.parent_history_id IS NULL
         GROUP BY u.id
         ORDER BY u.created_at
     """).fetchall()
@@ -220,7 +305,8 @@ def add_history(user_id, filename, original_bytes, compressed_bytes,
                 operation="compress", duration_ms=0.0, batch_id=None,
                 gzip_bytes=0, huffman_bytes=0, entropy_bits=0.0,
                 block_share_pct=0.0, preset="", sha256_original="",
-                sha256_container="", detected_type=""):
+                sha256_container="", detected_type="",
+                parent_history_id=None):
     """Record one processed file.  ratio and space_saved_pct are derived here
     so every caller reports them identically."""
     orig = max(0, int(original_bytes))
@@ -233,13 +319,13 @@ def add_history(user_id, filename, original_bytes, compressed_bytes,
         " original_bytes, compressed_bytes, ratio, space_saved_pct, engine,"
         " container_format, lossless_verified, duration_ms, batch_id,"
         " gzip_bytes, huffman_bytes, entropy_bits, block_share_pct, preset,"
-        " sha256_original, sha256_container, detected_type)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " sha256_original, sha256_container, detected_type, parent_history_id)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (user_id, filename, operation, orig, comp, ratio, saved, engine,
          container_format, 1 if lossless_verified else 0, float(duration_ms),
          batch_id, int(gzip_bytes), int(huffman_bytes), float(entropy_bits),
          float(block_share_pct), preset, sha256_original or "",
-         sha256_container or "", detected_type or ""))
+         sha256_container or "", detected_type or "", parent_history_id))
     conn.commit()
     return cur.lastrowid
 
@@ -262,12 +348,21 @@ def find_by_container_sha(user_id, digest):
 
 
 def list_history(user_id, limit=200, offset=0, batch_id=None):
-    sql = "SELECT * FROM compression_history WHERE user_id = ?"
+    sql = """SELECT h.*,
+                    a.id AS artifact_id,
+                    a.download_name AS artifact_name,
+                    a.byte_size AS artifact_bytes,
+                    a.integrity_status AS artifact_integrity,
+                    a.last_verified_at AS artifact_last_verified,
+                    CASE WHEN a.id IS NULL THEN 0 ELSE 1 END AS artifact_available
+             FROM compression_history h
+             LEFT JOIN stored_artifacts a ON a.history_id = h.id
+             WHERE h.user_id = ?"""
     args = [user_id]
     if batch_id:
-        sql += " AND batch_id = ?"
+        sql += " AND h.batch_id = ?"
         args.append(batch_id)
-    sql += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+    sql += " ORDER BY h.created_at DESC, h.id DESC LIMIT ? OFFSET ?"
     args += [limit, offset]
     return get_db().execute(sql, args).fetchall()
 
@@ -281,8 +376,9 @@ def history_stats(user_id):
                COALESCE(SUM(compressed_bytes), 0)  AS total_compressed,
                COALESCE(AVG(ratio), 0)             AS avg_ratio,
                COALESCE(SUM(lossless_verified), 0) AS lossless_count
-        FROM compression_history
-        WHERE user_id = ? AND operation = 'compress'
+        FROM compression_history h
+        WHERE h.user_id = ? AND h.operation = 'compress'
+          AND h.parent_history_id IS NULL
     """, (user_id,)).fetchone()
     d = dict(row)
     d["total_saved"] = d["total_original"] - d["total_compressed"]
@@ -300,6 +396,130 @@ def delete_history_row(row_id, user_id):
         "DELETE FROM compression_history WHERE id = ? AND user_id = ?",
         (row_id, user_id))
     conn.commit()
+    return cur.rowcount
+
+
+def delete_history_group(row_id, user_id, connection=None):
+    """Delete a result; archive children cascade through parent_history_id."""
+    conn = connection or get_db()
+    cur = conn.execute(
+        "DELETE FROM compression_history WHERE id = ? AND user_id = ?",
+        (row_id, user_id))
+    if connection is None:
+        conn.commit()
+    return cur.rowcount
+
+
+# ---------------------------------------------------------------------------
+# durable compressed artifacts
+# ---------------------------------------------------------------------------
+
+class StorageQuotaExceeded(RuntimeError):
+    """Raised inside the serialized quota reservation."""
+
+    def __init__(self, used, limit):
+        super().__init__("stored artifact quota exceeded")
+        self.used = int(used)
+        self.limit = int(limit)
+
+
+@contextmanager
+def storage_reservation(user_id, new_bytes, limit):
+    """Serialize quota check + metadata commit across threads/processes.
+
+    BEGIN IMMEDIATE takes SQLite's writer lock before calculating usage.  The
+    caller writes the opaque file and inserts metadata while this transaction
+    is open, so two requests cannot both reserve the same remaining capacity.
+    """
+    conn = connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT COALESCE(SUM(byte_size), 0) AS n FROM stored_artifacts"
+            " WHERE user_id = ?", (user_id,)).fetchone()
+        used = int(row["n"])
+        if int(new_bytes) > int(limit) - used:
+            raise StorageQuotaExceeded(used, limit)
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def add_stored_artifact(history_id, user_id, storage_key, download_name,
+                        mimetype, byte_size, sha256, connection=None):
+    conn = connection or get_db()
+    cur = conn.execute(
+        "INSERT INTO stored_artifacts (history_id, user_id, storage_key,"
+        " download_name, mimetype, byte_size, sha256, last_verified_at)"
+        " VALUES (?,?,?,?,?,?,?,datetime('now'))",
+        (history_id, user_id, storage_key, download_name, mimetype,
+         int(byte_size), sha256))
+    if connection is None:
+        conn.commit()
+    return cur.lastrowid
+
+
+def stored_bytes_for_user(user_id):
+    row = get_db().execute(
+        "SELECT COALESCE(SUM(byte_size), 0) AS n FROM stored_artifacts"
+        " WHERE user_id = ?", (user_id,)).fetchone()
+    return int(row["n"])
+
+
+def get_stored_artifact(history_id):
+    """Resolve by history id; the route performs owner/admin authorization."""
+    return get_db().execute("""
+        SELECT a.*, h.filename, h.container_format, h.sha256_container,
+               h.batch_id
+        FROM stored_artifacts a
+        JOIN compression_history h ON h.id = a.history_id
+        WHERE a.history_id = ?
+    """, (history_id,)).fetchone()
+
+
+def set_artifact_integrity(history_id, status):
+    conn = get_db()
+    conn.execute(
+        "UPDATE stored_artifacts SET integrity_status = ?,"
+        " last_verified_at = datetime('now') WHERE history_id = ?",
+        (status, history_id))
+    conn.commit()
+
+
+def list_user_artifacts(user_id):
+    return get_db().execute(
+        "SELECT * FROM stored_artifacts WHERE user_id = ? ORDER BY id",
+        (user_id,)).fetchall()
+
+
+@contextmanager
+def user_deletion_lock(user_id):
+    """Serialize artifact enumeration and account deletion with new stores."""
+    conn = connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        artifacts = conn.execute(
+            "SELECT * FROM stored_artifacts WHERE user_id = ? ORDER BY id",
+            (user_id,)).fetchall()
+        yield conn, artifacts
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def delete_user(user_id, connection=None):
+    """Delete an account and its cascaded history/artifact metadata."""
+    conn = connection or get_db()
+    cur = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    if connection is None:
+        conn.commit()
     return cur.rowcount
 
 
@@ -467,28 +687,38 @@ def search_history(user_id, q="", date_from="", date_to="", engine="",
         sort = "created_at"
     direction = "ASC" if str(direction).lower() == "asc" else "DESC"
 
-    sql = ["SELECT * FROM compression_history WHERE user_id = ?"]
+    sql = ["""SELECT h.*,
+                    a.id AS artifact_id,
+                    a.download_name AS artifact_name,
+                    a.byte_size AS artifact_bytes,
+                    a.integrity_status AS artifact_integrity,
+                    a.last_verified_at AS artifact_last_verified,
+                    CASE WHEN a.id IS NULL THEN 0 ELSE 1 END AS artifact_available
+             FROM compression_history h
+             LEFT JOIN stored_artifacts a ON a.history_id = h.id
+             WHERE h.user_id = ?"""]
     args = [user_id]
     if q:
-        sql.append("AND filename LIKE ?")
+        sql.append("AND h.filename LIKE ?")
         args.append("%" + q + "%")
     if date_from:
-        sql.append("AND date(created_at) >= date(?)")
+        sql.append("AND date(h.created_at) >= date(?)")
         args.append(date_from)
     if date_to:
-        sql.append("AND date(created_at) <= date(?)")
+        sql.append("AND date(h.created_at) <= date(?)")
         args.append(date_to)
     if engine:
-        sql.append("AND engine = ?")
+        sql.append("AND h.engine = ?")
         args.append(engine)
     if preset:
-        sql.append("AND preset = ?")
+        sql.append("AND h.preset = ?")
         args.append(preset)
 
     count_sql = "SELECT COUNT(*) AS n FROM (" + " ".join(sql) + ")"
     total = get_db().execute(count_sql, args).fetchone()["n"]
 
-    sql.append("ORDER BY %s %s, id DESC LIMIT ? OFFSET ?" % (sort, direction))
+    sql.append("ORDER BY h.%s %s, h.id DESC LIMIT ? OFFSET ?" %
+               (sort, direction))
     rows = get_db().execute(" ".join(sql), args + [limit, offset]).fetchall()
     return rows, total
 

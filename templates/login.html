@@ -6,9 +6,10 @@
     <p class="eyebrow">Welcome back</p>
     <h1>Return to your compression workspace.</h1>
     <p>Process files locally, review exact savings, and restore AFC containers with SHA-256 verification.</p>
-    <a href="{{ url_for('main.landing') }}">← Back to overview</a>
+    <a href="{{ url_for('main.landing') }}">← Back to ByteSize</a>
   </section>
   <form method="post" class="auth-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div><p class="eyebrow">Account access</p><h2>Sign in</h2></div>
     {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
     <label for="username">Username
@@ -17,9 +18,10 @@
     <label for="password">Password
       <input id="password" name="password" type="password" required autocomplete="current-password">
     </label>
-    <input type="hidden" name="next" value="{{ request.args.get('next', '') }}">
+    <input type="hidden" name="next"
+           value="{{ request.args.get('next', request.form.get('next', '')) }}">
     <button class="button button-primary button-full">Sign in</button>
-    <p class="auth-switch">New to Structura? <a href="{{ url_for('auth.register') }}">Create an account</a></p>
+    <p class="auth-switch">New to ByteSize? <a href="{{ url_for('auth.register', next=request.args.get('next', request.form.get('next', ''))) }}">Create an account</a></p>
   </form>
 </div>
 {% endblock %}

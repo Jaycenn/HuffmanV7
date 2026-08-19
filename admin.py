@@ -9,8 +9,9 @@ logged-in non-admin (not a redirect) — this is asserted in the test suite.
 Part 2 can add analytics here; keep new admin routes on this blueprint and
 keep the role_required decorator on every one of them.
 """
-from flask import Blueprint, g, render_template, request
+from flask import Blueprint, g, redirect, render_template, request, url_for
 
+import artifact_store
 import auth
 import db
 
@@ -44,7 +45,38 @@ def toggle_active(user_id):
              username=g.user["username"],
              detail="target=%s active=%s" % (target["username"], new_state),
              ip_address=auth.client_ip())
-    from flask import redirect, url_for
+    return redirect(url_for("admin.users"))
+
+
+@bp.post("/users/<int:user_id>/delete")
+@auth.role_required("admin")
+def delete_user(user_id):
+    """Delete a non-admin account and every compressed artifact it owns."""
+    target = db.get_user_by_id(user_id)
+    if target is None:
+        return render_template("error.html", code=404,
+                               message="No such user."), 404
+    if target["id"] == g.user["id"] or target["role"] == "admin":
+        return render_template(
+            "error.html", code=400,
+            message="Administrator accounts cannot be deleted here."), 400
+    try:
+        # The SQLite writer lock spans enumeration, file cleanup, and account
+        # deletion. A concurrent compression either commits before this list or
+        # observes the deleted user and rolls its own new file back.
+        with db.user_deletion_lock(user_id) as (conn, artifacts):
+            for item in artifacts:
+                artifact_store.delete(item["storage_key"])
+            db.delete_user(user_id, connection=conn)
+    except OSError as exc:
+        return render_template(
+            "error.html", code=500,
+            message="Account deletion stopped because a stored file could "
+                    "not be removed: %s" % exc), 500
+    username = target["username"]
+    db.audit("admin_delete_user", user_id=g.user["id"],
+             username=g.user["username"], detail="target=%s" % username,
+             ip_address=auth.client_ip())
     return redirect(url_for("admin.users"))
 
 

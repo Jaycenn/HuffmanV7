@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#f5f6f2">
-<title>{% block title %}Workspace{% endblock %} · Structura</title>
+<meta name="csrf-token" content="{{ csrf_token }}">
+<title>{% block title %}Compress{% endblock %} · ByteSize</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 <script>
@@ -19,44 +20,45 @@
 {% block head %}{% endblock %}
 </head>
 <body class="bg-paper text-ink min-h-screen">
+<a class="skip-link" href="#mainContent">Skip to main content</a>
 
-{% if current_user %}
+{% if current_user or app_shell %}
 <div class="app-mobilebar no-print">
   <button id="navToggle" class="nav-toggle" aria-label="Open navigation" aria-expanded="false">
     <span aria-hidden="true">&#9776;</span>
   </button>
-  <a class="brand brand-compact" href="{{ url_for('main.dashboard') }}">
-    <span class="brand-mark" aria-hidden="true">S</span>
-    <span>Structura</span>
+  <a class="brand brand-compact" href="{{ url_for('main.landing') }}">
+    <span class="brand-mark" aria-hidden="true">B</span>
+    <span class="mobile-brand-copy"><strong>ByteSize</strong><small>Lossless file compression</small></span>
   </a>
 </div>
 
 <div class="app-frame">
   <div id="navScrim" class="nav-scrim hidden no-print"></div>
   <aside id="sidebar" class="app-sidebar hidden lg:block no-print">
-    <a class="brand sidebar-brand" href="{{ url_for('main.dashboard') }}">
-      <span class="brand-mark" aria-hidden="true">S</span>
+    <a class="brand sidebar-brand" href="{{ url_for('main.landing') }}">
+      <span class="brand-mark" aria-hidden="true">B</span>
       <span>
-        <strong>Structura</strong>
-        <small>Hybrid Huffman compression</small>
+        <strong>ByteSize</strong>
+        <small>Lossless file compression</small>
       </span>
     </a>
 
     <nav class="app-nav" aria-label="Main navigation">
-      {% for ep, label in [
-           ('main.dashboard','Workspace'),
-           ('main.compress_page','Compress'),
-           ('main.decompress_page','Restore'),
-           ('main.files_page','Activity')] %}
-      <a href="{{ url_for(ep) }}"
-         {% if request.endpoint == ep %}class="active" aria-current="page"{% endif %}>{{ label }}</a>
-      {% endfor %}
+      <a href="{{ url_for('main.compress_page') }}"
+         {% if request.endpoint in ('main.landing','main.compress_page') %}class="active" aria-current="page"{% endif %}>Compress</a>
+      <a href="{{ url_for('main.decompress_page') }}"
+         {% if request.endpoint == 'main.decompress_page' %}class="active" aria-current="page"{% endif %}>Decompress</a>
+      <a href="{{ url_for('main.files_page') }}"
+         {% if request.endpoint == 'main.files_page' %}class="active" aria-current="page"{% endif %}>Files</a>
+      <a href="{{ url_for('main.about_page') }}"
+         {% if request.endpoint == 'main.about_page' %}class="active" aria-current="page"{% endif %}>About</a>
 
       <div class="nav-divider"></div>
       <a href="{{ url_for('main.settings_page') }}"
          {% if request.endpoint == 'main.settings_page' %}class="active" aria-current="page"{% endif %}>Settings</a>
 
-      {% if current_user['role'] == 'admin' %}
+      {% if current_user and current_user['role'] == 'admin' %}
       <p class="nav-label">Administration</p>
       <a href="{{ url_for('admin.users') }}"
          {% if request.endpoint == 'admin.users' %}class="active" aria-current="page"{% endif %}>Users</a>
@@ -66,6 +68,7 @@
     </nav>
 
     <div class="sidebar-account">
+      {% if current_user %}
       <div class="account-row">
         <span class="account-avatar" aria-hidden="true">{{ current_user['username'][0]|upper }}</span>
         <span class="account-copy">
@@ -73,16 +76,33 @@
           <small>{{ current_user['role'] }}</small>
         </span>
       </div>
+      {% else %}
+      <p class="preview-account">Preview mode</p>
+      {% endif %}
       <button id="themeToggle" type="button" class="quiet-button" aria-pressed="false">
         <span id="themeLabel">Dark mode</span>
       </button>
+      {% if current_user %}
       <form method="post" action="{{ url_for('auth.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="quiet-button">Sign out</button>
       </form>
+      {% endif %}
     </div>
   </aside>
 
-  <main class="app-main">
+  <main id="mainContent" class="app-main" tabindex="-1"
+        {% if not current_user %}data-preview-gate{% endif %}>
+    {% if not current_user %}
+    <div class="preview-bar no-print" role="status">
+      <span><strong>Preview</strong> — sign in to compress files</span>
+      <span class="preview-actions">
+        <a href="{{ url_for('auth.login', next=request.full_path.rstrip('?')) }}">Sign in</a>
+        <a class="button button-primary button-small"
+           href="{{ url_for('auth.register', next=request.full_path.rstrip('?')) }}">Create account</a>
+      </span>
+    </div>
+    {% endif %}
     {% with msgs = get_flashed_messages() %}
       {% if msgs %}<div class="flash-message">{{ msgs|join(' ') }}</div>{% endif %}
     {% endwith %}
@@ -91,13 +111,46 @@
 </div>
 
 <nav class="app-bottomnav no-print" aria-label="Primary navigation">
-  {% for ep, short in [('main.dashboard','Home'),('main.compress_page','Compress'),
-                       ('main.decompress_page','Restore'),('main.files_page','Activity')] %}
-  <a href="{{ url_for(ep) }}" {% if request.endpoint == ep %}class="active" aria-current="page"{% endif %}>{{ short }}</a>
-  {% endfor %}
+  <a href="{{ url_for('main.compress_page') }}"
+     {% if request.endpoint in ('main.landing','main.compress_page') %}class="active" aria-current="page"{% endif %}>Compress</a>
+  <a href="{{ url_for('main.decompress_page') }}"
+     {% if request.endpoint == 'main.decompress_page' %}class="active" aria-current="page"{% endif %}>Decompress</a>
+  <a href="{{ url_for('main.files_page') }}"
+     {% if request.endpoint == 'main.files_page' %}class="active" aria-current="page"{% endif %}>Files</a>
+  <a href="{{ url_for('main.about_page') }}"
+     {% if request.endpoint == 'main.about_page' %}class="active" aria-current="page"{% endif %}>About</a>
 </nav>
 
 <script>
+(function () {
+  var token = document.querySelector('meta[name="csrf-token"]').content;
+  var unsafe = {POST:true, PUT:true, PATCH:true, DELETE:true};
+  var originalFetch = window.fetch;
+  window.fetch = function (input, options) {
+    options = options || {};
+    var method = String(options.method || "GET").toUpperCase();
+    var raw = typeof input === "string" ? input : input.url;
+    var target = new URL(raw, window.location.href);
+    if (unsafe[method] && target.origin === window.location.origin) {
+      var headers = new Headers(options.headers || {});
+      headers.set("X-CSRF-Token", token);
+      options.headers = headers;
+    }
+    return originalFetch.call(this, input, options);
+  };
+  var originalOpen = XMLHttpRequest.prototype.open;
+  var originalSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (method, url) {
+    var target = new URL(url, window.location.href);
+    this._bytesizeCsrf = unsafe[String(method).toUpperCase()] &&
+      target.origin === window.location.origin;
+    return originalOpen.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function () {
+    if (this._bytesizeCsrf) this.setRequestHeader("X-CSRF-Token", token);
+    return originalSend.apply(this, arguments);
+  };
+})();
 (function () {
   var toggle = document.getElementById("themeToggle");
   function paint() {
@@ -122,35 +175,73 @@
     sidebar.classList.toggle("hidden", !open);
     scrim.classList.toggle("hidden", !open);
     button.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) sidebar.querySelector("a").focus();
   }
   button.addEventListener("click", function () { setOpen(sidebar.classList.contains("hidden")); });
   scrim.addEventListener("click", function () { setOpen(false); });
   document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape") setOpen(false);
+    if (event.key === "Escape") { setOpen(false); button.focus(); }
   });
 })();
+{% if not current_user %}
+(function () {
+  var root = document.querySelector("[data-preview-gate]");
+  if (!root) return;
+  var selector = "#sDrop,#sInput,#sRun,#drop,#fileInput,#runBtn,#multiInput," +
+    "#dirInput,#packBtn,#csvBtn,#pdfBtn,#rDownload,#dDrop,#dInput,#dRun," +
+    "#pakInput,#extractBtn,#dDownload,[data-auth-action]";
+  var destination = {{ url_for('auth.login', next=request.full_path.rstrip('?'))|tojson }};
+  function protectedTarget(target) {
+    var found = target.closest && target.closest(selector);
+    if (found) return found;
+    var label = target.closest && target.closest("label");
+    return label && label.querySelector(selector) ? label : null;
+  }
+  function gate(event) {
+    var protectedElement = protectedTarget(event.target);
+    if (!protectedElement) return;
+    if (event.type === "keydown" && event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    var anchor = protectedElement.closest && protectedElement.closest("a[href]");
+    if (!anchor && protectedElement.matches && protectedElement.matches("a[href]")) {
+      anchor = protectedElement;
+    }
+    if (anchor) {
+      var attempted = new URL(anchor.href, window.location.href);
+      if (attempted.origin === window.location.origin) {
+        window.location.assign("/login?next=" + encodeURIComponent(
+          attempted.pathname + attempted.search));
+        return;
+      }
+    }
+    window.location.assign(destination);
+  }
+  ["click", "change", "drop", "keydown"].forEach(function (name) {
+    root.addEventListener(name, gate, true);
+  });
+})();
+{% endif %}
 </script>
 
 {% else %}
 <header class="public-header">
   <div class="public-nav">
     <a class="brand" href="{{ url_for('main.landing') }}">
-      <span class="brand-mark" aria-hidden="true">S</span>
-      <span><strong>Structura</strong><small>Hybrid Huffman compression</small></span>
+      <span class="brand-mark" aria-hidden="true">B</span>
+      <span><strong>ByteSize</strong><small>Lossless file compression</small></span>
     </a>
-    <nav aria-label="Public navigation">
-      {% if request.endpoint == 'main.landing' %}
-      <a class="public-nav-link" href="#method">How it works</a>
-      <a class="public-nav-link" href="#formats">Formats</a>
-      {% endif %}
-      <a class="public-nav-link" href="{{ url_for('auth.login') }}">Sign in</a>
-      <a class="button button-primary button-small" href="{{ url_for('auth.register') }}">Create account</a>
+    <nav aria-label="Account navigation">
+      <a class="public-nav-link" href="{{ url_for('main.about_page') }}">About</a>
+      <a class="public-nav-link" href="{{ url_for('auth.login', next=request.args.get('next', '')) }}">Sign in</a>
+      <a class="button button-primary button-small"
+         href="{{ url_for('auth.register', next=request.args.get('next', '')) }}">Create account</a>
     </nav>
   </div>
 </header>
-{% block public_content %}
-<main class="auth-page">{% block auth_content %}{% endblock %}</main>
-{% endblock %}
+<main id="mainContent" class="auth-page" tabindex="-1">
+  {% block auth_content %}{% endblock %}
+</main>
 {% endif %}
 
 {% block scripts %}{% endblock %}
