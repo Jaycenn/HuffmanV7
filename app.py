@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-app.py — AFC Thesis Dashboard, Flask application (Parts 1 + 2).
+app.py — Structura, the local AFC Flask application.
 
 MAP OF THE APPLICATION (read this first if you are picking it up cold)
 ----------------------------------------------------------------------
@@ -30,9 +30,10 @@ SEPARATE COMPRESS AND DECOMPRESS PAGES
   Decompress page can hand `MyDocument.afc` back as `MyDocument.pdf` — it
   compresses nothing.
 
-ROUTES AVAILABLE TO BUILD ON IN PART 2
---------------------------------------
-  GET  /                     -> dashboard (stat cards + recent files)
+PUBLIC AND WORKSPACE ROUTES
+---------------------------
+  GET  /                     -> public product landing page
+  GET  /dashboard            -> signed-in workspace + recent files
   GET  /compress             -> Compress Files (single + queue + archive)
   GET  /decompress           -> Decompress Files (single + extract archive)
   POST /api/decompress       -> .afc -> original, with SHA-256 verification
@@ -45,14 +46,14 @@ ROUTES AVAILABLE TO BUILD ON IN PART 2
   POST /api/batch            -> one file of a batch (client drives the queue)
   POST /api/archive/create   -> many files -> one .afcpak
   POST /api/archive/extract  -> .afcpak -> manifest + per-file download tokens
-  GET  /api/history          -> JSON history (Part 2 analytics can use this)
-  GET  /api/stats            -> JSON aggregates (Part 2 analytics)
+  GET  /api/history          -> JSON history for the signed-in user
+  GET  /api/stats            -> JSON aggregate history metrics
   GET  /download/<token>     -> fetch a produced artefact
   GET  /report.csv|/report.pdf -> exports for the current run or history
 
-PART 2 ROUTES (analytics + algorithm showcase)
-----------------------------------------------
-  GET  /analytics                 -> stat cards, charts, file-type breakdown
+ANALYSIS AND COMPATIBILITY API
+------------------------------
+  GET  /analytics                 -> compatibility redirect to /dashboard
   GET  /compare                   -> side-by-side diff of two history entries
   GET  /api/analytics/summary     -> full stats (?scope=system for admins)
   GET  /api/analytics/extensions  -> file-type distribution
@@ -64,14 +65,13 @@ PART 2 ROUTES (analytics + algorithm showcase)
   GET  /api/presets               -> Fast/Balanced/Maximum descriptions
   GET  /api/status                -> engine mode, versions, uptime
 
-PART 2 DESIGN NOTES
--------------------
+DESIGN NOTES
+------------
   * analysis.py does all container/entropy introspection READ-ONLY; the
     engine still exposes no stats API and was not modified.
-  * presets.py maps Fast/Balanced/Maximum onto afc2's existing tunables.
-    MEASURED CAVEAT: the C++ core compiles those constants in and ignores the
-    Python values, so non-default presets force the pure-Python path. See the
-    presets.py docstring before changing this.
+  * presets.py maps Fast/Balanced/Maximum onto per-call engine options. The
+    tunable native ABI accelerates all three presets; Python remains the
+    portable byte-identical fallback.
   * gzip appears ONLY as a reference measurement for the comparison chart. It
     never produces user output.
 """
@@ -184,6 +184,12 @@ def human(n):
 # ---------------------------------------------------------------------------
 
 @main.route("/")
+def landing():
+    """Public product overview. Compression remains authentication-gated."""
+    return render_template("landing.html")
+
+
+@main.route("/dashboard")
 @auth.login_required
 def dashboard():
     stats = db.history_stats(g.user["id"])
@@ -736,9 +742,8 @@ def _admin_scope():
 @main.route("/analytics")
 @auth.login_required
 def analytics_page():
-    return render_template("analytics.html",
-                           presets=presets.describe(),
-                           is_admin=(g.user["role"] == "admin"))
+    """Compatibility redirect for bookmarks from the retired analytics page."""
+    return redirect(url_for("main.dashboard"))
 
 
 @main.route("/compare")

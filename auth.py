@@ -175,7 +175,7 @@ def logout():
         db.audit("logout", user_id=user["id"], username=user["username"],
                  ip_address=client_ip())
     session.clear()
-    return redirect(url_for("auth.login"))
+    return redirect(url_for("main.landing"))
 
 
 @bp.route("/register", methods=("GET", "POST"))

@@ -12,9 +12,9 @@
 #}
 {% block content %}
 <div class="rule2 pt-4">
+  <p class="eyebrow">New compression</p>
   <h1 class="font-display text-2xl">Compress Files</h1>
-  <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Reduce the size of your files using
-    Hybrid-Huffman compression.</p>
+  <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Choose a file, select a profile, and create a lossless AFC container.</p>
 </div>
 
 <!-- tabs -->
@@ -158,9 +158,7 @@
           <div class="mt-2 h-2 bg-line dark:bg-[#35322c] rounded-sm overflow-hidden">
             <div id="sEntBar" class="h-2 bg-maroon" style="width:0%"></div></div>
           <p id="sEntBand" class="text-sm mt-2"></p>
-          <p class="text-[11px] text-dim dark:text-[#9c968a] mt-2 italic">Estimate only —
-            per-byte (order-0). AFC routinely beats it, because structural
-            blocks capture multi-byte structure a byte histogram cannot see.</p>
+          <p class="text-[11px] text-dim dark:text-[#9c968a] mt-2">Order-0 estimate only. Structural blocks may capture repetition that a byte histogram cannot represent.</p>
         </div>
         <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
           <h3 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">

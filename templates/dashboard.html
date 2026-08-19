@@ -1,88 +1,67 @@
 {% extends "base.html" %}
-{% block title %}Dashboard{% endblock %}
+{% block title %}Workspace{% endblock %}
 {% block content %}
-<div class="rule2 pt-4">
-  <h1 class="font-display text-2xl">Dashboard</h1>
-  <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Summary of everything you have compressed on
-    this machine. Full analytics charts arrive in Part 2.</p>
+<header class="workspace-header">
+  <div>
+    <p class="eyebrow">Your workspace</p>
+    <h1>What would you like to do?</h1>
+    <p>Compress a normal file or restore an AFC container. Both workflows verify the result before you download it.</p>
+  </div>
+  <span class="local-badge"><i aria-hidden="true"></i> Processing locally</span>
+</header>
+
+<div class="action-grid">
+  <a class="action-card" href="{{ url_for('main.compress_page') }}">
+    <span class="action-index">01</span>
+    <div><h2>Compress a file</h2><p>Create a smaller AFC file with the adaptive Hybrid Huffman engine.</p></div>
+    <span class="action-arrow" aria-hidden="true">→</span>
+  </a>
+  <a class="action-card" href="{{ url_for('main.decompress_page') }}">
+    <span class="action-index">02</span>
+    <div><h2>Restore a file</h2><p>Recover the original bytes and confirm integrity with SHA-256.</p></div>
+    <span class="action-arrow" aria-hidden="true">→</span>
+  </a>
 </div>
 
-<!-- stat cards -->
-<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-6">
-  {% set cards = [
-      ('Files compressed', stats.files|string, ''),
-      ('Total original', human(stats.total_original), ''),
-      ('Total compressed', human(stats.total_compressed), 'maroon'),
-      ('Space saved', '%.1f%%'|format(stats.saved_pct), '')] %}
-  {% for label, value, tone in cards %}
-  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
-    <p class="text-[11px] text-dim dark:text-[#9c968a] uppercase">{{ label }}</p>
-    <p class="font-data tabular text-xl mt-1 {% if tone %}text-maroon{% endif %}">{{ value }}</p>
+<section class="workspace-section">
+  <div class="section-row">
+    <div><p class="eyebrow">Summary</p><h2>Compression record</h2></div>
+    <a href="{{ url_for('main.files_page') }}">View all activity →</a>
   </div>
-  {% endfor %}
-</div>
-<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
-  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
-    <p class="text-[11px] text-dim dark:text-[#9c968a] uppercase">Overall ratio</p>
-    <p class="font-data tabular text-xl mt-1">{{ '%.3f'|format(stats.overall_ratio) }}×</p>
+  <div class="metric-grid">
+    <div><small>FILES COMPRESSED</small><strong>{{ stats.files }}</strong></div>
+    <div><small>ORIGINAL SIZE</small><strong>{{ human(stats.total_original) }}</strong></div>
+    <div><small>SPACE SAVED</small><strong>{{ '%.1f%%'|format(stats.saved_pct) }}</strong></div>
+    <div><small>LOSSLESS VERIFIED</small><strong>{{ stats.lossless_count }}/{{ stats.files }}</strong></div>
   </div>
-  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
-    <p class="text-[11px] text-dim dark:text-[#9c968a] uppercase">Average ratio</p>
-    <p class="font-data tabular text-xl mt-1">{{ '%.3f'|format(stats.avg_ratio) }}×</p>
-  </div>
-  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
-    <p class="text-[11px] text-dim dark:text-[#9c968a] uppercase">Lossless verified</p>
-    <p class="font-data tabular text-xl mt-1">{{ stats.lossless_count }}/{{ stats.files }}</p>
-  </div>
-  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
-    <p class="text-[11px] text-dim dark:text-[#9c968a] uppercase">Bytes saved</p>
-    <p class="font-data tabular text-xl mt-1">{{ human(stats.total_saved) }}</p>
-  </div>
-</div>
+</section>
 
-<div class="flex flex-wrap gap-3 mt-6">
-  <a href="{{ url_for('main.compress_page') }}"
-     class="px-5 py-3 rounded-md bg-maroon text-white text-sm font-semibold
-            hover:bg-maroondark">Compress files</a>
-  <a href="{{ url_for('main.report_csv') }}"
-     class="px-4 py-3 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">
-     Download report (CSV)</a>
-  <a href="{{ url_for('main.report_pdf') }}" target="_blank"
-     class="px-4 py-3 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">
-     Report (PDF / print)</a>
-</div>
-
-<h2 class="font-data text-[11px] tracking-[0.14em] uppercase text-dim dark:text-[#9c968a] mt-8">
-  Recent files</h2>
-<div class="mt-2 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg overflow-x-auto">
-  <table class="w-full text-sm">
-    <thead class="text-left border-b border-line dark:border-[#35322c]">
-      <tr class="text-[11px] uppercase text-dim dark:text-[#9c968a]">
-        <th class="px-4 py-2">File</th><th class="px-4 py-2">Op</th>
-        <th class="px-4 py-2 text-right">Original</th>
-        <th class="px-4 py-2 text-right">Result</th>
-        <th class="px-4 py-2 text-right">Ratio</th>
-        <th class="px-4 py-2">Lossless</th><th class="px-4 py-2">When</th></tr>
-    </thead>
-    <tbody>
-      {% for r in recent %}
-      <tr class="border-b border-line/60 dark:border-[#35322c]/60">
-        <td class="px-4 py-2 break-all">{{ r['filename'] }}</td>
-        <td class="px-4 py-2 font-data text-xs">{{ r['operation'] }}</td>
-        <td class="px-4 py-2 text-right font-data tabular">{{ human(r['original_bytes']) }}</td>
-        <td class="px-4 py-2 text-right font-data tabular">{{ human(r['compressed_bytes']) }}</td>
-        <td class="px-4 py-2 text-right font-data tabular">{{ '%.2f'|format(r['ratio']) }}×</td>
-        <td class="px-4 py-2">{% if r['lossless_verified'] %}
-            <span class="text-green-700">✓</span>{% else %}
-            <span class="text-maroon">✗</span>{% endif %}</td>
-        <td class="px-4 py-2 font-data text-xs text-dim dark:text-[#9c968a]">{{ r['created_at'] }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="7" class="px-4 py-6 text-center text-dim dark:text-[#9c968a] text-sm">
-        Nothing yet — <a class="text-maroon underline"
-        href="{{ url_for('main.compress_page') }}">compress a file</a> to begin.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+<section class="workspace-section">
+  <div class="section-row">
+    <div><p class="eyebrow">Latest</p><h2>Recent files</h2></div>
+    <div class="report-links">
+      <a href="{{ url_for('main.report_csv') }}">Export CSV</a>
+      <a href="{{ url_for('main.report_pdf') }}" target="_blank">Print report</a>
+    </div>
+  </div>
+  <div class="table-shell">
+    <table class="w-full text-sm">
+      <thead><tr><th>File</th><th>Operation</th><th class="text-right">Original</th><th class="text-right">Result</th><th>Verified</th><th>Processed</th></tr></thead>
+      <tbody>
+        {% for r in recent %}
+        <tr>
+          <td class="break-all">{{ r['filename'] }}</td>
+          <td class="font-data text-xs">{{ r['operation'] }}</td>
+          <td class="text-right font-data tabular">{{ human(r['original_bytes']) }}</td>
+          <td class="text-right font-data tabular">{{ human(r['compressed_bytes']) }}</td>
+          <td>{% if r['lossless_verified'] %}<span class="verified-mark">Verified</span>{% else %}<span class="failed-mark">Failed</span>{% endif %}</td>
+          <td class="font-data text-xs text-dim">{{ r['created_at'] }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="empty-state">No activity yet. <a href="{{ url_for('main.compress_page') }}">Compress your first file.</a></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

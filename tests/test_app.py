@@ -80,9 +80,14 @@ def corpus_files(limit=4):
 def test_auth(app, appmod):
     c = app.test_client()
 
-    # anonymous is redirected to login, not 500
+    # anonymous users can inspect the landing page, but protected workspaces
+    # still redirect to sign in.
     r = c.get("/", follow_redirects=False)
-    check("anonymous redirected to login",
+    check("anonymous reaches public landing page",
+          r.status_code == 200 and b"Structura" in r.data
+          and b"Sign in to compress" in r.data, r.status_code)
+    r = c.get("/compress", follow_redirects=False)
+    check("anonymous cannot use compression workspace",
           r.status_code in (301, 302) and "/login" in r.headers.get("Location", ""),
           r.status_code)
 
@@ -93,13 +98,14 @@ def test_auth(app, appmod):
                follow_redirects=False)
     check("register creates account and logs in", r.status_code in (301, 302))
 
-    r = c.get("/")
+    r = c.get("/dashboard")
     check("logged-in user reaches dashboard", r.status_code == 200)
 
     # logout
     c.post("/logout")
     r = c.get("/", follow_redirects=False)
-    check("logout ends session", r.status_code in (301, 302))
+    check("logout returns to public landing page",
+          r.status_code == 200 and b"Sign in to compress" in r.data)
 
     # wrong password rejected
     r = login(c, "alice", "WRONG")
@@ -426,9 +432,10 @@ def test_reports(app):
     check("CSV report contains a TOTAL row", b"TOTAL" in r.data)
     r = c.get("/report.pdf")
     check("PDF (print view) renders", r.status_code == 200
-          and b"Performance Report" in r.data, r.status_code)
-    check("report states engine + app version",
-          config.ENGINE_VERSION.encode() in r.data)
+          and b"Structura" in r.data and b"Compression report" in r.data,
+          r.status_code)
+    check("report omits academic and version branding",
+          b"HOLY ANGEL" not in r.data and config.ENGINE_VERSION.encode() not in r.data)
 
 
 def test_pages_render(app):
@@ -783,9 +790,10 @@ def test_part1_still_works(app):
     """Regression guard: Part 2 must not have broken Part 1's behaviour."""
     c = app.test_client()
     login(c, "alice", "correct-horse")
-    for path in ("/", "/compress", "/files", "/settings", "/analytics",
-                 "/compare"):
+    for path in ("/dashboard", "/compress", "/files", "/settings", "/compare"):
         check("page still renders: %s" % path, c.get(path).status_code == 200)
+    check("retired analytics page redirects to workspace",
+          c.get("/analytics", follow_redirects=False).status_code in (301, 302))
     r = c.get("/report.csv")
     check("CSV report still exports", r.status_code == 200
           and b"TOTAL" in r.data)
@@ -820,7 +828,7 @@ def test_pages_are_separate(app):
     check("Decompress page is headed 'Decompress Files'",
           b"Decompress Files" in rd.data)
     check("Compress page carries its description",
-          b"Reduce the size of your files" in rc.data)
+          b"Choose a file, select a profile" in rc.data)
     check("Decompress page carries its description",
           b"Restore an AFC file to its original format" in rd.data)
 
@@ -831,7 +839,7 @@ def test_pages_are_separate(app):
           b"Compress / Decompress" not in rd.data)
 
     # Both are in the primary navigation, on every page — not buried.
-    for path in ("/", "/analytics", "/files", "/settings"):
+    for path in ("/dashboard", "/files", "/settings"):
         body = c.get(path).data
         check("nav links Compress from %s" % path,
               b'href="/compress"' in body)

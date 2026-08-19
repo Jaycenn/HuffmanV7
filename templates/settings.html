@@ -1,96 +1,68 @@
 {% extends "base.html" %}
 {% block title %}Settings{% endblock %}
 {% block content %}
-<div class="rule2 pt-4">
-  <h1 class="font-display text-2xl">Settings</h1>
+<div class="rule2">
+  <p class="eyebrow">Workspace preferences</p>
+  <h1>Settings</h1>
+  <p class="text-dim text-sm mt-1">Account, file limits, privacy, and engine availability.</p>
 </div>
-<div class="grid lg:grid-cols-2 gap-4 mt-6">
-  <section class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-6">
-    <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Account</h2>
-    <dl class="mt-3 text-sm space-y-1">
-      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Username</dt>
-        <dd class="font-data">{{ current_user['username'] }}</dd></div>
-      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Email</dt>
-        <dd class="font-data break-all">{{ current_user['email'] }}</dd></div>
-      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Role</dt>
-        <dd class="font-data">{{ current_user['role'] }}</dd></div>
-      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Created</dt>
-        <dd class="font-data">{{ current_user['created_at'] }}</dd></div>
+
+<div class="settings-grid">
+  <section class="settings-card">
+    <p class="eyebrow">Account</p>
+    <h2>{{ current_user['username'] }}</h2>
+    <dl>
+      <div><dt>Email</dt><dd>{{ current_user['email'] }}</dd></div>
+      <div><dt>Role</dt><dd>{{ current_user['role'] }}</dd></div>
+      <div><dt>Created</dt><dd>{{ current_user['created_at'] }}</dd></div>
     </dl>
-    <a href="{{ url_for('auth.change_password') }}"
-       class="inline-block mt-4 px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
-              hover:border-maroon">Change password</a>
+    <a class="button button-secondary button-small" href="{{ url_for('auth.change_password') }}">Change password</a>
   </section>
 
-  <section class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-6">
-    <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Size policy (enforced)</h2>
-    <p class="text-xs text-dim dark:text-[#9c968a] mt-1">These come from <code>config.py</code>; the
-      UI never hardcodes a limit.</p>
-    <dl class="mt-3 text-sm space-y-1">
-      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Minimum file</dt>
-        <dd class="font-data tabular">{{ human(cfg.MIN_FILE_SIZE) }}</dd></div>
-      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Maximum file</dt>
-        <dd class="font-data tabular">{{ human(cfg.MAX_FILE_SIZE) }}</dd></div>
-      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Maximum batch</dt>
-        <dd class="font-data tabular">{{ human(cfg.MAX_BATCH_SIZE) }}</dd></div>
-      <div class="flex justify-between"><dt class="text-dim dark:text-[#9c968a]">Concurrent jobs</dt>
-        <dd class="font-data tabular">{{ cfg.MAX_CONCURRENT_JOBS }}</dd></div>
+  <section class="settings-card">
+    <p class="eyebrow">File limits</p>
+    <h2>Processing policy</h2>
+    <dl>
+      <div><dt>Minimum file</dt><dd>{{ human(cfg.MIN_FILE_SIZE) }}</dd></div>
+      <div><dt>Maximum file</dt><dd>{{ human(cfg.MAX_FILE_SIZE) }}</dd></div>
+      <div><dt>Maximum batch</dt><dd>{{ human(cfg.MAX_BATCH_SIZE) }}</dd></div>
+      <div><dt>Concurrent jobs</dt><dd>{{ cfg.MAX_CONCURRENT_JOBS }}</dd></div>
     </dl>
-    <p class="text-xs text-dim dark:text-[#9c968a] mt-3">Defaults match the ceiling the thesis
-      Appendix C documents as tested ({{ human(cfg.PAPER_TESTED_MAX_FILE) }} per
-      file, {{ human(cfg.PAPER_TESTED_MAX_BATCH) }} per batch). See
-      <code>SIZE_POLICY.md</code> before raising them.</p>
   </section>
 
-  <section class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-6 lg:col-span-2">
-    <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Engine</h2>
-    <dl class="mt-3 text-sm grid sm:grid-cols-3 gap-2">
-      <div><dt class="text-dim dark:text-[#9c968a] text-xs">App</dt>
-        <dd class="font-data">{{ cfg.APP_VERSION }}</dd></div>
-      <div><dt class="text-dim dark:text-[#9c968a] text-xs">Engine</dt>
-        <dd class="font-data">{{ cfg.ENGINE_VERSION }}</dd></div>
-      <div><dt class="text-dim dark:text-[#9c968a] text-xs">Archive format</dt>
-        <dd class="font-data">{{ cfg.ARCHIVE_EXT }}</dd></div>
-    </dl>
-    <p class="text-xs text-dim dark:text-[#9c968a] mt-3">Data stays on this machine: accounts and
-      history live in a local SQLite file, produced files are held in memory
-      for this session only, and nothing is uploaded anywhere. See
-      <code>SCOPE_NOTES.md</code>.</p>
+  <section class="settings-card settings-wide">
+    <p class="eyebrow">Privacy</p>
+    <h2>Local processing</h2>
+    <p>Accounts and processing history stay in the local SQLite database. Produced files are held for the current session, and the application does not send file contents to an external service.</p>
+  </section>
+
+  <section class="settings-card settings-wide">
+    <p class="eyebrow">Compression engine</p>
+    <h2 id="beState">Checking backend…</h2>
+    <p id="beReason"></p>
+    <div class="backend-list" id="bePresets"></div>
+    <pre id="beSteps" class="hidden"></pre>
+    <p class="settings-note">Python and native execution produce the same AFC output; the backend changes processing speed only.</p>
   </section>
 </div>
 
-<!-- [v7] Compression backend. A silent fall back to pure Python is ~12x
-     slower with byte-identical output, so it is stated plainly here rather
-     than left for the user to infer from a slow run. -->
-<div class="mt-6 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-5">
-  <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Compression backend</h2>
-  <p class="mt-2 text-lg font-semibold" id="beState">checking…</p>
-  <p class="text-sm text-dim dark:text-[#9c968a] mt-1" id="beReason"></p>
-  <div class="mt-3 grid gap-1 font-data text-xs" id="bePresets"></div>
-  <pre id="beSteps" class="hidden mt-3 text-[10px] font-data overflow-auto max-h-48
-                           whitespace-pre-wrap text-dim dark:text-[#9c968a]"></pre>
-  <p class="text-[11px] text-dim dark:text-[#9c968a] mt-3">Output is identical on
-    either backend — only speed differs. For a full diagnosis run
-    <code>python tools/native_doctor.py</code>.</p>
-</div>
 <script>
 fetch("/api/status").then(function (r) { return r.json(); }).then(function (j) {
   var ok = j.native_available;
-  var el = document.getElementById("beState");
-  el.textContent = ok ? "C++ native — active" : "pure Python — native core not loaded";
-  el.className = "mt-2 text-lg font-semibold " + (ok ? "text-green-700" : "text-maroon");
+  var state = document.getElementById("beState");
+  state.textContent = ok ? "C++ native is active" : "Portable Python fallback is active";
+  state.classList.add(ok ? "backend-ok" : "backend-warning");
   document.getElementById("beReason").textContent = j.native_reason || "";
-  var pb = document.getElementById("bePresets");
-  pb.innerHTML = "";
-  Object.keys(j.preset_backends || {}).forEach(function (k) {
-    var d = document.createElement("div");
-    d.textContent = k + " \u2192 " + j.preset_backends[k];
-    pb.appendChild(d);
+  var list = document.getElementById("bePresets");
+  Object.keys(j.preset_backends || {}).forEach(function (name) {
+    var row = document.createElement("div");
+    row.innerHTML = "<span>" + name + "</span><strong>" + j.preset_backends[name] + "</strong>";
+    list.appendChild(row);
   });
   if (!ok && (j.native_diagnostics || []).length) {
     var pre = document.getElementById("beSteps");
     pre.textContent = j.native_diagnostics.map(function (d) {
-      return (d.ok ? "[ok]   " : "[FAIL] ") + d.step + (d.detail ? " - " + d.detail : "");
+      return (d.ok ? "[ok] " : "[issue] ") + d.step + (d.detail ? " - " + d.detail : "");
     }).join("\n");
     pre.classList.remove("hidden");
   }

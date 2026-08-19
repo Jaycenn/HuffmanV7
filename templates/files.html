@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Files &amp; History{% endblock %}
+{% block title %}Activity{% endblock %}
 {% block content %}
 <div class="rule2 pt-4">
-  <h1 class="font-display text-2xl">Files &amp; History</h1>
-  <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Every file you have processed. Stored in
-    this machine's local SQLite database only.</p>
+  <p class="eyebrow">Processing record</p>
+  <h1 class="font-display text-2xl">Activity</h1>
+  <p class="text-dim text-sm mt-1">Search the compression and restoration records stored on this machine.</p>
 </div>
 
 <!-- Feature 4: search / filter controls (extends Part 1's static table) -->
@@ -41,9 +41,6 @@
   <a href="{{ url_for('main.report_pdf') }}" target="_blank"
      class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">
      Export PDF</a>
-  <a href="{{ url_for('main.compare_page') }}"
-     class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">
-     Compare two results</a>
   <span id="resultCount" class="font-data text-xs text-dim dark:text-[#9c968a] ml-auto"></span>
 </div>
 

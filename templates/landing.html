@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Lossless compression, built around structure{% endblock %}
+{% block public_content %}
+<main>
+  <section class="landing-hero">
+    <div class="hero-copy">
+      <p class="eyebrow">Lossless file compression</p>
+      <h1>Find the structure a byte-by-byte encoder misses.</h1>
+      <p class="hero-lead">Structura combines multi-level frequency analysis, a bit-cost decision rule, and canonical Huffman coding to reduce repetitive files without changing a single original byte.</p>
+      <div class="hero-actions">
+        <a class="button button-primary" href="{{ url_for('auth.login') }}">Sign in to compress</a>
+        <a class="button button-secondary" href="#method">See how it works</a>
+      </div>
+      <p class="privacy-line"><span aria-hidden="true">●</span> Local processing · SHA-256 verified · No lossy conversion</p>
+    </div>
+
+    <div class="product-preview" aria-label="Preview of the signed-in compression workspace">
+      <div class="preview-topbar">
+        <span class="preview-brand">Structura</span>
+        <span class="preview-status">Sign-in required</span>
+      </div>
+      <div class="preview-body">
+        <div class="preview-heading">
+          <div><small>NEW COMPRESSION</small><strong>Choose a file</strong></div>
+          <span>Balanced</span>
+        </div>
+        <div class="preview-drop">
+          <span class="preview-arrow" aria-hidden="true">↑</span>
+          <strong>Drop a file here</strong>
+          <small>PDF, DOCX, text, structured data, source code, and binary files</small>
+        </div>
+        <div class="preview-metrics">
+          <div><small>MODE</small><strong>Adaptive</strong></div>
+          <div><small>VERIFY</small><strong>SHA-256</strong></div>
+          <div><small>BACKEND</small><strong>C++ Native</strong></div>
+        </div>
+      </div>
+      <a class="preview-lock" href="{{ url_for('auth.login') }}">Sign in to use the workspace →</a>
+    </div>
+  </section>
+
+  <section class="landing-section" id="method">
+    <div class="section-heading">
+      <p class="eyebrow">The method</p>
+      <h2>One pipeline. Three deliberate decisions.</h2>
+      <p>The system stays inside the Huffman family. It does not switch to an unrelated compressor behind the scenes.</p>
+    </div>
+    <div class="method-grid">
+      <article><span>01</span><h3>Analyze at multiple levels</h3><p>Count individual bytes, recurring sequences, and structural word patterns in the uploaded file.</p></article>
+      <article><span>02</span><h3>Keep only patterns that pay</h3><p>The Bit Cost Decision Engine rejects candidates whose dictionary cost would erase their savings.</p></article>
+      <article><span>03</span><h3>Encode and verify</h3><p>Canonical Hybrid Huffman coding produces the AFC file, then an automatic round trip confirms exact bytes and SHA-256.</p></article>
+    </div>
+  </section>
+
+  <section class="landing-section formats-section" id="formats">
+    <div class="formats-copy">
+      <p class="eyebrow">Automatic file handling</p>
+      <h2>Upload the file you already have.</h2>
+      <p>PDF and DOCX internals are analyzed automatically. Repetitive components may be encoded while already-compressed components are preserved exactly. Savings depend on the file's actual contents.</p>
+    </div>
+    <div class="format-list" aria-label="Supported formats">
+      <span>TXT</span><span>CSV</span><span>JSON</span><span>SQL</span>
+      <span>Source code</span><span>PDF</span><span>DOCX</span><span>Binary</span>
+    </div>
+  </section>
+
+  <section class="landing-cta">
+    <div><p class="eyebrow">Ready when you are</p><h2>Compress locally. Restore exactly.</h2></div>
+    <a class="button button-primary" href="{{ url_for('auth.register') }}">Create an account</a>
+  </section>
+</main>
+<footer class="public-footer">
+  <span>Structura</span>
+  <span>Static canonical Hybrid Huffman · Local and lossless</span>
+</footer>
+{% endblock %}
