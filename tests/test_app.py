@@ -18,6 +18,7 @@ Covers, per the brief's proof requirements:
 """
 import ast
 import hashlib
+import re
 import io
 import os
 import shutil
@@ -85,16 +86,18 @@ def corpus_files(limit=4):
 def test_auth(app, appmod):
     c = app.test_client()
 
-    # Anonymous visitors see the genuine app shell, while work endpoints stay
-    # server-gated.
+    # Anonymous visitors get the public ByteSize website; the workspace and
+    # every work endpoint stay gated.
     r = c.get("/", follow_redirects=False)
-    check("anonymous reaches real ByteSize interface",
+    check("anonymous reaches the public ByteSize landing page",
           r.status_code == 200 and b"ByteSize" in r.data
-          and b'id="sDrop"' in r.data
-          and b"Preview" in r.data, r.status_code)
+          and b'class="landing-hero"' in r.data
+          and b'class="public-header"' in r.data
+          and b'class="app-sidebar' not in r.data, r.status_code)
     r = c.get("/compress", follow_redirects=False)
-    check("anonymous can inspect compression workspace",
-          r.status_code == 200 and b'id="sRun"' in r.data, r.status_code)
+    check("anonymous is sent to sign in before the workspace",
+          r.status_code in (301, 302)
+          and "/login" in r.headers.get("Location", ""), r.status_code)
     check("anonymous compression action remains server-gated",
           c.post("/api/compress").status_code == 401)
 
@@ -105,14 +108,25 @@ def test_auth(app, appmod):
                follow_redirects=False)
     check("register creates account and logs in", r.status_code in (301, 302))
 
+    check("registration lands in the ByteSize Workspace",
+          r.headers.get("Location") == "/dashboard", r.headers.get("Location"))
+
     r = c.get("/dashboard")
     check("logged-in user reaches dashboard", r.status_code == 200)
+    r = c.get("/", follow_redirects=False)
+    check("signed-in visitor to / is sent to the workspace",
+          r.status_code in (301, 302)
+          and r.headers.get("Location") == "/dashboard",
+          r.headers.get("Location"))
 
     # logout
-    c.post("/logout")
+    r = c.post("/logout", follow_redirects=False)
+    check("logout returns to the public landing page",
+          r.status_code in (301, 302) and r.headers.get("Location") == "/",
+          r.headers.get("Location"))
     r = c.get("/", follow_redirects=False)
-    check("logout returns to public landing page",
-          r.status_code == 200 and b"sign in to compress" in r.data)
+    check("landing page invites an anonymous visitor to sign in",
+          r.status_code == 200 and b"Sign in to compress" in r.data)
 
     # wrong password rejected
     r = login(c, "alice", "WRONG")
@@ -510,12 +524,17 @@ def test_reports(app):
 def test_pages_render(app):
     c = app.test_client()
     login(c, "alice", "correct-horse")
-    for path in ("/", "/compress", "/decompress", "/files", "/about",
+    for path in ("/dashboard", "/compress", "/decompress", "/files", "/about",
                  "/settings"):
         r = c.get(path)
         if not check("page renders: %s" % path, r.status_code == 200,
                      r.status_code):
             continue
+    r = c.get("/", follow_redirects=False)
+    check("signed-in / redirects to the workspace",
+          r.status_code in (301, 302)
+          and r.headers.get("Location") == "/dashboard",
+          r.headers.get("Location"))
     # every size shown must come from config: assert the rendered Settings page
     # actually contains the configured maximum, not a stale literal
     r = c.get("/settings")
@@ -525,21 +544,48 @@ def test_pages_render(app):
           human(config.MAX_FILE_SIZE))
 
 
-def test_public_shell_and_action_gates(app):
+def test_public_site_and_action_gates(app):
+    """The public website and the ByteSize Workspace are separate surfaces.
+
+    `/` is a real marketing/landing page again rather than the application
+    shell, every workspace destination is login-gated, and no work endpoint is
+    reachable anonymously."""
     c = app.test_client()
-    for path in ("/", "/compress", "/decompress", "/files", "/about"):
+    for path in ("/", "/about", "/login", "/register"):
         r = c.get(path)
-        check("public app page renders: %s" % path,
-              r.status_code == 200 and b"ByteSize" in r.data, r.status_code)
+        check("public page renders: %s" % path,
+              r.status_code == 200 and b"ByteSize" in r.data
+              and b'class="public-header"' in r.data
+              and b'class="app-sidebar' not in r.data, r.status_code)
 
     root = c.get("/").data
-    check("root is the real Compress screen, not a mockup",
-          b'id="sDrop"' in root and b'id="sPreset"' in root
-          and b"Preview" in root)
-    files = c.get("/files").data
-    check("public Files view has a genuine empty state",
-          b"Sign in to see your compressed files" in files
-          and b"alice29.txt" not in files)
+    check("root is the public landing page, not the app shell",
+          b'class="landing-hero"' in root
+          and b'class="product-preview"' in root
+          and b'id="sDrop"' not in root and b'id="sPreset"' not in root)
+    check("landing page keeps the Structura-derived sections",
+          b'id="method"' in root and b'id="formats"' in root
+          and b"How it works" in root and b"Formats" in root
+          and b'class="method-grid"' in root
+          and b'class="format-list"' in root
+          and b'class="landing-cta"' in root
+          and b'class="public-footer"' in root)
+    check("landing copy identifies ByteSize, not Structura",
+          b"Find the structure a byte-by-byte encoder misses" in root
+          and b"ByteSize combines multi-level frequency analysis" in root
+          and re.search(rb"Structura\b", root) is None)
+    check("landing preview leads to authentication",
+          b"Sign in to use the workspace" in root
+          and b'class="preview-brand">ByteSize<' in root)
+    check("landing preview names the backend actually loaded",
+          (b"C++ native" in root) == bool(__import__("app").engine.NATIVE))
+
+    for path in ("/dashboard", "/compress", "/decompress", "/files",
+                 "/settings", "/compare"):
+        r = c.get(path, follow_redirects=False)
+        check("workspace page is login-gated: %s" % path,
+              r.status_code in (301, 302)
+              and "/login" in r.headers.get("Location", ""), r.status_code)
 
     api_actions = [
         ("POST", "/api/compress"), ("POST", "/api/decompress"),
@@ -573,8 +619,9 @@ def test_public_shell_and_action_gates(app):
           == config.RESULT_RETENTION_DAYS
           and c.get("/api/config").get_json()["max_stored_bytes_per_user"]
           == config.MAX_STORED_BYTES_PER_USER)
-    check("public report links preserve their attempted destination in JS",
-          b"attempted.pathname + attempted.search" in c.get("/files").data)
+    check("gated destinations survive the sign-in round trip",
+          c.get("/files", follow_redirects=False).headers.get("Location")
+          == "/login?next=/files")
 
 
 def test_intended_destination_preserved(app):
@@ -609,21 +656,34 @@ def test_intended_destination_preserved(app):
         follow_redirects=False)
     check("registration cannot redirect to another origin",
           r.status_code in (301, 302)
-          and r.headers.get("Location") == "/", r.headers.get("Location"))
+          and r.headers.get("Location") == "/dashboard",
+          r.headers.get("Location"))
 
 
 def test_branding_and_about_evidence(app):
     import csv as _csv
     c = app.test_client()
-    for path in ("/", "/compress", "/decompress", "/files", "/about",
-                 "/login", "/register"):
-        body = c.get(path).data
-        check("ByteSize brand renders: %s" % path, b"ByteSize" in body)
-        check("institution and versions absent: %s" % path,
-              b"Holy Angel University" not in body
-              and b"School of Computing" not in body
-              and config.APP_VERSION.encode() not in body
-              and config.ENGINE_VERSION.encode() not in body)
+    public_paths = ("/", "/about", "/login", "/register")
+    workspace_paths = ("/dashboard", "/compress", "/decompress", "/files",
+                       "/about", "/settings")
+    signed_in = app.test_client()
+    login(signed_in, "alice", "correct-horse")
+    for client, paths in ((c, public_paths), (signed_in, workspace_paths)):
+        for path in paths:
+            body = client.get(path).data
+            check("ByteSize brand renders: %s" % path, b"ByteSize" in body)
+            # \b keeps the domain word "structural" out of the brand sweep.
+            check("no Structura branding survives: %s" % path,
+                  re.search(rb"Structura\b", body) is None)
+            check("institution and versions absent: %s" % path,
+                  b"Holy Angel University" not in body
+                  and b"School of Computing" not in body
+                  and config.APP_VERSION.encode() not in body
+                  and config.ENGINE_VERSION.encode() not in body)
+    for path in workspace_paths:
+        body = signed_in.get(path).data
+        check("workspace carries the ByteSize B mark: %s" % path,
+              b'class="brand-mark" aria-hidden="true">B<' in body)
 
     standalone = open(os.path.join(ROOT, "AFC_WebApp.html"),
                       encoding="utf-8").read()
@@ -2559,7 +2619,7 @@ def main():
         test_history_isolation(app)
         test_reports(app)
         test_pages_render(app)
-        test_public_shell_and_action_gates(app)
+        test_public_site_and_action_gates(app)
         test_intended_destination_preserved(app)
         test_branding_and_about_evidence(app)
         test_analytics_routes_removed(app)

@@ -208,7 +208,9 @@ def login():
         return redirect(url_for("auth.change_password"))
     if nxt:
         return redirect(nxt)
-    return redirect(url_for("main.landing"))
+    # No intended destination: the workspace is the home of a signed-in
+    # ByteSize account, not the public marketing page.
+    return redirect(url_for("main.dashboard"))
 
 
 @bp.post("/logout")
@@ -245,7 +247,7 @@ def register():
     nxt = safe_next(request.args.get("next") or request.form.get("next"))
     if nxt:
         return redirect(nxt)
-    return redirect(url_for("main.landing"))
+    return redirect(url_for("main.dashboard"))
 
 
 @bp.route("/change-password", methods=("GET", "POST"))
@@ -280,4 +282,4 @@ def change_password():
     nxt = safe_next(session.pop("post_auth_next", None))
     if nxt:
         return redirect(nxt)
-    return redirect(url_for("main.landing"))
+    return redirect(url_for("main.dashboard"))

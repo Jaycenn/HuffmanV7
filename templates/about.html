@@ -1,6 +1,10 @@
 {% extends "base.html" %}
-{% block title %}How it works{% endblock %}
-{% block content %}
+{% block title %}About{% endblock %}
+
+{#  One body, two shells. `/about` is public, so the same thesis content is
+    rendered inside the public website chrome for a signed-out reader and
+    inside the ByteSize Workspace shell once there is an account. #}
+{% set body %}
 <header class="about-hero">
   <p class="eyebrow">Method and evidence</p>
   <h1>Adaptive File Compression System Using Multi-Level Frequency Analysis &amp; Hybrid Huffman</h1>
@@ -37,4 +41,15 @@
   <p class="document-note"><strong>PDF and DOCX need class-qualified interpretation.</strong>
      Files with internally uncompressed streams can provide substantial structure for Hybrid Huffman, while ordinary producer-compressed files may offer very little additional reduction. ByteSize therefore makes no general compression-percentage claim for either format; both are reconstructed byte for byte.</p>
 </section>
+{% endset %}
+
+{% block content %}{{ body }}{% endblock %}
+
+{% block public_content %}
+<main id="mainContent" class="public-page" tabindex="-1">{{ body }}</main>
+<footer class="public-footer">
+  <span>ByteSize</span>
+  <span>Static canonical Hybrid Huffman · Local and lossless ·
+    <a href="{{ url_for('main.landing') }}">Back to the overview</a></span>
+</footer>
 {% endblock %}

@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">Your workspace</p>
     <h1>What would you like to do?</h1>
-    <p>Compress a normal file or restore an AFC container. Both workflows verify the result before you download it.</p>
+    <p>Compress a normal file with the Hybrid Huffman engine, or decompress an AFC container back to its exact original bytes. Both workflows verify the result before you download it.</p>
   </div>
   <span class="local-badge"><i aria-hidden="true"></i> Processing locally</span>
 </header>
@@ -18,7 +18,7 @@
   </a>
   <a class="action-card" href="{{ url_for('main.decompress_page') }}">
     <span class="action-index">02</span>
-    <div><h2>Restore a file</h2><p>Recover the original bytes and confirm integrity with SHA-256.</p></div>
+    <div><h2>Decompress a file</h2><p>Restore the original bytes from an AFC container and confirm integrity with SHA-256.</p></div>
     <span class="action-arrow" aria-hidden="true">→</span>
   </a>
 </div>

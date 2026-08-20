@@ -32,12 +32,12 @@ SEPARATE COMPRESS AND DECOMPRESS PAGES
 
 PUBLIC AND WORKSPACE ROUTES
 ---------------------------
-  GET  /                     -> real Compress interface (public preview)
-  GET  /dashboard            -> signed-in workspace + recent files
-  GET  /compress             -> public shell; actions remain login-gated
-  GET  /decompress           -> public shell; actions remain login-gated
+  GET  /                     -> public ByteSize landing page
+  GET  /dashboard            -> ByteSize Workspace + recent files (signed in)
+  GET  /compress             -> Compress Files (single + queue + archive)
+  GET  /decompress           -> Decompress Files (single + extract archive)
   POST /api/decompress       -> .afc -> original, with SHA-256 verification
-  GET  /files                -> public empty state / owner's stored files
+  GET  /files                -> stored files + history for the current user
   GET  /about                -> public method + CSV-backed benchmark evidence
   GET  /settings             -> account settings
   GET  /admin/users          -> admin only
@@ -328,53 +328,60 @@ def human(n):
 
 @main.route("/")
 def landing():
-    """The real Compress interface, publicly viewable and server-gated."""
-    return render_template("compress.html", app_shell=True,
-                           preview=g.get("user") is None)
+    """Public ByteSize landing page. Compression stays authentication-gated.
+
+    A signed-in visitor has no use for the marketing shell, so `/` sends them
+    straight to the workspace that the brand mark already points at."""
+    if g.get("user") is not None:
+        return redirect(url_for("main.dashboard"))
+    # The preview card names the backend this installation actually loaded;
+    # it must never advertise native acceleration that is not present.
+    return render_template("landing.html", backend=engine_name())
 
 
 @main.route("/about")
 def about_page():
-    """Public methodology and repository-traceable benchmark evidence."""
-    return render_template("about.html", app_shell=True,
-                           preview=g.get("user") is None)
+    """Method and repository-traceable benchmark evidence.
+
+    Public, because the thesis explanation is part of the product story. The
+    template carries both shells: public chrome for a signed-out reader and
+    the workspace shell once there is an account."""
+    return render_template("about.html")
 
 
 @main.route("/dashboard")
 @auth.login_required
 def dashboard():
+    """The ByteSize Workspace — the home of the authenticated application."""
     stats = db.history_stats(g.user["id"])
     recent = db.list_history(g.user["id"], limit=10)
     return render_template("dashboard.html", stats=stats, recent=recent)
 
 
 @main.route("/compress")
+@auth.login_required
 def compress_page():
     """Compress Files — normal file in, .afc out. Compression only."""
-    return render_template("compress.html", app_shell=True,
-                           preview=g.get("user") is None)
+    return render_template("compress.html")
 
 
 @main.route("/decompress")
+@auth.login_required
 def decompress_page():
     """Decompress Files — .afc in, original file out. Decompression only.
 
     A separate destination in the primary navigation rather than a mode inside
     the compress box, so a first-time user never has to work out which
     operation an ambiguous upload will perform."""
-    return render_template("decompress.html", app_shell=True,
-                           preview=g.get("user") is None)
+    return render_template("decompress.html")
 
 
 @main.route("/files")
+@auth.login_required
 def files_page():
-    if g.get("user") is None:
-        return render_template("files.html", rows=[], stats=None,
-                               app_shell=True, preview=True)
-    # The authenticated table is fetched with server-side search/pagination;
-    # avoid loading hundreds of unused rows into the initial HTML response.
-    return render_template("files.html", rows=[], stats=None,
-                           app_shell=True, preview=False)
+    # The table is fetched with server-side search/pagination; avoid loading
+    # hundreds of unused rows into the initial HTML response.
+    return render_template("files.html", rows=[], stats=None)
 
 
 @main.route("/settings")
@@ -1350,8 +1357,7 @@ def create_app(db_path=None, testing=False, storage_dir=None):
         if request.path.startswith("/api/"):
             return jsonify(error=message), 400
         return render_template(
-            "error.html", code=400, message=message,
-            app_shell=g.user is not None), 400
+            "error.html", code=400, message=message), 400
 
     @app.before_request
     def _load_user():
@@ -1390,8 +1396,7 @@ def create_app(db_path=None, testing=False, storage_dir=None):
         if request.path.startswith("/api/") or request.path.startswith("/download/"):
             return jsonify(error="Not found, or that download has expired."), 404
         return render_template("error.html", code=404,
-                               message="Page not found.", app_shell=True,
-                               preview=g.get("user") is None), 404
+                               message="Page not found."), 404
 
     @app.errorhandler(413)
     def _413(_):
