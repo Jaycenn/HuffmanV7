@@ -27,7 +27,7 @@
         <div class="preview-drop">
           <span class="preview-arrow" aria-hidden="true">↑</span>
           <strong>Drop a file here</strong>
-          <small>Text, source code, markup, structured data and logs — any file is accepted</small>
+          <small>Text, source code, markup, structured data, logs and PDF — any file is accepted</small>
         </div>
         <div class="preview-metrics">
           <div><small>MODE</small><strong>Adaptive</strong></div>
@@ -56,16 +56,15 @@
     <div class="formats-copy">
       <p class="eyebrow">Where the method applies</p>
       <h2>Built for files that still have structure to find.</h2>
-      <p>These are the categories the method is evaluated on: text, source code, markup, structured data and system logs. Anything else is accepted too — a PDF, a DOCX, an image, an archive — and is always reconstructed byte for byte, but material that was already compressed leaves little structure to find, so expect little or no reduction there.</p>
+      <p>Every category below is one ByteSize has been measured on, and each result is published in this repository. PDF depends entirely on what is inside it: a book stored as text streams reduces like the text it contains — 71.8% on the Silesia <em>reymont</em> volume — while a PDF of scanned images has nothing left to find, and across 200 real-world documents the average was 12.5%. Any file at all is accepted, and every one is reconstructed byte for byte.</p>
     </div>
-    {# The chips list the evaluated categories from the study's scope, and only
-       those. PDF/DOCX and binary inputs are in the study to characterise the
-       size guard and the raw-storage fallback, NOT to claim gains, so putting
-       them here as peers of TXT and CSV would overstate the result -- 200 real
-       PDFs in benchmarks/external_corpus.csv reduce by 12.50%. #}
-    <div class="format-list" aria-label="File categories the method is evaluated on">
+    {# Each chip must correspond to a measured row in a committed result file;
+       test_advertised_formats_are_measured enforces that, so a category cannot
+       be advertised here before it has been benchmarked. #}
+    <div class="format-list" aria-label="File categories ByteSize is measured on">
       <span>TXT</span><span>CSV</span><span>JSON</span><span>SQL</span>
-      <span>HTML</span><span>LOG</span><span>Source code</span>
+      <span>XML</span><span>HTML</span><span>LOG</span>
+      <span>Source code</span><span>PDF</span>
     </div>
   </section>
 

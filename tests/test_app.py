@@ -964,6 +964,63 @@ def test_compress_options_are_meaningful(app):
                                           omitted["compressed"]))
 
 
+# Each landing-page chip -> a file in a committed result CSV that demonstrates
+# it. Advertising a category the project has never benchmarked is the failure
+# this table exists to prevent.
+ADVERTISED_EVIDENCE = {
+    "TXT": ("v9_repo_corpus.csv", "prose_en.txt"),
+    "CSV": ("v9_repo_corpus.csv", "data.csv"),
+    "JSON": ("v9_repo_corpus.csv", "data.json"),
+    "SQL": ("v9_repo_corpus.csv", "universe.sql"),
+    "XML": ("external_corpus.csv", "xml"),
+    "HTML": ("v9_repo_corpus.csv", "cp.html"),
+    "LOG": ("v9_repo_corpus.csv", "server.log"),
+    "Source code": ("v9_repo_corpus.csv", "code_python.py.txt"),
+    "PDF": ("external_corpus.csv", "reymont"),
+}
+
+
+def test_advertised_formats_are_measured(app):
+    """Every file category the landing page advertises must be measured.
+
+    The chips are a claim about what ByteSize is good at, so each one has to
+    point at a real row in a committed result file that actually shrank. This
+    is what stops the list drifting back to whatever sounds impressive."""
+    import csv as _csv
+    import re as _re
+    c = app.test_client()
+    page = c.get("/").data.decode("utf-8")
+    block = _re.search(r'<div class="format-list".*?</div>', page, _re.S)
+    check("the landing page still lists file categories", block is not None)
+    if block is None:
+        return
+    chips = _re.findall(r"<span>(.*?)</span>", block.group(0))
+    check("chips were parsed", len(chips) >= 5, chips)
+
+    cache = {}
+    for chip in chips:
+        check("advertised category has an evidence entry: %s" % chip,
+              chip in ADVERTISED_EVIDENCE, chip)
+        if chip not in ADVERTISED_EVIDENCE:
+            continue
+        name, target = ADVERTISED_EVIDENCE[chip]
+        if name not in cache:
+            with open(os.path.join(ROOT, "benchmarks", name), newline="",
+                      encoding="utf-8") as handle:
+                cache[name] = list(_csv.DictReader(handle))
+        row = next((r for r in cache[name]
+                    if r["file"] == target and r["preset"] == "balanced"), None)
+        check("advertised category is backed by a measurement: %s" % chip,
+              row is not None, "%s not in %s" % (target, name))
+        if row is None:
+            continue
+        check("advertised category actually shrank: %s (%s%%)"
+              % (chip, row["saved_percent"]),
+              float(row["saved_percent"]) > 0
+              and row["byte_equal"] == "True"
+              and row["sha256_equal"] == "True", row["saved_percent"])
+
+
 def test_analytics_routes_removed(app):
     c = app.test_client()
     login(c, "alice", "correct-horse")
@@ -2870,6 +2927,7 @@ def main():
         test_container_bytes_are_pinned()
         test_preset_size_is_monotonic()
         test_compress_options_are_meaningful(app)
+        test_advertised_formats_are_measured(app)
         test_analytics_routes_removed(app)
         test_persistent_artifact_access(app, appmod)
         test_storage_quota_and_transient_restore(app)
