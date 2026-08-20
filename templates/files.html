@@ -11,7 +11,7 @@
   </p>
 </div>
 
-<form id="filters" data-auth-action
+<form id="filters"
       class="mt-5 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4
              grid gap-3 sm:grid-cols-2 lg:grid-cols-5 items-end"
       onsubmit="return false">
@@ -37,9 +37,9 @@
 </form>
 
 <div class="flex flex-wrap gap-3 mt-4 items-center">
-  <a href="{{ url_for('main.report_csv') }}" data-auth-action
+  <a href="{{ url_for('main.report_csv') }}"
      class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">Export CSV</a>
-  <a href="{{ url_for('main.report_pdf') }}" target="_blank" data-auth-action
+  <a href="{{ url_for('main.report_pdf') }}" target="_blank"
      class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">Export PDF</a>
   <span id="resultCount" class="font-data text-xs text-dim dark:text-[#9c968a] ml-auto"></span>
 </div>
@@ -54,20 +54,18 @@
                               ('Verification',''), ('When','created_at'), ('Actions','')] %}
         <th class="px-3 py-2 {% if col %}cursor-pointer select-none hover:text-maroon{% endif %}"
             {% if col %}data-sortcol="{{ col }}" tabindex="0" role="button"
-            {% if preview %}data-auth-action aria-label="Sign in to sort by {{ label }}"{% endif %}{% endif %}>{{ label }}{% if col %}
+            aria-label="Sort by {{ label }}"{% endif %}>{{ label }}{% if col %}
           <span class="opacity-40">&#8645;</span>{% endif %}</th>
         {% endfor %}
       </tr>
     </thead>
     <tbody id="histBody">
-      {% if preview %}
-      <tr><td colspan="9" class="empty-state">Sign in to see your compressed files.</td></tr>
-      {% endif %}
+      <tr><td colspan="9" class="empty-state">Loading your files…</td></tr>
     </tbody>
   </table>
 </div>
 
-<div class="flex flex-wrap items-center gap-3 mt-4" data-auth-action>
+<div class="flex flex-wrap items-center gap-3 mt-4">
   <button id="prevBtn" class="px-3 py-2 rounded-md border border-line dark:border-[#35322c]
           text-sm hover:border-maroon disabled:opacity-40">Previous</button>
   <span id="pageInfo" class="font-data text-xs text-dim dark:text-[#9c968a]"></span>
@@ -81,7 +79,6 @@
 {% endblock %}
 
 {% block scripts %}
-{% if not preview %}
 <script>
 (function () {
   "use strict";
@@ -195,5 +192,4 @@
   load();
 })();
 </script>
-{% endif %}
 {% endblock %}

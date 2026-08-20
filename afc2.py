@@ -94,6 +94,20 @@ class EngineOptions:
     dp_rounds: int = DP_ROUNDS
     merge_rounds_v4: int = MERGE_ROUNDS_V4
     min_candidate_freq: int = MIN_CANDIDATE_FREQ
+    # [v9] Search-shape tunables. These were module constants, which meant a
+    # preset could only search DEEPER, never DIFFERENTLY — and measurement
+    # showed no single setting is best for every file: a wider n-gram scan
+    # wins on prose and PDF text, a larger dictionary wins on multi-megabyte
+    # text, and both lose badly on regular delimited data. Making them
+    # per-call is what lets presets.py try several profiles and keep the
+    # smallest container. None of them affects decoding: the dictionary and
+    # the code lengths are written into the container explicitly.
+    scan_window: int = SCAN_WINDOW
+    ngram_max: int = NGRAM_MAX
+    max_initial_dict: int = MAX_INITIAL_DICT
+    max_dict: int = MAX_DICT
+    max_block: int = MAX_BLOCK
+    merges_per_round: int = MERGES_PER_ROUND
 
     def __post_init__(self):
         if self.dp_rounds < 0:
@@ -102,6 +116,19 @@ class EngineOptions:
             raise ValueError("merge_rounds_v4 must be non-negative")
         if self.min_candidate_freq < 2:
             raise ValueError("min_candidate_freq must be at least 2")
+        if self.scan_window < 1024:
+            raise ValueError("scan_window must be at least 1024")
+        # n-gram keys pack into a uint64 on the native side; 8 is the ceiling.
+        if not (NGRAM_MIN <= self.ngram_max <= 8):
+            raise ValueError("ngram_max must be between %d and 8" % NGRAM_MIN)
+        if self.max_dict < 256:
+            raise ValueError("max_dict must be at least 256")
+        if not (0 < self.max_initial_dict <= self.max_dict):
+            raise ValueError("max_initial_dict must be in (0, max_dict]")
+        if not (2 <= self.max_block <= 65535):
+            raise ValueError("max_block must be between 2 and 65535")
+        if self.merges_per_round < 1:
+            raise ValueError("merges_per_round must be at least 1")
 
 
 DEFAULT_OPTIONS = EngineOptions()
@@ -115,6 +142,9 @@ def current_options() -> EngineOptions:
         tune=bool(OPTS["tune"]), dp_rounds=int(DP_ROUNDS),
         merge_rounds_v4=int(MERGE_ROUNDS_V4),
         min_candidate_freq=int(MIN_CANDIDATE_FREQ),
+        scan_window=int(SCAN_WINDOW), ngram_max=int(NGRAM_MAX),
+        max_initial_dict=int(MAX_INITIAL_DICT), max_dict=int(MAX_DICT),
+        max_block=int(MAX_BLOCK), merges_per_round=int(MERGES_PER_ROUND),
     )
 
 
@@ -122,11 +152,13 @@ def current_options() -> EngineOptions:
 # Tier scans
 # -----------------------------------------------------------------------------
 
-def _tier2_ngrams(data: bytes, min_freq: int) -> dict:
-    win = data[:SCAN_WINDOW]
+def _tier2_ngrams(data: bytes, min_freq: int,
+                  options: "EngineOptions" = None) -> dict:
+    options = DEFAULT_OPTIONS if options is None else options
+    win = data[:options.scan_window]
     out = {}
     n = len(win)
-    for L in range(NGRAM_MIN, NGRAM_MAX + 1):
+    for L in range(NGRAM_MIN, options.ngram_max + 1):
         if L > n:
             break
         cnt = Counter(bytes(win[i:i + L]) for i in range(n - L + 1))
@@ -165,9 +197,11 @@ def _tier1_lit_bits(data: bytes) -> list:
     return [est_code_len(f, total) for f in tier1]
 
 
-def _select_candidates(data: bytes, min_freq: int, lit_bits: list) -> list:
+def _select_candidates(data: bytes, min_freq: int, lit_bits: list,
+                       options: "EngineOptions" = None) -> list:
+    options = DEFAULT_OPTIONS if options is None else options
     total = len(data)
-    cands = _tier2_ngrams(data, min_freq)
+    cands = _tier2_ngrams(data, min_freq, options)
     for w, f in _tier3_words(data, min_freq).items():
         if w not in cands:
             cands[w] = f
@@ -177,7 +211,7 @@ def _select_candidates(data: bytes, min_freq: int, lit_bits: list) -> list:
         if gain > 0:
             scored.append((gain, pat))
     scored.sort(key=lambda t: (-t[0], t[1]))
-    return [pat for _, pat in scored[:MAX_INITIAL_DICT]]
+    return [pat for _, pat in scored[:options.max_initial_dict]]
 
 
 # -----------------------------------------------------------------------------
@@ -275,12 +309,15 @@ def _segment_optimal(data: bytes, patterns: list, lengths: dict) -> list:
 # -----------------------------------------------------------------------------
 
 def _grow_blocks(ids: list, patterns: list, rounds: int,
-                 refund: bool, min_freq: int = MIN_CANDIDATE_FREQ) -> tuple:
+                 refund: bool, min_freq: int = MIN_CANDIDATE_FREQ,
+                 options: "EngineOptions" = None) -> tuple:
+    options = DEFAULT_OPTIONS if options is None else options
+
     def expand(sid):
         return bytes([sid]) if sid < 256 else patterns[sid - 256]
 
     for _ in range(rounds):
-        if len(patterns) >= MAX_DICT:
+        if len(patterns) >= options.max_dict:
             break
         total = len(ids)
         if total < 2:
@@ -294,7 +331,7 @@ def _grow_blocks(ids: list, patterns: list, rounds: int,
             if f < min_freq:
                 continue
             merged = expand(a) + expand(b)
-            if len(merged) > MAX_BLOCK:
+            if len(merged) > options.max_block:
                 continue
             gain = _bit_cost_gain(merged, f, lit_bits,
                                   est_code_len(f, total))
@@ -311,10 +348,10 @@ def _grow_blocks(ids: list, patterns: list, rounds: int,
         # key includes (a, b): two different pairs can concatenate to the
         # same bytes with equal gain, and native/JS ports must sort likewise
         accepted.sort(key=lambda t: (-t[0], t[1], t[2], t[3]))
-        room = MAX_DICT - len(patterns)
+        room = options.max_dict - len(patterns)
         chosen = {}
         pat_index = {p: i for i, p in enumerate(patterns)}
-        for gain, merged, a, b in accepted[:MERGES_PER_ROUND]:
+        for gain, merged, a, b in accepted[:options.merges_per_round]:
             if (a, b) in chosen:
                 continue
             if merged in pat_index:
@@ -419,6 +456,12 @@ def _native_params(options: EngineOptions) -> dict:
                          else MERGE_ROUNDS),
         "min_freq": options.min_candidate_freq,
         "tune": options.tune,
+        "scan_window": options.scan_window,
+        "ngram_max": options.ngram_max,
+        "max_initial_dict": options.max_initial_dict,
+        "max_dict": options.max_dict,
+        "max_block": options.max_block,
+        "merges_per_round": options.merges_per_round,
     }
 
 
@@ -489,10 +532,17 @@ def compress_bytes(data: bytes, adaptive: bool = True,
     fixed_enabled = (options.llhuff and options.hdr2 and options.refund)
     if native_ok and fixed_enabled:
         if getattr(_native, "TUNABLE", False):
-            # [v7] any preset, natively
-            return _native.compress(bytes(data), True, fmt,
-                                    params=_native_params(options))
-        if (options == DEFAULT_OPTIONS):
+            # [v7] any preset, natively. [v9] a search profile that reshapes
+            # the scan needs afc_compress_v9; an older library raises rather
+            # than quietly ignoring the shape, and we fall through to the
+            # pure-Python reference, which can always honour it.
+            try:
+                return _native.compress(bytes(data), True, fmt,
+                                        params=_native_params(options))
+            except RuntimeError:
+                if backend == "native":
+                    raise
+        elif (options == DEFAULT_OPTIONS):
             # library predates afc_compress_ex: only the compiled-in defaults
             # can be honoured, so anything else falls through to Python.
             return _native.compress(bytes(data), True, fmt)
@@ -517,10 +567,10 @@ def compress_bytes(data: bytes, adaptive: bool = True,
 
 def _compress_core(data: bytes, fmt: str, min_freq: int, rounds: int,
                    lit_bits: list, options: EngineOptions) -> bytes:
-    patterns = _select_candidates(data, min_freq, lit_bits)
+    patterns = _select_candidates(data, min_freq, lit_bits, options)
     ids = _segment_greedy(data, patterns)
     ids, patterns = _grow_blocks(ids, patterns, rounds, options.refund,
-                                 min_freq)
+                                 min_freq, options)
     ids, patterns = _final_audit(ids, patterns, lit_bits)
 
     if options.dp:

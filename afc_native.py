@@ -373,8 +373,22 @@ if AVAILABLE:
             ctypes.c_int,
             ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_uint32)]
         _LIB.afc_compress_ex.restype = ctypes.c_int
+
+    # [v9] Profile entry point: the same pipeline again, but the search-shape
+    # tunables (scan window, n-gram ceiling, dictionary caps, block cap,
+    # merges per round) are caller-supplied too. A library without it reports
+    # PROFILES False and presets.py falls back to the single default profile,
+    # so a stale .so still compresses correctly — just without the search.
+    PROFILES = hasattr(_LIB, "afc_compress_v9")
+    if PROFILES:
+        _LIB.afc_compress_v9.argtypes = [
+            ctypes.c_char_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int32), ctypes.c_int32,
+            ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_uint32)]
+        _LIB.afc_compress_v9.restype = ctypes.c_int
 else:
     TUNABLE = False
+    PROFILES = False
 
 
 def _take(outp, outn):
@@ -383,19 +397,42 @@ def _take(outp, outn):
     return data
 
 
+# [v9] Positional layout of the flat int32 vector afc_compress_v9 reads. The
+# first five entries are the V7 tunables; anything the caller leaves off keeps
+# the engine default, which is how the ABI grows without a new export.
+_V9_FIELDS = ("dp", "dp_rounds", "merge_rounds", "min_freq", "tune",
+              "scan_window", "ngram_max", "max_initial_dict", "max_dict",
+              "max_block", "merges_per_round")
+_V9_DEFAULTS = {"dp": 1, "dp_rounds": 3, "merge_rounds": 6, "min_freq": 4,
+                "tune": 1, "scan_window": 1 << 20, "ngram_max": 5,
+                "max_initial_dict": 3072, "max_dict": 4096, "max_block": 128,
+                "merges_per_round": 32}
+_V9_ONLY = _V9_FIELDS[5:]
+
+
 def compress(data: bytes, adaptive: bool = True, fmt: str = "auto",
              params: dict = None) -> bytes:
     """Full v4 pipeline in one native call (byte-identical to pure Python).
 
-    `params`, when given, carries the four preset-controlled tunables:
+    `params`, when given, carries the preset-controlled tunables:
 
         {"dp": bool, "dp_rounds": int, "merge_rounds": int,
          "min_freq": int, "tune": bool}
 
-    They map 1:1 onto afc2.OPTS["dp"], afc2.DP_ROUNDS, afc2.MERGE_ROUNDS_V4
-    and afc2.MIN_CANDIDATE_FREQ, so a preset reaches the native core instead
-    of being silently ignored. Omitting `params` uses the engine defaults and
-    calls the original entry point, so nothing changes for existing callers.
+    and, on a v9 library, the search-shape ones as well:
+
+        {"scan_window": int, "ngram_max": int, "max_initial_dict": int,
+         "max_dict": int, "max_block": int, "merges_per_round": int}
+
+    They map 1:1 onto the matching ``afc2.EngineOptions`` fields, so a preset
+    reaches the native core instead of being silently ignored. Omitting
+    `params` uses the engine defaults and calls the original entry point, so
+    nothing changes for existing callers.
+
+    A caller that asks for a non-default search shape on a library that
+    predates afc_compress_v9 gets a RuntimeError rather than output produced
+    under the wrong parameters; presets.py treats that as "no profile search
+    available" and falls back to the default profile.
     """
     outp, outn = ctypes.c_void_p(), ctypes.c_uint32()
     if params is None:
@@ -403,16 +440,31 @@ def compress(data: bytes, adaptive: bool = True, fmt: str = "auto",
                                _FMT_CODES.get(fmt, 0),
                                ctypes.byref(outp), ctypes.byref(outn))
     else:
-        if not TUNABLE:
-            raise RuntimeError("native library predates afc_compress_ex")
-        rc = _LIB.afc_compress_ex(
-            data, len(data), 1 if adaptive else 0, _FMT_CODES.get(fmt, 0),
-            1 if params.get("dp", True) else 0,
-            int(params.get("dp_rounds", 3)),
-            int(params.get("merge_rounds", 6)),
-            int(params.get("min_freq", 4)),
-            1 if params.get("tune", True) else 0,
-            ctypes.byref(outp), ctypes.byref(outn))
+        shaped = any(name in params
+                     and int(params[name]) != _V9_DEFAULTS[name]
+                     for name in _V9_ONLY)
+        if shaped and not PROFILES:
+            raise RuntimeError("native library predates afc_compress_v9")
+        if shaped:
+            values = [int(params.get(name, _V9_DEFAULTS[name]))
+                      for name in _V9_FIELDS]
+            vec = (ctypes.c_int32 * len(values))(*values)
+            rc = _LIB.afc_compress_v9(
+                data, len(data), 1 if adaptive else 0,
+                _FMT_CODES.get(fmt, 0), vec, len(values),
+                ctypes.byref(outp), ctypes.byref(outn))
+        else:
+            if not TUNABLE:
+                raise RuntimeError("native library predates afc_compress_ex")
+            rc = _LIB.afc_compress_ex(
+                data, len(data), 1 if adaptive else 0,
+                _FMT_CODES.get(fmt, 0),
+                1 if params.get("dp", True) else 0,
+                int(params.get("dp_rounds", 3)),
+                int(params.get("merge_rounds", 6)),
+                int(params.get("min_freq", 4)),
+                1 if params.get("tune", True) else 0,
+                ctypes.byref(outp), ctypes.byref(outn))
     if rc != 0:
         raise RuntimeError(f"native compress failed (rc={rc})")
     return _take(outp, outn)

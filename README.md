@@ -200,18 +200,40 @@ adjustable with `?depth=` on `/api/tree/<token>` (4–12, default 9).
 
 ### Compression presets
 
-| Preset | Effect | Backend |
-|---|---|---|
-| **Fast** | fewer candidates, no optimal parsing, fewer growth rounds | **C++ native** |
-| **Balanced** *(default)* | engine defaults, best ratio-to-time trade | **C++ native** |
-| **Maximum** | larger candidate search, more DP and growth rounds — usually smaller, but see the note | **C++ native** |
+| Preset | Effect | Profiles searched | Backend |
+|---|---|---|---|
+| **Fast** | fewer candidates, no optimal parsing, fewer growth rounds | 1 | **C++ native** |
+| **Balanced** *(default)* | engine defaults plus three reshaped scans | 5 | **C++ native** |
+| **Maximum** | everything Balanced tries, again at the deepest settings | 9 | **C++ native** |
 
-> **Maximum is not always smaller than Balanced.** Measured over the full
-> corpus it wins on five files (best −3.65%) and loses on two (`data.csv`
-> +3.46%, `code_python.py.txt` +0.07%). Earlier documentation claimed it was
-> never larger; that was generalised from three files and has been corrected.
-> A deeper block-growth search can admit blocks that pass the Bit Cost
-> Decision Engine's estimate but crowd the dictionary. Details in `presets.py`.
+> **[v9] A preset is a search, and a costlier preset is never larger.** Until
+> v9 a preset could only search *deeper*, because the rest of the engine's
+> shape — the Tier-2 n-gram ceiling, the scan window, the dictionary and block
+> caps, the merges admitted per round — was compiled in. Deeper is not
+> reliably smaller: Maximum used to come out *larger* than Balanced on several
+> files, because a deeper block-growth search admits structural blocks that
+> pass the Bit Cost Decision Engine's estimate but crowd the dictionary.
+>
+> Those tunables are per-call now, and no single setting wins everywhere: a
+> 16k dictionary is −8.4% on a 10 MB text but +10.3% on regular delimited CSV;
+> a 6-byte n-gram scan is −18.3% on a stored-DOCX but +27.6% on the JSON
+> sample. So each preset compresses the file under a ladder of profiles and
+> keeps the smallest container, and the ladders are nested
+> (`fast ⊂ balanced ⊂ maximum`) — which makes the size ordering a property of
+> the construction, not a claim about a corpus. `test_preset_size_is_monotonic`
+> asserts it. The profiles run concurrently, bounded by input size so a large
+> file does not multiply peak memory. Details in `presets.py`.
+
+> **[v9] Compression got 2–6x faster with identical output first.** The
+> optimal-parse stage was 65–85% of compression time because it hashed the
+> input slice once per candidate dictionary length at every position (~9
+> hashes per byte at a 9% hit rate). It now walks an Aho-Corasick automaton
+> over the dictionary, which reports exactly the entries that end at each
+> position, longest first — the same order the old loop relaxed them in, so
+> the parse and every emitted byte were unchanged. `benchmarks/v9_repo_corpus.py`
+> regenerates the size table; `test_container_bytes_are_pinned` fixes the
+> container SHA-256 for a seven-file corpus so no future change to the emitted
+> bytes can be accidental.
 
 > **[v7] All three presets now run natively.** The C++ core used to compile its
 > tuning constants in and ignore the Python values, so Fast and Maximum were

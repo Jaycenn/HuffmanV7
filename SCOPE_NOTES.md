@@ -8,7 +8,7 @@ boundaries. Every claim below is enforced by a test in `tests/test_app.py`.
 
 ## 1. The compression algorithm was not touched
 
-`afc.py`, `afc2.py`, `afc_native.cpp`, `afc_native.py`, `afc_engine.js` are
+`afc.py`, `afc2.py`, `afc_native.cpp`, `afc_native.py`, `afc_engine.js` were
 **byte-for-byte unchanged** in Part 1. The web layer only calls the published
 API:
 
@@ -20,6 +20,20 @@ afc2.decompress_bytes(blob)                    # -> original bytes
 Nothing in `app.py`, `db.py`, `auth.py`, `admin.py`, or `afcpak.py` reaches
 into engine internals, changes a constant, or post-processes a container.
 `git diff` on those five engine files should be empty for this part.
+
+**Later performance work does edit `afc_native.cpp`, and states its own
+proof.** The v9 optimisation replaced the search structures inside the native
+core — an Aho-Corasick automaton over the structural dictionary instead of
+per-length hash probing, open-addressed frequency counters, and an early exit
+once the optimal parse stops moving. None of it changes the compression model:
+the tier scans, the Bit Cost Decision Engine, block growth, the length-limited
+canonical Huffman coder and the container layouts are all as before. The claim
+that matters to the study is therefore not "the file was not edited" but **the
+emitted container is identical byte for byte**, which is asserted directly:
+`test_container_bytes_are_pinned` fixes the SHA-256 of the produced container
+for a seven-file corpus at all three presets, and
+`test_preset_backend_byte_identity` keeps the pure-Python reference and the
+native core in agreement.
 
 **Entropy coding is still Huffman-only.** No arithmetic/range/ANS coding, no
 LZ77/78/LZW/LZSS or any offset back-reference, no BWT/MTF, no PPM, no ML. The

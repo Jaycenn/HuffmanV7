@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Lossless compression, built around structure{% endblock %}
+{% block title %}Home{% endblock %}
 {% block public_content %}
-<main>
+<main id="mainContent" tabindex="-1">
   <section class="landing-hero">
     <div class="hero-copy">
       <p class="eyebrow">Lossless file compression</p>
@@ -32,7 +32,7 @@
         <div class="preview-metrics">
           <div><small>MODE</small><strong>Adaptive</strong></div>
           <div><small>VERIFY</small><strong>SHA-256</strong></div>
-          <div><small>BACKEND</small><strong>C++ Native</strong></div>
+          <div><small>BACKEND</small><strong>{{ backend }}</strong></div>
         </div>
       </div>
       <a class="preview-lock" href="{{ url_for('auth.login') }}">Sign in to use the workspace →</a>
@@ -71,6 +71,7 @@
 </main>
 <footer class="public-footer">
   <span>ByteSize</span>
-  <span>Static canonical Hybrid Huffman · Local and lossless</span>
+  <span>Static canonical Hybrid Huffman · Local and lossless ·
+    <a href="{{ url_for('main.about_page') }}">About the method</a></span>
 </footer>
 {% endblock %}

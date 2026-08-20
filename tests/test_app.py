@@ -18,6 +18,7 @@ Covers, per the brief's proof requirements:
 """
 import ast
 import hashlib
+import re
 import io
 import os
 import shutil
@@ -85,16 +86,18 @@ def corpus_files(limit=4):
 def test_auth(app, appmod):
     c = app.test_client()
 
-    # Anonymous visitors see the genuine app shell, while work endpoints stay
-    # server-gated.
+    # Anonymous visitors get the public ByteSize website; the workspace and
+    # every work endpoint stay gated.
     r = c.get("/", follow_redirects=False)
-    check("anonymous reaches real ByteSize interface",
+    check("anonymous reaches the public ByteSize landing page",
           r.status_code == 200 and b"ByteSize" in r.data
-          and b'id="sDrop"' in r.data
-          and b"Preview" in r.data, r.status_code)
+          and b'class="landing-hero"' in r.data
+          and b'class="public-header"' in r.data
+          and b'class="app-sidebar' not in r.data, r.status_code)
     r = c.get("/compress", follow_redirects=False)
-    check("anonymous can inspect compression workspace",
-          r.status_code == 200 and b'id="sRun"' in r.data, r.status_code)
+    check("anonymous is sent to sign in before the workspace",
+          r.status_code in (301, 302)
+          and "/login" in r.headers.get("Location", ""), r.status_code)
     check("anonymous compression action remains server-gated",
           c.post("/api/compress").status_code == 401)
 
@@ -105,14 +108,25 @@ def test_auth(app, appmod):
                follow_redirects=False)
     check("register creates account and logs in", r.status_code in (301, 302))
 
+    check("registration lands in the ByteSize Workspace",
+          r.headers.get("Location") == "/dashboard", r.headers.get("Location"))
+
     r = c.get("/dashboard")
     check("logged-in user reaches dashboard", r.status_code == 200)
+    r = c.get("/", follow_redirects=False)
+    check("signed-in visitor to / is sent to the workspace",
+          r.status_code in (301, 302)
+          and r.headers.get("Location") == "/dashboard",
+          r.headers.get("Location"))
 
     # logout
-    c.post("/logout")
+    r = c.post("/logout", follow_redirects=False)
+    check("logout returns to the public landing page",
+          r.status_code in (301, 302) and r.headers.get("Location") == "/",
+          r.headers.get("Location"))
     r = c.get("/", follow_redirects=False)
-    check("logout returns to public landing page",
-          r.status_code == 200 and b"sign in to compress" in r.data)
+    check("landing page invites an anonymous visitor to sign in",
+          r.status_code == 200 and b"Sign in to compress" in r.data)
 
     # wrong password rejected
     r = login(c, "alice", "WRONG")
@@ -510,12 +524,17 @@ def test_reports(app):
 def test_pages_render(app):
     c = app.test_client()
     login(c, "alice", "correct-horse")
-    for path in ("/", "/compress", "/decompress", "/files", "/about",
+    for path in ("/dashboard", "/compress", "/decompress", "/files", "/about",
                  "/settings"):
         r = c.get(path)
         if not check("page renders: %s" % path, r.status_code == 200,
                      r.status_code):
             continue
+    r = c.get("/", follow_redirects=False)
+    check("signed-in / redirects to the workspace",
+          r.status_code in (301, 302)
+          and r.headers.get("Location") == "/dashboard",
+          r.headers.get("Location"))
     # every size shown must come from config: assert the rendered Settings page
     # actually contains the configured maximum, not a stale literal
     r = c.get("/settings")
@@ -525,21 +544,48 @@ def test_pages_render(app):
           human(config.MAX_FILE_SIZE))
 
 
-def test_public_shell_and_action_gates(app):
+def test_public_site_and_action_gates(app):
+    """The public website and the ByteSize Workspace are separate surfaces.
+
+    `/` is a real marketing/landing page again rather than the application
+    shell, every workspace destination is login-gated, and no work endpoint is
+    reachable anonymously."""
     c = app.test_client()
-    for path in ("/", "/compress", "/decompress", "/files", "/about"):
+    for path in ("/", "/about", "/login", "/register"):
         r = c.get(path)
-        check("public app page renders: %s" % path,
-              r.status_code == 200 and b"ByteSize" in r.data, r.status_code)
+        check("public page renders: %s" % path,
+              r.status_code == 200 and b"ByteSize" in r.data
+              and b'class="public-header"' in r.data
+              and b'class="app-sidebar' not in r.data, r.status_code)
 
     root = c.get("/").data
-    check("root is the real Compress screen, not a mockup",
-          b'id="sDrop"' in root and b'id="sPreset"' in root
-          and b"Preview" in root)
-    files = c.get("/files").data
-    check("public Files view has a genuine empty state",
-          b"Sign in to see your compressed files" in files
-          and b"alice29.txt" not in files)
+    check("root is the public landing page, not the app shell",
+          b'class="landing-hero"' in root
+          and b'class="product-preview"' in root
+          and b'id="sDrop"' not in root and b'id="sPreset"' not in root)
+    check("landing page keeps the Structura-derived sections",
+          b'id="method"' in root and b'id="formats"' in root
+          and b"How it works" in root and b"Formats" in root
+          and b'class="method-grid"' in root
+          and b'class="format-list"' in root
+          and b'class="landing-cta"' in root
+          and b'class="public-footer"' in root)
+    check("landing copy identifies ByteSize, not Structura",
+          b"Find the structure a byte-by-byte encoder misses" in root
+          and b"ByteSize combines multi-level frequency analysis" in root
+          and re.search(rb"Structura\b", root) is None)
+    check("landing preview leads to authentication",
+          b"Sign in to use the workspace" in root
+          and b'class="preview-brand">ByteSize<' in root)
+    check("landing preview names the backend actually loaded",
+          (b"C++ native" in root) == bool(__import__("app").engine.NATIVE))
+
+    for path in ("/dashboard", "/compress", "/decompress", "/files",
+                 "/settings", "/compare"):
+        r = c.get(path, follow_redirects=False)
+        check("workspace page is login-gated: %s" % path,
+              r.status_code in (301, 302)
+              and "/login" in r.headers.get("Location", ""), r.status_code)
 
     api_actions = [
         ("POST", "/api/compress"), ("POST", "/api/decompress"),
@@ -573,8 +619,9 @@ def test_public_shell_and_action_gates(app):
           == config.RESULT_RETENTION_DAYS
           and c.get("/api/config").get_json()["max_stored_bytes_per_user"]
           == config.MAX_STORED_BYTES_PER_USER)
-    check("public report links preserve their attempted destination in JS",
-          b"attempted.pathname + attempted.search" in c.get("/files").data)
+    check("gated destinations survive the sign-in round trip",
+          c.get("/files", follow_redirects=False).headers.get("Location")
+          == "/login?next=/files")
 
 
 def test_intended_destination_preserved(app):
@@ -609,21 +656,34 @@ def test_intended_destination_preserved(app):
         follow_redirects=False)
     check("registration cannot redirect to another origin",
           r.status_code in (301, 302)
-          and r.headers.get("Location") == "/", r.headers.get("Location"))
+          and r.headers.get("Location") == "/dashboard",
+          r.headers.get("Location"))
 
 
 def test_branding_and_about_evidence(app):
     import csv as _csv
     c = app.test_client()
-    for path in ("/", "/compress", "/decompress", "/files", "/about",
-                 "/login", "/register"):
-        body = c.get(path).data
-        check("ByteSize brand renders: %s" % path, b"ByteSize" in body)
-        check("institution and versions absent: %s" % path,
-              b"Holy Angel University" not in body
-              and b"School of Computing" not in body
-              and config.APP_VERSION.encode() not in body
-              and config.ENGINE_VERSION.encode() not in body)
+    public_paths = ("/", "/about", "/login", "/register")
+    workspace_paths = ("/dashboard", "/compress", "/decompress", "/files",
+                       "/about", "/settings")
+    signed_in = app.test_client()
+    login(signed_in, "alice", "correct-horse")
+    for client, paths in ((c, public_paths), (signed_in, workspace_paths)):
+        for path in paths:
+            body = client.get(path).data
+            check("ByteSize brand renders: %s" % path, b"ByteSize" in body)
+            # \b keeps the domain word "structural" out of the brand sweep.
+            check("no Structura branding survives: %s" % path,
+                  re.search(rb"Structura\b", body) is None)
+            check("institution and versions absent: %s" % path,
+                  b"Holy Angel University" not in body
+                  and b"School of Computing" not in body
+                  and config.APP_VERSION.encode() not in body
+                  and config.ENGINE_VERSION.encode() not in body)
+    for path in workspace_paths:
+        body = signed_in.get(path).data
+        check("workspace carries the ByteSize B mark: %s" % path,
+              b'class="brand-mark" aria-hidden="true">B<' in body)
 
     standalone = open(os.path.join(ROOT, "AFC_WebApp.html"),
                       encoding="utf-8").read()
@@ -653,11 +713,171 @@ def test_branding_and_about_evidence(app):
               and format(compressed, ",") in about
               and ("%.2f%%" % saved) in about
               and ("benchmarks/" + name) in about)
+    # [v9] The current-engine row has to trace to its CSV as well, and that
+    # CSV has to describe THIS engine -- otherwise the page would quietly go
+    # on quoting a previous version's numbers.
+    repo_csv = os.path.join(ROOT, "benchmarks", "v9_repo_corpus.csv")
+    with open(repo_csv, newline="", encoding="utf-8") as handle:
+        repo_rows = [r for r in _csv.DictReader(handle)
+                     if r["preset"] == "balanced"]
+    original = sum(int(r["original_bytes"]) for r in repo_rows)
+    compressed = sum(int(r["compressed_bytes"]) for r in repo_rows)
+    saved = 100.0 * (1.0 - compressed / original)
+    check("About repository-corpus numbers trace to CSV",
+          format(original, ",") in about
+          and format(compressed, ",") in about
+          and ("%.2f%%" % saved) in about
+          and "benchmarks/v9_repo_corpus.csv" in about)
+    check("every repository-corpus row is verified lossless",
+          all(r["byte_equal"] == "True" and r["sha256_equal"] == "True"
+              for r in repo_rows) and len(repo_rows) >= 20, len(repo_rows))
+    check("the AFC 1.3 rows are labelled as the historical audit",
+          "AFC 1.3 audit" in about and "not" in about)
+
+    # [v9] Silesia is now measured on the current engine as well. The two rows
+    # are the same twelve files, so the page may only claim an improvement if
+    # the committed measurement actually shows one.
+    ext_csv = os.path.join(ROOT, "benchmarks", "external_corpus.csv")
+    with open(ext_csv, newline="", encoding="utf-8") as handle:
+        ext_rows = [r for r in _csv.DictReader(handle)]
+    sil = [r for r in ext_rows
+           if r["corpus"] == "silesia" and r["preset"] == "balanced"]
+    sil_original = sum(int(r["original_bytes"]) for r in sil)
+    sil_now = sum(int(r["compressed_bytes"]) for r in sil)
+    check("Silesia current-engine numbers trace to CSV",
+          len(sil) == 12
+          and format(sil_original, ",") in about
+          and format(sil_now, ",") in about
+          and ("%.2f%%" % (100.0 * (1.0 - sil_now / sil_original))) in about
+          and "benchmarks/external_corpus.csv" in about, len(sil))
+    check("every external-corpus row is verified lossless",
+          all(r["byte_equal"] == "True" and r["sha256_equal"] == "True"
+              for r in ext_rows) and len(ext_rows) >= 48, len(ext_rows))
+
+    with open(os.path.join(ROOT, "benchmarks",
+                           "afc_1_3_silesia_native_summary.csv"),
+              newline="", encoding="utf-8") as handle:
+        old_sil = [r for r in _csv.DictReader(handle)
+                   if r["preset"] == "balanced"]
+    old_original = sum(int(r["original_bytes"]) for r in old_sil)
+    old_bytes = sum(int(r["compressed_bytes"]) for r in old_sil)
+    check("the two Silesia rows really are the same corpus",
+          old_original == sil_original,
+          "%d != %d" % (old_original, sil_original))
+    check("the claimed Silesia improvement is the measured one",
+          sil_now < old_bytes
+          and format(old_bytes - sil_now, ",") in about,
+          "%s vs %s" % (format(old_bytes - sil_now, ","), sil_now))
+    # A partial Canterbury re-run must never be presented as Canterbury.
+    check("no partial Canterbury subset is published as the corpus",
+          not any(r["corpus"] == "canterbury" for r in ext_rows)
+          and "canterbury-text-subset" in
+              open(ext_csv, encoding="utf-8").read())
+
+    import presets as _presets
+    spot = [("canterbury", "alice29.txt"), ("corpus", "data.json"),
+            ("documents", "docx_zip_stored.docx")]
+    for group, fname in spot:
+        row = next(r for r in repo_rows
+                   if r["group"] == group and r["file"] == fname)
+        raw = open(os.path.join(ROOT, "benchmarks", group, fname), "rb").read()
+        blob, _u, _b = _presets.compress_with(raw, "balanced", fmt="auto")
+        check("published size still reproduces: %s" % fname,
+              len(blob) == int(row["compressed_bytes"]),
+              "%d != %s" % (len(blob), row["compressed_bytes"]))
     check("document claim distinguishes both component classes",
           "internally uncompressed" in about
           and "producer-compressed" in about
           and "no general compression-percentage claim" in about)
 
+
+# ---------------------------------------------------------------------------
+# [v9] Container output is a published artefact: a user's stored .afc file and
+# the numbers in the thesis both depend on it.  Performance work is expected;
+# silently changing what the engine emits is not.  These digests pin the exact
+# container for a fixed corpus at every preset, so any change to the encoded
+# bytes has to be a deliberate edit of this table with a measured reason.
+# ---------------------------------------------------------------------------
+
+def _pin_corpus():
+    return [
+        ("prose", b"the quick brown fox jumps over the lazy dog. " * 300),
+        ("csvish", b"".join(b"%d,alpha,beta,gamma,%d\n" % (i, i * 7)
+                            for i in range(400))),
+        ("jsonish", b"[" + b",".join(b'{"id":%d,"name":"item","ok":true}' % i
+                                     for i in range(300)) + b"]"),
+        ("code", b"def compress(data):\n    return huffman(data)\n\n" * 200),
+        ("binary", bytes((i * 37 + (i >> 3)) & 0xFF for i in range(6000))),
+        ("incompressible",
+         bytes(((i * 2654435761) >> 13) & 0xFF for i in range(4096))),
+        ("repetitive", b"AB" * 5000),
+    ]
+
+
+PINNED_CONTAINERS = {
+    # (name, preset): (sha256[:32], bytes now, bytes under the V7 engine)
+    ("prose", "fast"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486, 486),
+    ("prose", "balanced"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486, 865),
+    ("prose", "maximum"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486, 865),
+    ("csvish", "fast"): ("dc67eace6449ca2dc449f5cf142689a5", 2503, 2503),
+    ("csvish", "balanced"): ("91e1a9ffade15428c92f2ebf5c2ce069", 2335, 2335),
+    ("csvish", "maximum"): ("d746c723d1a19f2f5d6e7907e43a1e97", 2291, 2335),
+    ("jsonish", "fast"): ("4189e69d98a2382747def080987c9a90", 1246, 1246),
+    ("jsonish", "balanced"): ("9c44277dc5092815e69773d507db6d7f", 1178, 1461),
+    ("jsonish", "maximum"): ("9c44277dc5092815e69773d507db6d7f", 1178, 1461),
+    ("code", "fast"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473, 473),
+    ("code", "balanced"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473, 848),
+    ("code", "maximum"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473, 848),
+    ("binary", "fast"): ("a0a19f3f609b9290471181001a02e5d2", 5436, 5436),
+    ("binary", "balanced"): ("92529110a69d47ab931c5512af5356c8", 2962, 3344),
+    ("binary", "maximum"): ("33725610bbf986c00b2e60335f7e6835", 2364, 2801),
+    ("incompressible", "fast"): ("62e57bf89140815e79ea50d554bca7da", 3826, 3826),
+    ("incompressible", "balanced"): ("b2625c816e67c00b8c207916ccfc9791", 2885, 3197),
+    ("incompressible", "maximum"): ("b2625c816e67c00b8c207916ccfc9791", 2885, 3197),
+    ("repetitive", "fast"): ("f06c7f8ddba83f685adedfb7865f50d9", 96, 96),
+    ("repetitive", "balanced"): ("528e09942cc001850704d032eae34449", 58, 109),
+    ("repetitive", "maximum"): ("528e09942cc001850704d032eae34449", 58, 109),
+}
+
+
+def test_container_bytes_are_pinned():
+    import presets
+    import afc2
+    for name, data in _pin_corpus():
+        for preset in ("fast", "balanced", "maximum"):
+            blob, _used, _backend = presets.compress_with(data, preset,
+                                                          fmt="auto")
+            want_sha, want_len, v7_len = PINNED_CONTAINERS[(name, preset)]
+            got = hashlib.sha256(blob).hexdigest()[:32]
+            check("container bytes unchanged: %s/%s" % (name, preset),
+                  got == want_sha and len(blob) == want_len,
+                  "%s/%d (expected %s/%d)" % (got, len(blob), want_sha,
+                                              want_len))
+            # The third column is what the pre-search V7 engine emitted. It
+            # never has to be revisited, and it makes the ratchet one-way:
+            # the engine may not regress past the version this corpus was
+            # first measured on.
+            check("no regression against the V7 engine: %s/%s" % (name, preset),
+                  len(blob) <= v7_len, "%d > %d" % (len(blob), v7_len))
+            check("pinned container round-trips: %s/%s" % (name, preset),
+                  afc2.decompress_bytes(blob) == data)
+
+def test_preset_size_is_monotonic():
+    """A costlier preset must never produce a LARGER container.
+
+    Presets search progressively harder, but a deeper search that lands on a
+    worse container is a regression a user can see in their own file sizes."""
+    import presets
+    for name, data in _pin_corpus():
+        sizes = {}
+        for preset in ("fast", "balanced", "maximum"):
+            blob, _used, _backend = presets.compress_with(data, preset,
+                                                          fmt="auto")
+            sizes[preset] = len(blob)
+        check("balanced is not larger than fast: %s" % name,
+              sizes["balanced"] <= sizes["fast"], sizes)
+        check("maximum is not larger than balanced: %s" % name,
+              sizes["maximum"] <= sizes["balanced"], sizes)
 
 def test_analytics_routes_removed(app):
     c = app.test_client()
@@ -2559,9 +2779,11 @@ def main():
         test_history_isolation(app)
         test_reports(app)
         test_pages_render(app)
-        test_public_shell_and_action_gates(app)
+        test_public_site_and_action_gates(app)
         test_intended_destination_preserved(app)
         test_branding_and_about_evidence(app)
+        test_container_bytes_are_pinned()
+        test_preset_size_is_monotonic()
         test_analytics_routes_removed(app)
         test_persistent_artifact_access(app, appmod)
         test_storage_quota_and_transient_restore(app)

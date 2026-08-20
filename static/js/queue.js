@@ -47,22 +47,9 @@
   });
 
   // ---- tabs ---------------------------------------------------------------
-  document.querySelectorAll(".tab").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      document.querySelectorAll(".tab").forEach(function (b) {
-        var on = b === btn;
-        b.classList.toggle("border-maroon", on);
-        b.classList.toggle("text-maroon", on);
-        b.classList.toggle("font-semibold", on);
-        b.classList.toggle("border-transparent", !on);
-        b.classList.toggle("text-dim", !on);
-      });
-      document.querySelectorAll(".pane").forEach(function (p) {
-        p.classList.add("hidden");
-      });
-      $("pane-" + btn.dataset.tab).classList.remove("hidden");
-    });
-  });
+  // compress.js owns the .tab/.pane switch for this page (it also maintains
+  // aria-selected and the roving tabindex). A second identical listener here
+  // only ran the same work twice, so the queue no longer registers one.
 
   // ---- queue --------------------------------------------------------------
   var drop = $("drop"), input = $("fileInput");

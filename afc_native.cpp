@@ -330,54 +330,163 @@ static int64_t bit_cost_gain(const string& pat, uint32_t f,
   return (int64_t)f * (spelled - sym_bits) - 8 * ((int64_t)pat.size() + 3);
 }
 
+// 64-bit finalizer shared by the open-addressed tables and the dictionary
+// automaton below.
+static inline uint64_t hash_mix(uint64_t x) {
+  x ^= x >> 33; x *= 0xff51afd7ed558ccdULL;
+  x ^= x >> 33; x *= 0xc4ceb9fe1a85ec53ULL;
+  x ^= x >> 33; return x;
+}
+
+// [v9] Open-addressed 64-bit key counter, used by the two loops that touch
+// every byte (or every symbol) of the input: Tier-2 n-gram counting and
+// adjacent-pair counting during block growth.  A std::unordered_map spends
+// most of its time on node allocation and modulo bucketing here.
+//
+// It starts small and doubles on a 0.5 load factor rather than reserving for
+// the theoretical maximum, because the number of DISTINCT keys is usually far
+// below the number of positions — reserving for the worst case meant zeroing
+// hundreds of megabytes per round on a large file.
+//
+// Iteration order over the slots is unspecified, which is safe: every
+// consumer sorts its candidates under a total order before using them.
+struct U64Counter {
+  vector<uint64_t> key;   // 0 = empty; a real key is stored as key+1
+  vector<uint32_t> cnt;
+  uint64_t mask = 0;
+  size_t used = 0, limit = 0;
+
+  void init(size_t hint) {
+    // Small inputs must not pay for a large table: a few-hundred-byte file
+    // was spending most of its compression time zeroing hash slots.
+    size_t cap = 256;
+    if (hint > 128) { while (cap < hint && cap < (1u << 22)) cap <<= 1; }
+    key.assign(cap, 0);
+    cnt.assign(cap, 0);
+    mask = cap - 1;
+    used = 0;
+    limit = cap / 2;
+  }
+  void grow() {
+    vector<uint64_t> ok;
+    vector<uint32_t> oc;
+    ok.swap(key);
+    oc.swap(cnt);
+    size_t cap = (ok.size() << 1);
+    key.assign(cap, 0);
+    cnt.assign(cap, 0);
+    mask = cap - 1;
+    limit = cap / 2;
+    for (size_t i = 0; i < ok.size(); ++i) {
+      if (!ok[i]) continue;
+      uint64_t j = hash_mix(ok[i]) & mask;
+      while (key[j]) j = (j + 1) & mask;
+      key[j] = ok[i];
+      cnt[j] = oc[i];
+    }
+  }
+  inline void add(uint64_t k) {
+    uint64_t kk = k + 1;
+    uint64_t i = hash_mix(kk) & mask;
+    for (;;) {
+      if (key[i] == kk) { ++cnt[i]; return; }
+      if (key[i] == 0) {
+        key[i] = kk;
+        cnt[i] = 1;
+        if (++used > limit) grow();
+        return;
+      }
+      i = (i + 1) & mask;
+    }
+  }
+};
+
+// [v9] Every tunable the search profiles vary lives here.  The five original
+// fields keep their meaning and their defaults, so afc_compress and
+// afc_compress_ex behave exactly as before; the six added below were
+// `static const` until now, which is why a preset could only ever deepen the
+// search rather than reshape it.
+struct Params {
+  int dp = 1;
+  int dp_rounds = DP_ROUNDS;
+  int merge_rounds = MERGE_ROUNDS_V4;
+  int min_freq = MIN_CANDIDATE_FREQ;
+  int tune = 1;
+  uint32_t scan_window = SCAN_WINDOW;
+  int ngram_max = NGRAM_MAX;
+  uint32_t max_initial_dict = MAX_INITIAL_DICT;
+  uint32_t max_dict = MAX_DICT;
+  uint32_t max_block = MAX_BLOCK;
+  int merges_per_round = MERGES_PER_ROUND;
+
+  void clamp() {
+    if (dp_rounds < 0) dp_rounds = 0;
+    if (merge_rounds < 0) merge_rounds = 0;
+    // min_freq must stay >= 2: the small-file trial also runs min_freq - 1,
+    // and a floor of 0 would admit every n-gram and blow up the candidate set.
+    if (min_freq < 2) min_freq = 2;
+    if (scan_window < 1024u) scan_window = 1024u;
+    // n-gram keys are packed into a uint64, so 8 bytes is the hard ceiling.
+    if (ngram_max < NGRAM_MIN) ngram_max = NGRAM_MIN;
+    if (ngram_max > 8) ngram_max = 8;
+    if (max_dict < 256u) max_dict = 256u;
+    if (max_initial_dict > max_dict) max_initial_dict = max_dict;
+    if (max_block < 2u) max_block = 2u;
+    if (max_block > 65535u) max_block = 65535u;
+    if (merges_per_round < 1) merges_per_round = 1;
+  }
+};
+
 // Tier-2 n-gram counting for one length (thread worker).  n-grams of
 // length <= 8 pack into a uint64 key (big-endian byte order), which is much
 // faster to hash than heap strings; the counts are identical.
 static void count_len(const uint8_t* win, uint32_t wn, int L,
-                      unordered_map<uint64_t, uint32_t>* m) {
+                      U64Counter* m) {
+  m->init((size_t)wn + 8 < (1u << 16) ? (size_t)wn + 8 : (size_t)(1u << 16));
   if ((uint32_t)L > wn) return;
-  m->reserve(wn / 2 + 8);
   uint64_t key = 0;
   const uint64_t mask =
       L >= 8 ? ~0ULL : (((uint64_t)1 << (8 * L)) - 1);
   for (int k = 0; k < L - 1; ++k) key = (key << 8) | win[k];
   for (uint32_t i = 0; i + L <= wn; ++i) {
     key = ((key << 8) | win[i + L - 1]) & mask;
-    ++(*m)[key];
+    m->add(key);
   }
 }
 
 static void select_candidates(const uint8_t* data, uint32_t n, int min_freq,
-                              const int* lit_bits, vector<string>& patterns) {
-  uint32_t wn = n < SCAN_WINDOW ? n : SCAN_WINDOW;
+                              const int* lit_bits, const Params& P,
+                              vector<string>& patterns) {
+  uint32_t wn = n < P.scan_window ? n : P.scan_window;
+  const int ngram_max = P.ngram_max;
   // Tier-2: one thread per n-gram length (deterministic: separate maps);
   // below ~16 KB thread spawn costs more than the scan itself, so go serial
-  unordered_map<uint64_t, uint32_t> maps[NGRAM_MAX - NGRAM_MIN + 1];
+  U64Counter maps[8 - NGRAM_MIN + 1];
 #ifndef AFC_NO_THREADS
   if (wn >= 16384) {
     vector<thread> th;
-    for (int L = NGRAM_MIN; L <= NGRAM_MAX; ++L)
+    for (int L = NGRAM_MIN; L <= ngram_max; ++L)
       th.emplace_back(count_len, data, wn, L, &maps[L - NGRAM_MIN]);
     for (auto& t : th) t.join();
   } else
 #endif
   {
-    for (int L = NGRAM_MIN; L <= NGRAM_MAX; ++L)
+    for (int L = NGRAM_MIN; L <= ngram_max; ++L)
       count_len(data, wn, L, &maps[L - NGRAM_MIN]);
   }
   unordered_map<string, uint32_t> cands;
-  cands.reserve(maps[0].size() + maps[1].size() + 64);
-  for (int L = NGRAM_MIN; L <= NGRAM_MAX; ++L) {
-    for (auto& kv : maps[L - NGRAM_MIN]) {
-      if (kv.second >= (uint32_t)min_freq) {
-        char buf[8];
-        uint64_t k = kv.first;
-        for (int j = L - 1; j >= 0; --j) {
-          buf[j] = (char)(k & 0xFF);
-          k >>= 8;
-        }
-        cands[string(buf, (size_t)L)] = kv.second;
+  cands.reserve(maps[0].used + maps[1].used + 64);
+  for (int L = NGRAM_MIN; L <= ngram_max; ++L) {
+    U64Counter& m = maps[L - NGRAM_MIN];
+    for (size_t slot = 0; slot < m.key.size(); ++slot) {
+      if (m.key[slot] == 0 || m.cnt[slot] < (uint32_t)min_freq) continue;
+      char buf[8];
+      uint64_t k = m.key[slot] - 1;
+      for (int j = L - 1; j >= 0; --j) {
+        buf[j] = (char)(k & 0xFF);
+        k >>= 8;
       }
+      cands[string(buf, (size_t)L)] = m.cnt[slot];
     }
   }
   // Tier-3: word tokens (maximal [0-9A-Z_a-z] runs, 3..24 bytes)
@@ -415,65 +524,212 @@ static void select_candidates(const uint8_t* data, uint32_t n, int min_freq,
          return a.second < b.second;                         // pattern asc
        });
   patterns.clear();
-  size_t take = scored.size() < MAX_INITIAL_DICT ? scored.size()
-                                                 : MAX_INITIAL_DICT;
+  size_t take = scored.size() < P.max_initial_dict ? scored.size()
+                                                   : P.max_initial_dict;
   patterns.reserve(take);
   for (size_t k = 0; k < take; ++k) patterns.push_back(move(scored[k].second));
 }
 
-struct PatIndex {
-  // string_view keys point into the owning `patterns` vector — zero-copy
-  // lookups from the input buffer during greedy and DP segmentation
-  unordered_map<string_view, uint32_t> pset;
-  vector<vector<int>> lens_desc;  // per first byte, lengths desc
-  vector<vector<int>> lens_asc;   // per first byte, lengths asc
+// ---------------------------------------------------------------------------
+// [v9] structural-dictionary automaton (Aho-Corasick)
+// ---------------------------------------------------------------------------
+// Both segmentation passes need to know which dictionary entries occur where.
+// The previous index answered that by hashing the input slice once per
+// candidate length at each position: ~9 string hashes per byte on English
+// text, of which ~9% found anything, which made the DP parse 65-85% of total
+// compression time.
+//
+// A trie answers both questions directly and without hashing input bytes:
+//
+//   * greedy parse  -- descend from the root at position i and keep the
+//     deepest terminal seen; that IS the longest match, so the emitted ids
+//     are the same ones the length-ordered probe produced.
+//   * DP parse      -- walk the automaton once across the input.  After
+//     consuming data[j-1] the terminal chain hanging off the current node is
+//     exactly the set of entries ending at j, enumerated LONGEST FIRST.
+//
+// That order matters and is not incidental.  The old DP relaxed edges out of
+// each position i in ascending pattern length; for a fixed target j that is
+// i ascending, i.e. length DESCENDING, with the one-byte literal edge (from
+// i == j-1) relaxed last.  Reproducing that order under strict `<` updates is
+// what keeps the parse — and therefore every emitted container — byte for
+// byte identical to the pre-automaton engine.
+//
+// Nothing about the compression model changes: the dictionary, the Bit Cost
+// Decision Engine and the canonical Huffman coder are untouched.  This is a
+// search-structure change only.
+struct Automaton {
+  vector<int32_t> fail;      // failure link
+  vector<int32_t> out_link;  // next terminal up the failure chain (0 = none)
+  vector<int32_t> term_pat;  // pattern id ending at this node, else -1
+  vector<uint16_t> term_len; // its length (<= Params::max_block)
+  vector<uint64_t> gk;       // open-addressed goto edges, key (node<<8|byte)+1
+  vector<int32_t> gv;
+  vector<int32_t> root_next; // depth-1 transitions, -1 when absent
+  uint64_t gmask = 0;
+  bool has_unit_pattern = false;   // a length-1 entry; see segment_optimal
+
+  inline int32_t go(int32_t node, uint8_t c) const {
+    uint64_t key = (((uint64_t)(uint32_t)node << 8) | c) + 1;
+    uint64_t i = hash_mix(key) & gmask;
+    for (;;) {
+      uint64_t k = gk[i];
+      if (k == key) return gv[i];
+      if (k == 0) return -1;
+      i = (i + 1) & gmask;
+    }
+  }
+
+  // Advance one input byte, following failure links when the edge is absent.
+  // Transitions out of the root are by far the most common (every byte that
+  // does not extend a live match lands there), and on data with a small or
+  // empty dictionary they are ALL of them — so they read a flat array rather
+  // than hashing.
+  inline int32_t step(int32_t node, uint8_t c) const {
+    for (;;) {
+      if (node == 0) {
+        int32_t t = root_next[c];
+        return t < 0 ? 0 : t;
+      }
+      int32_t t = go(node, c);
+      if (t >= 0) return t;
+      node = fail[node];
+    }
+  }
+
+  void put(int32_t node, uint8_t c, int32_t child) {
+    uint64_t key = (((uint64_t)(uint32_t)node << 8) | c) + 1;
+    uint64_t i = hash_mix(key) & gmask;
+    while (gk[i] != 0) {
+      if (gk[i] == key) { gv[i] = child; return; }
+      i = (i + 1) & gmask;
+    }
+    gk[i] = key;
+    gv[i] = child;
+  }
+
   void build(const vector<string>& patterns) {
-    pset.clear();
-    pset.reserve(patterns.size() * 2 + 8);
-    for (uint32_t i = 0; i < patterns.size(); ++i)
-      pset[string_view(patterns[i])] = i;
-    vector<vector<bool>> seen(256, vector<bool>(MAX_BLOCK + 1, false));
-    for (auto& p : patterns) seen[(uint8_t)p[0]][p.size()] = true;
-    lens_asc.assign(256, {});
-    lens_desc.assign(256, {});
-    for (int b = 0; b < 256; ++b) {
-      for (int L = 1; L <= (int)MAX_BLOCK; ++L)
-        if (seen[b][L]) lens_asc[b].push_back(L);
-      lens_desc[b] = lens_asc[b];
-      reverse(lens_desc[b].begin(), lens_desc[b].end());
+    size_t edges = 1;
+    for (auto& p : patterns) edges += p.size();
+    size_t cap = 16;
+    while (cap < edges * 2) cap <<= 1;      // load factor <= 0.5
+    gk.assign(cap, 0);
+    gv.assign(cap, -1);
+    root_next.assign(256, -1);
+    gmask = cap - 1;
+
+    fail.assign(1, 0);
+    out_link.assign(1, 0);
+    term_pat.assign(1, -1);
+    term_len.assign(1, 0);
+    has_unit_pattern = false;
+    // Child lists are needed for the BFS below and thrown away afterwards;
+    // the steady-state lookup path is the flat goto table alone.
+    vector<vector<pair<uint8_t, int32_t>>> kids(1);
+
+    for (uint32_t pi = 0; pi < patterns.size(); ++pi) {
+      const string& p = patterns[pi];
+      if (p.empty()) continue;
+      if (p.size() == 1) has_unit_pattern = true;
+      int32_t node = 0;
+      for (unsigned char ch : p) {
+        int32_t nxt = go(node, ch);
+        if (nxt < 0) {
+          nxt = (int32_t)fail.size();
+          fail.push_back(0);
+          out_link.push_back(0);
+          term_pat.push_back(-1);
+          term_len.push_back(0);
+          kids.push_back({});
+          put(node, ch, nxt);
+          if (node == 0) root_next[ch] = nxt;
+          kids[node].push_back({ch, nxt});
+        }
+        node = nxt;
+      }
+      // Duplicate entries cannot occur (the dictionary is de-duplicated
+      // upstream), but keeping the first id is the deterministic choice.
+      if (term_pat[node] < 0) {
+        term_pat[node] = (int32_t)pi;
+        term_len[node] = (uint16_t)p.size();
+      }
+    }
+
+    vector<int32_t> queue;
+    queue.reserve(fail.size());
+    for (auto& kv : kids[0]) {
+      fail[kv.second] = 0;
+      out_link[kv.second] = 0;
+      queue.push_back(kv.second);
+    }
+    for (size_t qi = 0; qi < queue.size(); ++qi) {
+      int32_t u = queue[qi];
+      for (auto& kv : kids[u]) {
+        uint8_t c = kv.first;
+        int32_t v = kv.second;
+        int32_t f = fail[u];
+        for (;;) {
+          int32_t t = go(f, c);
+          if (t >= 0 && t != v) { fail[v] = t; break; }
+          if (f == 0) { fail[v] = 0; break; }
+          f = fail[f];
+        }
+        out_link[v] = term_pat[fail[v]] >= 0 ? fail[v] : out_link[fail[v]];
+        queue.push_back(v);
+      }
     }
   }
 };
 
+// Greedy longest-match seed parse.  Descending the trie from the input
+// position visits each candidate byte once instead of re-hashing the slice
+// for every dictionary length that starts with the same byte; the deepest
+// terminal reached is by definition the longest match, so the id stream is
+// unchanged.
 static void segment_greedy(const uint8_t* data, uint32_t n,
-                           const PatIndex& px, vector<uint32_t>& ids) {
+                           const Automaton& ac, vector<uint32_t>& ids) {
   ids.clear();
   ids.reserve(n / 2 + 8);
   uint32_t i = 0;
   while (i < n) {
-    uint8_t b = data[i];
-    bool matched = false;
-    for (int L : px.lens_desc[b]) {
-      if (i + (uint32_t)L <= n) {
-        auto it = px.pset.find(
-            string_view((const char*)data + i, (size_t)L));
-        if (it != px.pset.end()) {
-          ids.push_back(256 + it->second);
-          i += L;
-          matched = true;
-          break;
+    int32_t node = ac.root_next[data[i]];
+    int32_t best_pat = -1;
+    uint32_t best_len = 0;
+    if (node >= 0) {
+      if (ac.term_pat[node] >= 0) {
+        best_pat = ac.term_pat[node];
+        best_len = ac.term_len[node];
+      }
+      for (uint32_t k = i + 1; k < n; ++k) {
+        int32_t t = ac.go(node, data[k]);
+        if (t < 0) break;
+        node = t;
+        if (ac.term_pat[node] >= 0) {
+          best_pat = ac.term_pat[node];
+          best_len = ac.term_len[node];
         }
       }
     }
-    if (!matched) {
-      ids.push_back(b);
+    if (best_pat >= 0) {
+      ids.push_back(256 + (uint32_t)best_pat);
+      i += best_len;
+    } else {
+      ids.push_back(data[i]);
       ++i;
     }
   }
 }
 
+// Shortest-path segmentation over the ACTUAL code lengths.
+//
+// Edges are relaxed by target position rather than by source position.  For a
+// fixed target j the old loop produced source i ascending, i.e. pattern
+// length descending, with the literal edge (i == j-1, length 1) last; the
+// automaton's terminal chain yields exactly that descending-length order, so
+// the strict `<` updates resolve every tie the same way and the parse is
+// identical.
 static void segment_optimal(const uint8_t* data, uint32_t n,
-                            const PatIndex& px,
+                            const Automaton& ac,
                             const vector<string>& patterns,
                             const unordered_map<uint32_t, int>& lengths,
                             vector<uint32_t>& ids) {
@@ -492,27 +748,40 @@ static void segment_optimal(const uint8_t* data, uint32_t n,
   vector<uint32_t> back(n + 1, 0);
   vector<uint16_t> blen(n + 1, 0);
   cost[0] = 0;
-  for (uint32_t i = 0; i < n; ++i) {
-    int64_t c = cost[i];
-    if (c >= INF) continue;
-    uint8_t b = data[i];
-    int64_t nc = c + litcost[b];
-    if (nc < cost[i + 1]) {
-      cost[i + 1] = nc;
-      back[i + 1] = b;
-      blen[i + 1] = 1;
-    }
-    for (int L : px.lens_asc[b]) {
-      uint32_t j = i + (uint32_t)L;
-      if (j > n) break;
-      auto it = px.pset.find(string_view((const char*)data + i, (size_t)L));
-      if (it == px.pset.end()) continue;
-      nc = c + patcost[it->second];
+  int32_t node = 0;
+  for (uint32_t j = 1; j <= n; ++j) {
+    uint8_t c = data[j - 1];
+    node = ac.step(node, c);
+    int32_t t = ac.term_pat[node] >= 0 ? node : ac.out_link[node];
+    // A length-1 dictionary entry cannot be produced by the tiers (n-grams
+    // start at 2, word tokens at 3, merges only grow), but if one ever were,
+    // it must be relaxed AFTER the literal to match the old source-ordered
+    // loop.  The chain is descending, so such an entry is always last.
+    while (t && ac.term_len[t] > 1) {
+      uint32_t i = j - ac.term_len[t];
+      int64_t nc = cost[i] + patcost[ac.term_pat[t]];
       if (nc < cost[j]) {
         cost[j] = nc;
-        back[j] = 256 + it->second;
-        blen[j] = (uint16_t)L;
+        back[j] = 256 + (uint32_t)ac.term_pat[t];
+        blen[j] = ac.term_len[t];
       }
+      t = ac.out_link[t];
+    }
+    int64_t nc = cost[j - 1] + litcost[c];
+    if (nc < cost[j]) {
+      cost[j] = nc;
+      back[j] = c;
+      blen[j] = 1;
+    }
+    while (t) {
+      uint32_t i = j - ac.term_len[t];
+      nc = cost[i] + patcost[ac.term_pat[t]];
+      if (nc < cost[j]) {
+        cost[j] = nc;
+        back[j] = 256 + (uint32_t)ac.term_pat[t];
+        blen[j] = ac.term_len[t];
+      }
+      t = ac.out_link[t];
     }
   }
   ids.clear();
@@ -531,38 +800,66 @@ struct GrowCand {
 };
 
 static void grow_blocks(vector<uint32_t>& ids, vector<string>& patterns,
-                        int rounds, int min_freq) {
+                        int rounds, int min_freq, const Params& P) {
   for (int r = 0; r < rounds; ++r) {
-    if (patterns.size() >= MAX_DICT) break;
+    if (patterns.size() >= P.max_dict) break;
     uint32_t total = (uint32_t)ids.size();
     if (total < 2) break;
-    unordered_map<uint64_t, uint32_t> pairs;
-    pairs.reserve(total + 8);
+    U64Counter pairs;
+    // Distinct adjacent pairs are typically a small fraction of the stream,
+    // so start from the smaller of the stream length and a modest cap and let
+    // the table double only if the data really is that varied.
+    pairs.init((size_t)total + 8 < (1u << 16) ? (size_t)total + 8
+                                              : (size_t)(1u << 16));
     for (uint32_t i = 0; i + 1 < total; ++i)
-      ++pairs[((uint64_t)ids[i] << 32) | ids[i + 1]];
+      pairs.add(((uint64_t)ids[i] << 32) | ids[i + 1]);
     vector<uint32_t> sym_counts(256 + patterns.size(), 0);
     for (uint32_t sid : ids) ++sym_counts[sid];
     int lit_bits[256];
     for (int b = 0; b < 256; ++b)
       lit_bits[b] = est_code_len(sym_counts[b], total);
+    // Scoring a merge needs only the merged length and the summed literal
+    // cost of its bytes, and both are additive over the two children.  The
+    // concatenated string is therefore built ONLY for candidates that survive
+    // the Bit Cost Decision Engine — previously every distinct pair in the
+    // stream allocated one, which on a large file is millions of throwaway
+    // heap strings per round.
+    size_t nsym = 256 + patterns.size();
+    vector<int64_t> spelled(nsym);
+    vector<uint32_t> symlen(nsym);
+    for (size_t sid = 0; sid < 256; ++sid) {
+      spelled[sid] = lit_bits[sid];
+      symlen[sid] = 1;
+    }
+    for (size_t k = 0; k < patterns.size(); ++k) {
+      const string& p = patterns[k];
+      int64_t sp = 0;
+      for (unsigned char ch : p) sp += lit_bits[ch];
+      spelled[256 + k] = sp;
+      symlen[256 + k] = (uint32_t)p.size();
+    }
     auto expand = [&](uint32_t sid) -> string {
       if (sid < 256) return string(1, (char)sid);
       return patterns[sid - 256];
     };
     vector<GrowCand> accepted;
-    for (auto& kv : pairs) {
-      uint32_t f = kv.second;
+    for (size_t slot = 0; slot < pairs.key.size(); ++slot) {
+      if (pairs.key[slot] == 0) continue;
+      uint32_t f = pairs.cnt[slot];
       if (f < (uint32_t)min_freq) continue;
-      uint32_t a = (uint32_t)(kv.first >> 32), b = (uint32_t)kv.first;
-      string merged = expand(a) + expand(b);
-      if (merged.size() > MAX_BLOCK) continue;
-      int64_t gain = bit_cost_gain(merged, f, lit_bits,
-                                   est_code_len(f, total));
+      uint64_t pk = pairs.key[slot] - 1;
+      uint32_t a = (uint32_t)(pk >> 32), b = (uint32_t)pk;
+      uint32_t mlen = symlen[a] + symlen[b];
+      if (mlen > P.max_block) continue;
+      int64_t gain = (int64_t)f * ((spelled[a] + spelled[b])
+                                   - est_code_len(f, total))
+                     - 8 * ((int64_t)mlen + 3);
       // [v4] dictionary-refund accounting
       for (uint32_t child : {a, b})
         if (child >= 256 && sym_counts[child] == f && a != b)
           gain += 8 * ((int64_t)patterns[child - 256].size() + 3);
-      if (gain > 0) accepted.push_back({gain, move(merged), a, b});
+      if (gain > 0)
+        accepted.push_back({gain, expand(a) + expand(b), a, b});
     }
     if (accepted.empty()) break;
     sort(accepted.begin(), accepted.end(),
@@ -572,14 +869,14 @@ static void grow_blocks(vector<uint32_t>& ids, vector<string>& patterns,
            if (x.a != y.a) return x.a < y.a;
            return x.b < y.b;
          });
-    uint32_t room = MAX_DICT - (uint32_t)patterns.size();
+    uint32_t room = P.max_dict - (uint32_t)patterns.size();
     unordered_map<uint64_t, uint32_t> chosen;
     unordered_map<string, uint32_t> pat_index;
     pat_index.reserve(patterns.size() * 2 + 8);
     for (uint32_t i = 0; i < patterns.size(); ++i) pat_index[patterns[i]] = i;
-    size_t lim = accepted.size() < (size_t)MERGES_PER_ROUND
+    size_t lim = accepted.size() < (size_t)P.merges_per_round
                      ? accepted.size()
-                     : (size_t)MERGES_PER_ROUND;
+                     : (size_t)P.merges_per_round;
     for (size_t k = 0; k < lim; ++k) {
       GrowCand& gc = accepted[k];
       uint64_t pk = ((uint64_t)gc.a << 32) | gc.b;
@@ -595,11 +892,17 @@ static void grow_blocks(vector<uint32_t>& ids, vector<string>& patterns,
       }
     }
     if (chosen.empty()) break;
+    // At most MERGES_PER_ROUND pairs are ever chosen, so almost every symbol
+    // in the stream cannot begin one.  A left-symbol membership bitmap turns
+    // the common case into a single array read instead of a hash probe.
+    vector<bool> starts_merge(256 + patterns.size(), false);
+    for (auto& kv : chosen)
+      starts_merge[(uint32_t)(kv.first >> 32)] = true;
     vector<uint32_t> out;
     out.reserve(ids.size());
     uint32_t i = 0, nn = (uint32_t)ids.size();
     while (i < nn) {
-      if (i + 1 < nn) {
+      if (i + 1 < nn && starts_merge[ids[i]]) {
         auto it = chosen.find(((uint64_t)ids[i] << 32) | ids[i + 1]);
         if (it != chosen.end()) {
           out.push_back(it->second);
@@ -679,24 +982,16 @@ static void build_lengths(const vector<uint32_t>& ids,
 //
 // Defaults reproduce the historical compiled-in behaviour byte-for-byte, so
 // afc_compress() (the original ABI) is unchanged for existing callers.
-struct Params {
-  int dp = 1;
-  int dp_rounds = DP_ROUNDS;
-  int merge_rounds = MERGE_ROUNDS_V4;
-  int min_freq = MIN_CANDIDATE_FREQ;
-  int tune = 1;
-};
-
 static string compress_core(const uint8_t* data, uint32_t n, int fmt,
                             int min_freq, int rounds, const int* lit_bits,
                             const Params& P) {
   vector<string> patterns;
-  select_candidates(data, n, min_freq, lit_bits, patterns);
-  PatIndex px;
-  px.build(patterns);
+  select_candidates(data, n, min_freq, lit_bits, P, patterns);
+  Automaton ac;
+  ac.build(patterns);
   vector<uint32_t> ids;
-  segment_greedy(data, n, px, ids);
-  grow_blocks(ids, patterns, rounds, min_freq);
+  segment_greedy(data, n, ac, ids);
+  grow_blocks(ids, patterns, rounds, min_freq, P);
   final_audit(ids, patterns, lit_bits);
 
   unordered_map<uint32_t, int> lengths;
@@ -705,10 +1000,17 @@ static string compress_core(const uint8_t* data, uint32_t n, int fmt,
   // output for the Fast preset, so the branch covers both statements.
   if (P.dp) {
     build_lengths(ids, lengths);
-    px.build(patterns);  // patterns are stable across the DP iterations
+    ac.build(patterns);  // patterns are stable across the DP iterations
+    vector<uint32_t> next_ids;
     for (int r = 0; r < P.dp_rounds; ++r) {
-      segment_optimal(data, n, px, patterns, lengths, ids);
+      segment_optimal(data, n, ac, patterns, lengths, next_ids);
+      // [v9] Once the parse stops moving the remaining rounds are provably
+      // no-ops: identical ids give identical code lengths, which give the
+      // same parse again.  Stopping there is a pure work saving.
+      bool settled = (next_ids == ids);
+      ids.swap(next_ids);
       build_lengths(ids, lengths);
+      if (settled) break;
     }
     final_audit(ids, patterns, lit_bits);
   }
@@ -808,12 +1110,45 @@ AFC_API int afc_compress_ex(const uint8_t* data, uint32_t n, int adaptive, int f
                     int tune, void** out, uint32_t* outn) {
   Params P;
   P.dp = dp;
-  P.dp_rounds = dp_rounds > 0 ? dp_rounds : 0;
-  P.merge_rounds = merge_rounds >= 0 ? merge_rounds : 0;
-  // min_freq must stay >= 2: the small-file trial also runs min_freq - 1, and
-  // a floor of 0 would admit every n-gram and blow up the candidate set.
-  P.min_freq = min_freq >= 2 ? min_freq : 2;
+  P.dp_rounds = dp_rounds;
+  P.merge_rounds = merge_rounds;
+  P.min_freq = min_freq;
   P.tune = tune;
+  P.clamp();
+  return afc_compress_impl(data, n, adaptive, fmt, P, out, outn);
+}
+
+// [v9] Profile-aware entry point.
+//
+// The caller passes a flat int32 array so the ABI can gain fields without
+// another export: `nparams` says how many were supplied and anything beyond
+// it keeps the engine default. Order:
+//
+//   0 dp   1 dp_rounds   2 merge_rounds   3 min_freq   4 tune
+//   5 scan_window   6 ngram_max   7 max_initial_dict   8 max_dict
+//   9 max_block    10 merges_per_round
+//
+// Fields 5..10 were compile-time constants before v9. Varying them is what
+// lets one file be compressed under several search profiles so the smallest
+// container can be kept; none of them changes the decoder, because the
+// dictionary and the code lengths are written into the container explicitly.
+AFC_API int afc_compress_v9(const uint8_t* data, uint32_t n, int adaptive,
+                            int fmt, const int32_t* params, int32_t nparams,
+                            void** out, uint32_t* outn) {
+  Params P;
+  if (params == nullptr) nparams = 0;
+  if (nparams > 0) P.dp = params[0];
+  if (nparams > 1) P.dp_rounds = params[1];
+  if (nparams > 2) P.merge_rounds = params[2];
+  if (nparams > 3) P.min_freq = params[3];
+  if (nparams > 4) P.tune = params[4];
+  if (nparams > 5 && params[5] > 0) P.scan_window = (uint32_t)params[5];
+  if (nparams > 6) P.ngram_max = params[6];
+  if (nparams > 7 && params[7] > 0) P.max_initial_dict = (uint32_t)params[7];
+  if (nparams > 8 && params[8] > 0) P.max_dict = (uint32_t)params[8];
+  if (nparams > 9 && params[9] > 0) P.max_block = (uint32_t)params[9];
+  if (nparams > 10) P.merges_per_round = params[10];
+  P.clamp();
   return afc_compress_impl(data, n, adaptive, fmt, P, out, outn);
 }
 
