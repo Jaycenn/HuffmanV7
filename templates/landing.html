@@ -27,7 +27,7 @@
         <div class="preview-drop">
           <span class="preview-arrow" aria-hidden="true">↑</span>
           <strong>Drop a file here</strong>
-          <small>PDF, DOCX, text, structured data, source code, and binary files</small>
+          <small>Text, source code, markup, structured data and logs — any file is accepted</small>
         </div>
         <div class="preview-metrics">
           <div><small>MODE</small><strong>Adaptive</strong></div>
@@ -54,13 +54,18 @@
 
   <section class="landing-section formats-section" id="formats">
     <div class="formats-copy">
-      <p class="eyebrow">Automatic file handling</p>
-      <h2>Upload the file you already have.</h2>
-      <p>PDF and DOCX internals are analyzed automatically. Repetitive components may be encoded while already-compressed components are preserved exactly. Savings depend on the file's actual contents.</p>
+      <p class="eyebrow">Where the method applies</p>
+      <h2>Built for files that still have structure to find.</h2>
+      <p>These are the categories the method is evaluated on: text, source code, markup, structured data and system logs. Anything else is accepted too — a PDF, a DOCX, an image, an archive — and is always reconstructed byte for byte, but material that was already compressed leaves little structure to find, so expect little or no reduction there.</p>
     </div>
-    <div class="format-list" aria-label="Supported formats">
+    {# The chips list the evaluated categories from the study's scope, and only
+       those. PDF/DOCX and binary inputs are in the study to characterise the
+       size guard and the raw-storage fallback, NOT to claim gains, so putting
+       them here as peers of TXT and CSV would overstate the result -- 200 real
+       PDFs in benchmarks/external_corpus.csv reduce by 12.50%. #}
+    <div class="format-list" aria-label="File categories the method is evaluated on">
       <span>TXT</span><span>CSV</span><span>JSON</span><span>SQL</span>
-      <span>Source code</span><span>PDF</span><span>DOCX</span><span>Binary</span>
+      <span>HTML</span><span>LOG</span><span>Source code</span>
     </div>
   </section>
 
