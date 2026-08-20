@@ -215,7 +215,8 @@
 
     var fd = new FormData();
     fd.append("file", picked);
-    fd.append("format", $("sFmt").value);
+    // No container field: the server defaults to "auto", which already emits
+    // whichever of AFC1/AFC2 is smaller for this file.
     fd.append("mode", $("sMode").value);
     fd.append("preset", $("sPreset").value);
 

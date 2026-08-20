@@ -174,20 +174,16 @@
 
       <div class="mt-4 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
         <h3 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Options</h3>
-        <label class="block mt-3 font-data text-xs text-dim dark:text-[#9c968a]">container
-          <select id="sFmt" class="mt-1 w-full border border-line dark:border-[#35322c]
-                                   rounded-md px-2 py-2 bg-white dark:bg-[#1c1b18] text-ink
-                                   dark:text-[#ECE8E0]">
-            <option value="auto" selected>auto (smallest)</option>
-            <option value="afc1">AFC1 (legacy)</option>
-            <option value="afc2">AFC2 (compact)</option>
-          </select></label>
-        <label class="block mt-3 font-data text-xs text-dim dark:text-[#9c968a]">mode
+        {# The container choice was removed: the engine already emits whichever
+           of AFC1/AFC2 is smaller for the file, so every other value could
+           only make the user's result larger. The API still accepts `format`
+           for the benchmarks and the test suite. #}
+        <label class="block mt-3 font-data text-xs text-dim dark:text-[#9c968a]">method
           <select id="sMode" class="mt-1 w-full border border-line dark:border-[#35322c]
                                     rounded-md px-2 py-2 bg-white dark:bg-[#1c1b18] text-ink
                                     dark:text-[#ECE8E0]">
-            <option value="adaptive" selected>adaptive</option>
-            <option value="baseline">baseline</option>
+            <option value="adaptive" selected>ByteSize (adaptive)</option>
+            <option value="baseline">Plain Huffman (baseline)</option>
           </select></label>
         <label class="block mt-3 font-data text-xs text-dim dark:text-[#9c968a]">preset
           <select id="sPreset" class="mt-1 w-full border border-line dark:border-[#35322c]
@@ -197,6 +193,7 @@
             <option value="balanced" selected>Balanced</option>
             <option value="maximum">Maximum</option>
           </select></label>
+        <p id="sPresetNote" class="mt-2 font-data text-[10px] text-dim dark:text-[#9c968a]"></p>
       </div>
     </div>
   </div>
@@ -249,16 +246,10 @@
     <button id="clearBtn"
             class="px-4 py-3 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">
       Clear queue</button>
-    <label class="font-data text-xs text-dim dark:text-[#9c968a]">container
-      <select id="fmt" class="ml-1 border border-line dark:border-[#35322c] rounded-md px-2 py-2 bg-white dark:bg-[#1c1b18]">
-        <option value="auto" selected>auto (smallest)</option>
-        <option value="afc1">AFC1 (legacy)</option>
-        <option value="afc2">AFC2 (compact)</option>
-      </select></label>
-    <label class="font-data text-xs text-dim dark:text-[#9c968a]">mode
+    <label class="font-data text-xs text-dim dark:text-[#9c968a]">method
       <select id="mode" class="ml-1 border border-line dark:border-[#35322c] rounded-md px-2 py-2 bg-white dark:bg-[#1c1b18]">
-        <option value="adaptive" selected>adaptive</option>
-        <option value="baseline">baseline</option>
+        <option value="adaptive" selected>ByteSize (adaptive)</option>
+        <option value="baseline">Plain Huffman (baseline)</option>
       </select></label>
     <label class="font-data text-xs text-dim dark:text-[#9c968a]">preset
       <select id="preset" class="ml-1 border border-line dark:border-[#35322c] rounded-md px-2 py-2 bg-white dark:bg-[#1c1b18]">
@@ -266,6 +257,7 @@
         <option value="balanced" selected>Balanced</option>
         <option value="maximum">Maximum</option>
       </select></label>
+    <span id="presetNote" class="font-data text-[10px] text-dim dark:text-[#9c968a]"></span>
     <span id="queueTotal" class="font-data text-xs text-dim dark:text-[#9c968a] ml-auto"></span>
   </div>
   <p id="err" class="hidden error-panel text-sm mt-3 rounded-md px-3 py-2" role="alert"></p>
@@ -374,4 +366,31 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/queue.js') }}"></script>
 <script src="{{ url_for('static', filename='js/compress.js') }}"></script>
+<script>
+// Baseline is the single-tier Huffman control kept for the method comparison,
+// not a setting anyone would pick to get a smaller file. The presets tune the
+// adaptive pipeline only, so under baseline they genuinely do nothing --
+// disable the control and say why, instead of leaving it looking live.
+(function () {
+  function link(modeId, presetId, noteId) {
+    var mode = document.getElementById(modeId);
+    var preset = document.getElementById(presetId);
+    var note = document.getElementById(noteId);
+    if (!mode || !preset) return;
+    function paint() {
+      var baseline = mode.value === "baseline";
+      preset.disabled = baseline;
+      if (note) {
+        note.textContent = baseline
+          ? "Presets tune the adaptive pipeline; baseline ignores them."
+          : "";
+      }
+    }
+    mode.addEventListener("change", paint);
+    paint();
+  }
+  link("sMode", "sPreset", "sPresetNote");
+  link("mode", "preset", "presetNote");
+})();
+</script>
 {% endblock %}

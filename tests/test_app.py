@@ -915,6 +915,55 @@ def test_preset_size_is_monotonic():
         check("maximum is not larger than balanced: %s" % name,
               sizes["maximum"] <= sizes["balanced"], sizes)
 
+def test_compress_options_are_meaningful(app):
+    """Every control on the Compress page must be able to change the result.
+
+    The container selector was removed because it could not: the engine
+    already emits whichever of AFC1/AFC2 is smaller, so every other value only
+    made the user's file larger. The method selector stays -- baseline is the
+    single-tier Huffman control the method comparison rests on -- but the
+    presets tune the adaptive pipeline only, so the page has to say so rather
+    than leave a live-looking control that does nothing."""
+    c = app.test_client()
+    login(c, "alice", "correct-horse")
+    page = c.get("/compress").data
+
+    for gone in (b'id="sFmt"', b'id="fmt"'):
+        check("container selector stays out of the UI: %s" % gone.decode(),
+              gone not in page)
+    for kept in (b'id="sMode"', b'id="sPreset"', b'id="mode"', b'id="preset"'):
+        check("control still offered: %s" % kept.decode(), kept in page)
+    check("both tabs explain that baseline ignores the preset",
+          page.count(b"Presets tune the adaptive pipeline") >= 1
+          and b'id="sPresetNote"' in page and b'id="presetNote"' in page)
+
+    # Dropping the field must not change what the user gets: the server
+    # default has to be the same "auto" the removed control used to send.
+    data = b"structural block sample for the option check\n" * 400
+    omitted = c.post("/api/compress", data={
+        "file": (io.BytesIO(data), "opt.txt"), "preset": "balanced"}).get_json()
+    explicit = c.post("/api/compress", data={
+        "file": (io.BytesIO(data), "opt.txt"), "preset": "balanced",
+        "format": "auto"}).get_json()
+    check("omitting the container field is identical to asking for auto",
+          omitted["compressed"] == explicit["compressed"],
+          "%s vs %s" % (omitted["compressed"], explicit["compressed"]))
+    legacy = c.post("/api/compress", data={
+        "file": (io.BytesIO(data), "opt.txt"), "preset": "balanced",
+        "format": "afc1"}).get_json()
+    check("the removed choice really was never an improvement",
+          legacy["compressed"] >= omitted["compressed"],
+          "afc1 %s vs auto %s" % (legacy["compressed"], omitted["compressed"]))
+
+    # The API keeps honouring format/mode for the benchmarks and this suite.
+    base = c.post("/api/compress", data={
+        "file": (io.BytesIO(data), "opt.txt"), "mode": "baseline"}).get_json()
+    check("baseline is still reachable through the API for the comparison",
+          base["compressed"] > omitted["compressed"],
+          "baseline %s vs adaptive %s" % (base["compressed"],
+                                          omitted["compressed"]))
+
+
 def test_analytics_routes_removed(app):
     c = app.test_client()
     login(c, "alice", "correct-horse")
@@ -2820,6 +2869,7 @@ def main():
         test_branding_and_about_evidence(app)
         test_container_bytes_are_pinned()
         test_preset_size_is_monotonic()
+        test_compress_options_are_meaningful(app)
         test_analytics_routes_removed(app)
         test_persistent_artifact_access(app, appmod)
         test_storage_quota_and_transient_restore(app)

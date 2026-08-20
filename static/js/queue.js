@@ -200,7 +200,7 @@
       renderQueue();
       var fd = new FormData();
       fd.append("file", item.file);
-      fd.append("format", $("fmt").value);
+      // No container field: "auto" on the server already picks the smaller.
       fd.append("mode", $("mode").value);
       fd.append("batch_id", batchId);
       fd.append("batch_total_bytes", String(totalBytes));
