@@ -300,9 +300,51 @@ def applied(name):
 
 
 def _run_one(data, preset, shape, fmt, adaptive, native):
+    # container_aware is False here on purpose: compress_with does the
+    # container routing ONCE and drives this ladder from inside it. For input
+    # that is not a container the flag makes no difference, because the
+    # routing test would decline anyway.
     options = options_for(preset, shape)
     return afc2.compress_bytes(data, adaptive, fmt=fmt, options=options,
+                               container_aware=False,
                                backend="native" if native else "python")
+
+
+def _run_ladder(data, ladder, fmt, adaptive, native):
+    """Compress under every profile in the ladder; the smallest wins.
+
+    Ties keep the earliest profile in the ladder, so the result is
+    deterministic and reproducible."""
+    if len(ladder) == 1:
+        preset, shape = ladder[0]
+        return _run_one(data, preset, shape, fmt, adaptive, native)
+
+    results = [None] * len(ladder)
+    workers = _worker_count(len(data), len(ladder))
+    if workers <= 1:
+        for i, (preset, shape) in enumerate(ladder):
+            results[i] = _run_one(data, preset, shape, fmt, adaptive, native)
+    elif workers >= len(ladder):
+        # Memory budget allows the whole ladder at once: no barriers.
+        pool = _pool()
+        futures = {
+            pool.submit(_run_one, data, preset, shape, fmt, adaptive,
+                        native): i
+            for i, (preset, shape) in enumerate(ladder)}
+        for future in as_completed(futures):
+            results[futures[future]] = future.result()
+    else:
+        # Large input: run in batches so peak memory stays inside the budget.
+        pool = _pool()
+        for start in range(0, len(ladder), workers):
+            futures = {
+                pool.submit(_run_one, data, ladder[i][0], ladder[i][1], fmt,
+                            adaptive, native): i
+                for i in range(start, min(start + workers, len(ladder)))}
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
+    # min() keeps the first minimum it meets, so ladder order breaks ties.
+    return min(results, key=len)
 
 
 def compress_with(data: bytes, name: str, fmt: str = "auto",
@@ -329,36 +371,42 @@ def compress_with(data: bytes, name: str, fmt: str = "auto",
     backend = ("C++ native" if native else
                ("pure Python (preset)" if afc2.NATIVE else "pure Python"))
     ladder = ladder_for(name, len(data))
-    if len(ladder) == 1:
-        preset, shape = ladder[0]
-        return _run_one(data, preset, shape, fmt, adaptive, native), name, \
-            backend
 
-    results = [None] * len(ladder)
-    workers = _worker_count(len(data), len(ladder))
-    if workers <= 1:
-        for i, (preset, shape) in enumerate(ladder):
-            results[i] = _run_one(data, preset, shape, fmt, adaptive, native)
-    elif workers >= len(ladder):
-        # Memory budget allows the whole ladder at once: no barriers.
-        pool = _pool()
-        futures = {
-            pool.submit(_run_one, data, preset, shape, fmt, adaptive,
-                        native): i
-            for i, (preset, shape) in enumerate(ladder)}
-        for future in as_completed(futures):
-            results[futures[future]] = future.result()
-    else:
-        # Large input: run in batches so peak memory stays inside the budget.
-        pool = _pool()
-        for start in range(0, len(ladder), workers):
-            futures = {
-                pool.submit(_run_one, data, ladder[i][0], ladder[i][1], fmt,
-                            adaptive, native): i
-                for i in range(start, min(start + workers, len(ladder)))}
-            for future in as_completed(futures):
-                results[futures[future]] = future.result()
+    # [v9] Container routing happens ONCE, with the ladder driven from inside
+    # it -- not once per profile.
+    #
+    # For a PDF or OOXML file the expensive step is the structural analysis in
+    # containers.py, which is pure Python: on a 3.9 MB PDF it is ~14 s of the
+    # ~15 s total, and it depends only on the input bytes, never on the search
+    # profile. Running the whole routed pipeline once per profile therefore
+    # repeated that analysis five or nine times for nothing.
+    #
+    # Passing a searching compress_fn instead keeps the routing decision
+    # exactly as containers.py makes it -- it still compares each candidate
+    # against the plain whole-file result and still declines when the plain
+    # path wins -- while every buffer it hands back is the best the ladder can
+    # do. Each component is therefore no larger than under any single profile,
+    # so the result is never larger than the previous behaviour, and on a
+    # container-format file it is several times faster.
+    whole = []
 
-    # min() keeps the first minimum it meets, so ladder order breaks ties.
-    best = min(results, key=len)
-    return best, name, backend
+    def searched(chunk, chunk_adaptive=True, fmt=fmt):
+        if chunk is data:
+            if not whole:
+                whole.append(_run_ladder(data, ladder, fmt, chunk_adaptive,
+                                         native))
+            return whole[0]
+        return _run_ladder(chunk, ladder, fmt, chunk_adaptive, native)
+
+    routed = None
+    if (adaptive and afc2.CONTAINER_AWARE and len(data) > 0
+            and afc2._looks_like_container(data)):
+        try:
+            import containers
+            routed, _info = containers.compress_container(
+                data, fmt=fmt, compress_fn=searched)
+        except Exception:
+            routed = None      # any analysis problem falls back to plain
+    if routed is not None:
+        return routed, name, backend
+    return searched(data, adaptive, fmt), name, backend
