@@ -33,13 +33,23 @@
     <table class="w-full text-sm">
       <thead><tr><th>Corpus</th><th class="text-right">Files</th><th class="text-right">Original bytes</th><th class="text-right">AFC bytes</th><th class="text-right">Saved</th><th>Source</th></tr></thead>
       <tbody>
+        <tr><td>Silesia <small class="history-operation">current engine</small></td><td class="metric-cell">12</td><td class="metric-cell">211,938,580</td><td class="metric-cell">87,133,292</td><td class="metric-cell">58.89%</td><td class="source-cell">benchmarks/external_corpus.csv</td></tr>
+        <tr><td>Silesia <small class="history-operation">AFC 1.3 audit</small></td><td class="metric-cell">12</td><td class="metric-cell">211,938,580</td><td class="metric-cell">91,315,157</td><td class="metric-cell">56.91%</td><td class="source-cell">benchmarks/afc_1_3_silesia_native_summary.csv</td></tr>
         <tr><td>Repository corpus <small class="history-operation">current engine</small></td><td class="metric-cell">31</td><td class="metric-cell">13,495,863</td><td class="metric-cell">4,710,247</td><td class="metric-cell">65.10%</td><td class="source-cell">benchmarks/v9_repo_corpus.csv</td></tr>
         <tr><td>Canterbury <small class="history-operation">AFC 1.3 audit</small></td><td class="metric-cell">11</td><td class="metric-cell">2,810,784</td><td class="metric-cell">826,154</td><td class="metric-cell">70.61%</td><td class="source-cell">benchmarks/afc_1_3_canterbury_native_summary.csv</td></tr>
-        <tr><td>Silesia <small class="history-operation">AFC 1.3 audit</small></td><td class="metric-cell">12</td><td class="metric-cell">211,938,580</td><td class="metric-cell">91,315,157</td><td class="metric-cell">56.91%</td><td class="source-cell">benchmarks/afc_1_3_silesia_native_summary.csv</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="document-note">The first row is produced by the engine running here, over the files this repository actually carries, and can be regenerated with <code>python benchmarks/v9_repo_corpus.py</code>. The Canterbury and Silesia rows are the earlier AFC 1.3 one-trial-per-file audit over the full official corpora, which are not redistributed with the source; they are kept as the historical measurement and are <strong>not</strong> a claim about the current engine, which is smaller than AFC 1.3 on every file measured here.</p>
+  <p class="document-note"><strong>The two Silesia rows are the same twelve files, measured twice.</strong>
+     The originals total 211,938,580 bytes in both, so the comparison is exact: the current engine writes
+     <strong>4,181,865 fewer bytes</strong> than the AFC 1.3 audit at the Balanced preset (−4.58%), and
+     6,810,146 fewer at Maximum (60.13% saved) — smaller on every one of the twelve files, not merely on average.
+     Silesia is regenerated with <code>benchmarks/external_corpus.py</code>, which takes the corpus as a path
+     because it is separately licensed and not redistributed here; the repository-corpus row is regenerated with
+     <code>benchmarks/v9_repo_corpus.py</code> and needs no download. The Canterbury row remains the AFC 1.3
+     audit over the full eleven-file corpus and is <strong>not</strong> a claim about the current engine: the
+     official corpus could not be re-measured here, and a partial re-run over only its text files would flatter
+     the result by omitting the binary members that pull the ratio down.</p>
   <p class="document-note"><strong>PDF and DOCX need class-qualified interpretation.</strong>
      Files with internally uncompressed streams can provide substantial structure for Hybrid Huffman, while ordinary producer-compressed files may offer very little additional reduction. ByteSize therefore makes no general compression-percentage claim for either format; both are reconstructed byte for byte.</p>
 </section>

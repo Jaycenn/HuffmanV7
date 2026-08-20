@@ -734,6 +734,46 @@ def test_branding_and_about_evidence(app):
     check("the AFC 1.3 rows are labelled as the historical audit",
           "AFC 1.3 audit" in about and "not" in about)
 
+    # [v9] Silesia is now measured on the current engine as well. The two rows
+    # are the same twelve files, so the page may only claim an improvement if
+    # the committed measurement actually shows one.
+    ext_csv = os.path.join(ROOT, "benchmarks", "external_corpus.csv")
+    with open(ext_csv, newline="", encoding="utf-8") as handle:
+        ext_rows = [r for r in _csv.DictReader(handle)]
+    sil = [r for r in ext_rows
+           if r["corpus"] == "silesia" and r["preset"] == "balanced"]
+    sil_original = sum(int(r["original_bytes"]) for r in sil)
+    sil_now = sum(int(r["compressed_bytes"]) for r in sil)
+    check("Silesia current-engine numbers trace to CSV",
+          len(sil) == 12
+          and format(sil_original, ",") in about
+          and format(sil_now, ",") in about
+          and ("%.2f%%" % (100.0 * (1.0 - sil_now / sil_original))) in about
+          and "benchmarks/external_corpus.csv" in about, len(sil))
+    check("every external-corpus row is verified lossless",
+          all(r["byte_equal"] == "True" and r["sha256_equal"] == "True"
+              for r in ext_rows) and len(ext_rows) >= 48, len(ext_rows))
+
+    with open(os.path.join(ROOT, "benchmarks",
+                           "afc_1_3_silesia_native_summary.csv"),
+              newline="", encoding="utf-8") as handle:
+        old_sil = [r for r in _csv.DictReader(handle)
+                   if r["preset"] == "balanced"]
+    old_original = sum(int(r["original_bytes"]) for r in old_sil)
+    old_bytes = sum(int(r["compressed_bytes"]) for r in old_sil)
+    check("the two Silesia rows really are the same corpus",
+          old_original == sil_original,
+          "%d != %d" % (old_original, sil_original))
+    check("the claimed Silesia improvement is the measured one",
+          sil_now < old_bytes
+          and format(old_bytes - sil_now, ",") in about,
+          "%s vs %s" % (format(old_bytes - sil_now, ","), sil_now))
+    # A partial Canterbury re-run must never be presented as Canterbury.
+    check("no partial Canterbury subset is published as the corpus",
+          not any(r["corpus"] == "canterbury" for r in ext_rows)
+          and "canterbury-text-subset" in
+              open(ext_csv, encoding="utf-8").read())
+
     import presets as _presets
     spot = [("canterbury", "alice29.txt"), ("corpus", "data.json"),
             ("documents", "docx_zip_stored.docx")]
