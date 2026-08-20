@@ -768,6 +768,36 @@ def test_branding_and_about_evidence(app):
           sil_now < old_bytes
           and format(old_bytes - sil_now, ",") in about,
           "%s vs %s" % (format(old_bytes - sil_now, ","), sil_now))
+    gov = [r for r in ext_rows
+           if r["corpus"] == "govdocs1-thread000" and r["preset"] == "balanced"]
+    gov_original = sum(int(r["original_bytes"]) for r in gov)
+    gov_now = sum(int(r["compressed_bytes"]) for r in gov)
+    check("GovDocs1 numbers trace to CSV",
+          len(gov) > 900
+          and format(gov_original, ",") in about
+          and format(gov_now, ",") in about
+          and ("%.2f%%" % (100.0 * (1.0 - gov_now / gov_original))) in about,
+          len(gov))
+    # The per-format figures quoted next to the table must be the measured
+    # ones: this is the page's own class-qualified claim about PDF and DOCX,
+    # so it may not drift from the CSV it cites.
+    by_ext = {}
+    for row in gov:
+        name = row["file"]
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        acc = by_ext.setdefault(ext, [0, 0])
+        acc[0] += int(row["original_bytes"])
+        acc[1] += int(row["compressed_bytes"])
+    for ext in ("pdf", "xls", "txt", "jpg"):
+        original, compressed = by_ext[ext]
+        quoted = "%.2f%%" % (100.0 * (1.0 - compressed / original))
+        check("About %s figure matches the measurement (%s)" % (ext, quoted),
+              quoted in about, quoted)
+    unshrunk = sum(1 for r in gov
+                   if int(r["compressed_bytes"]) >= int(r["original_bytes"]))
+    check("About reports the files that did not shrink",
+          str(unshrunk) in about, unshrunk)
+
     # A partial Canterbury re-run must never be presented as Canterbury.
     check("no partial Canterbury subset is published as the corpus",
           not any(r["corpus"] == "canterbury" for r in ext_rows)
@@ -785,10 +815,16 @@ def test_branding_and_about_evidence(app):
         check("published size still reproduces: %s" % fname,
               len(blob) == int(row["compressed_bytes"]),
               "%d != %s" % (len(blob), row["compressed_bytes"]))
+    # The page must still distinguish the two component classes and refuse a
+    # blanket percentage. Since v9 it does so with the measured GovDocs1
+    # split rather than prose, so the check is that both classes are named
+    # concretely -- a format that reduces well and one that does not -- and
+    # that the refusal is still there.
     check("document claim distinguishes both component classes",
-          "internally uncompressed" in about
-          and "producer-compressed" in about
-          and "no general compression-percentage claim" in about)
+          "no general compression-percentage claim" in about
+          and "uncompressed text streams" in about
+          and "behaves like the JPEGs" in about
+          and "did not shrink" in about)
 
 
 # ---------------------------------------------------------------------------
