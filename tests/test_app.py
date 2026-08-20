@@ -719,6 +719,70 @@ def test_branding_and_about_evidence(app):
           and "no general compression-percentage claim" in about)
 
 
+# ---------------------------------------------------------------------------
+# [v9] Container output is a published artefact: a user's stored .afc file and
+# the numbers in the thesis both depend on it.  Performance work is expected;
+# silently changing what the engine emits is not.  These digests pin the exact
+# container for a fixed corpus at every preset, so any change to the encoded
+# bytes has to be a deliberate edit of this table with a measured reason.
+# ---------------------------------------------------------------------------
+
+def _pin_corpus():
+    return [
+        ("prose", b"the quick brown fox jumps over the lazy dog. " * 300),
+        ("csvish", b"".join(b"%d,alpha,beta,gamma,%d\n" % (i, i * 7)
+                            for i in range(400))),
+        ("jsonish", b"[" + b",".join(b'{"id":%d,"name":"item","ok":true}' % i
+                                     for i in range(300)) + b"]"),
+        ("code", b"def compress(data):\n    return huffman(data)\n\n" * 200),
+        ("binary", bytes((i * 37 + (i >> 3)) & 0xFF for i in range(6000))),
+        ("incompressible",
+         bytes(((i * 2654435761) >> 13) & 0xFF for i in range(4096))),
+        ("repetitive", b"AB" * 5000),
+    ]
+
+
+PINNED_CONTAINERS = {
+    ("prose", "fast"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486),
+    ("prose", "balanced"): ("c4164fade8982dafc813552a904aaf5c", 865),
+    ("prose", "maximum"): ("c4164fade8982dafc813552a904aaf5c", 865),
+    ("csvish", "fast"): ("dc67eace6449ca2dc449f5cf142689a5", 2503),
+    ("csvish", "balanced"): ("91e1a9ffade15428c92f2ebf5c2ce069", 2335),
+    ("csvish", "maximum"): ("91e1a9ffade15428c92f2ebf5c2ce069", 2335),
+    ("jsonish", "fast"): ("4189e69d98a2382747def080987c9a90", 1246),
+    ("jsonish", "balanced"): ("18c517088ebbc7918b051d0d690820fc", 1461),
+    ("jsonish", "maximum"): ("18c517088ebbc7918b051d0d690820fc", 1461),
+    ("code", "fast"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473),
+    ("code", "balanced"): ("1dd29ae7c9ecc8207ca589de4b72a71a", 848),
+    ("code", "maximum"): ("1dd29ae7c9ecc8207ca589de4b72a71a", 848),
+    ("binary", "fast"): ("a0a19f3f609b9290471181001a02e5d2", 5436),
+    ("binary", "balanced"): ("71c9095563c98bdb31248b85f95aeffa", 3344),
+    ("binary", "maximum"): ("a1021bd1ffa1bac243b27e50c0f390ea", 2801),
+    ("incompressible", "fast"): ("62e57bf89140815e79ea50d554bca7da", 3826),
+    ("incompressible", "balanced"): ("596595ba7b52c42a1a170cbfae8c1b78", 3197),
+    ("incompressible", "maximum"): ("596595ba7b52c42a1a170cbfae8c1b78", 3197),
+    ("repetitive", "fast"): ("f06c7f8ddba83f685adedfb7865f50d9", 96),
+    ("repetitive", "balanced"): ("4df17b63eef46dd475cedb950287aeb0", 109),
+    ("repetitive", "maximum"): ("4df17b63eef46dd475cedb950287aeb0", 109),
+}
+
+
+def test_container_bytes_are_pinned():
+    import presets
+    import afc2
+    for name, data in _pin_corpus():
+        for preset in ("fast", "balanced", "maximum"):
+            blob, _used, _backend = presets.compress_with(data, preset,
+                                                          fmt="auto")
+            want_sha, want_len = PINNED_CONTAINERS[(name, preset)]
+            got = hashlib.sha256(blob).hexdigest()[:32]
+            check("container bytes unchanged: %s/%s" % (name, preset),
+                  got == want_sha and len(blob) == want_len,
+                  "%s/%d (expected %s/%d)" % (got, len(blob), want_sha,
+                                              want_len))
+            check("pinned container round-trips: %s/%s" % (name, preset),
+                  afc2.decompress_bytes(blob) == data)
+
 def test_analytics_routes_removed(app):
     c = app.test_client()
     login(c, "alice", "correct-horse")
@@ -2622,6 +2686,7 @@ def main():
         test_public_site_and_action_gates(app)
         test_intended_destination_preserved(app)
         test_branding_and_about_evidence(app)
+        test_container_bytes_are_pinned()
         test_analytics_routes_removed(app)
         test_persistent_artifact_access(app, appmod)
         test_storage_quota_and_transient_restore(app)
