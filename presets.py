@@ -142,14 +142,28 @@ SEARCH_PROFILES = {
 # of the cheaper preset's list. That is what makes "a costlier preset is never
 # larger" true by construction rather than by measurement.
 _SHAPES = ("default", "wide-dict", "ngram6", "ngram8")
-PROFILE_LADDER = {
-    "fast": [("fast", "default")],
-    "balanced": ([("fast", "default")]
-                 + [("balanced", shape) for shape in _SHAPES]),
-    "maximum": ([("fast", "default")]
-                + [("balanced", shape) for shape in _SHAPES]
-                + [("maximum", shape) for shape in _SHAPES]),
-}
+
+# Above this the ladder drops the wider n-gram scans. That is not a guess: on
+# multi-megabyte text they LOSE (ngram6 and ngram8 are both about +6% on the
+# 10 MB sample) while the wider dictionary is the whole win (-8.4%), so the
+# trimmed ladder gives the same bytes for roughly half the work. The trim is
+# applied to every preset alike, so the ladders stay nested and the size
+# ordering still holds.
+_LARGE_INPUT = 8 * 1024 * 1024
+_LARGE_SHAPES = ("default", "wide-dict")
+
+
+def _shapes_for(nbytes):
+    return _LARGE_SHAPES if nbytes >= _LARGE_INPUT else _SHAPES
+
+
+def _ladder(name, shapes):
+    rungs = [("fast", "default")]
+    if name in ("balanced", "maximum"):
+        rungs += [("balanced", shape) for shape in shapes]
+    if name == "maximum":
+        rungs += [("maximum", shape) for shape in shapes]
+    return rungs
 
 # Peak memory scales with input size times the number of concurrent jobs: the
 # DP cost/back/span arrays alone are ~14 bytes per input byte. Cap the
@@ -231,11 +245,11 @@ def profiles_available() -> bool:
     return bool(getattr(afc2._native, "PROFILES", False))
 
 
-def ladder_for(name):
+def ladder_for(name, nbytes=0):
     """The (preset, profile) pairs a named preset searches, in order."""
     if not is_valid(name):
         name = DEFAULT_PRESET
-    ladder = PROFILE_LADDER[name]
+    ladder = _ladder(name, _shapes_for(nbytes))
     if not profiles_available():
         # No v9 library: keep only the profiles the loaded core can run at
         # native speed. The search shrinks; nothing is computed under the
@@ -314,7 +328,7 @@ def compress_with(data: bytes, name: str, fmt: str = "auto",
     native = uses_native(name)
     backend = ("C++ native" if native else
                ("pure Python (preset)" if afc2.NATIVE else "pure Python"))
-    ladder = ladder_for(name)
+    ladder = ladder_for(name, len(data))
     if len(ladder) == 1:
         preset, shape = ladder[0]
         return _run_one(data, preset, shape, fmt, adaptive, native), name, \

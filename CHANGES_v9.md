@@ -85,6 +85,15 @@ releases the GIL for a native call) with the worker count bounded by input
 size, so a large file does not multiply peak memory;
 `AFC_PROFILE_MEMORY_BUDGET` overrides the bound.
 
+Above 8 MB the ladder also drops the wider n-gram scans, which is measured
+rather than assumed: on multi-megabyte text `ngram6` and `ngram8` both come out
+about +6% while the wider dictionary is the entire win, so the trimmed ladder
+produces the same bytes for roughly half the work — 10 MB at Balanced goes from
+4.55 s to 2.67 s with a byte-identical result. The trim applies to every preset
+alike, so the ladders stay nested and the size ordering still holds. A 40 MB
+input takes 2.3 s / 20 s / 65 s at Fast / Balanced / Maximum, all still faster
+than the pre-v9 engine's single-profile times at the same presets.
+
 Over the repository corpus, against the pre-v9 engine:
 
 | Preset | Size | Saved | Wall clock |
