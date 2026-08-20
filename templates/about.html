@@ -28,16 +28,18 @@
   <div class="section-row">
     <div><p class="eyebrow">Measured evidence</p><h2 id="evidenceTitle">Balanced preset, native backend</h2></div>
   </div>
-  <p class="evidence-note">Aggregated size results from the repository’s one-trial-per-file correctness audit. Every included row records byte equality and SHA-256 equality; no speed claim is made from a single trial.</p>
+  <p class="evidence-note">Every row below records byte equality and SHA-256 equality for the whole round trip. Sizes are reproducible; timings are machine-dependent and no speed claim is made from a single trial.</p>
   <div class="table-shell">
     <table class="w-full text-sm">
       <thead><tr><th>Corpus</th><th class="text-right">Files</th><th class="text-right">Original bytes</th><th class="text-right">AFC bytes</th><th class="text-right">Saved</th><th>Source</th></tr></thead>
       <tbody>
-        <tr><td>Canterbury</td><td class="metric-cell">11</td><td class="metric-cell">2,810,784</td><td class="metric-cell">826,154</td><td class="metric-cell">70.61%</td><td class="source-cell">benchmarks/afc_1_3_canterbury_native_summary.csv</td></tr>
-        <tr><td>Silesia</td><td class="metric-cell">12</td><td class="metric-cell">211,938,580</td><td class="metric-cell">91,315,157</td><td class="metric-cell">56.91%</td><td class="source-cell">benchmarks/afc_1_3_silesia_native_summary.csv</td></tr>
+        <tr><td>Repository corpus <small class="history-operation">current engine</small></td><td class="metric-cell">31</td><td class="metric-cell">13,495,863</td><td class="metric-cell">4,710,247</td><td class="metric-cell">65.10%</td><td class="source-cell">benchmarks/v9_repo_corpus.csv</td></tr>
+        <tr><td>Canterbury <small class="history-operation">AFC 1.3 audit</small></td><td class="metric-cell">11</td><td class="metric-cell">2,810,784</td><td class="metric-cell">826,154</td><td class="metric-cell">70.61%</td><td class="source-cell">benchmarks/afc_1_3_canterbury_native_summary.csv</td></tr>
+        <tr><td>Silesia <small class="history-operation">AFC 1.3 audit</small></td><td class="metric-cell">12</td><td class="metric-cell">211,938,580</td><td class="metric-cell">91,315,157</td><td class="metric-cell">56.91%</td><td class="source-cell">benchmarks/afc_1_3_silesia_native_summary.csv</td></tr>
       </tbody>
     </table>
   </div>
+  <p class="document-note">The first row is produced by the engine running here, over the files this repository actually carries, and can be regenerated with <code>python benchmarks/v9_repo_corpus.py</code>. The Canterbury and Silesia rows are the earlier AFC 1.3 one-trial-per-file audit over the full official corpora, which are not redistributed with the source; they are kept as the historical measurement and are <strong>not</strong> a claim about the current engine, which is smaller than AFC 1.3 on every file measured here.</p>
   <p class="document-note"><strong>PDF and DOCX need class-qualified interpretation.</strong>
      Files with internally uncompressed streams can provide substantial structure for Hybrid Huffman, while ordinary producer-compressed files may offer very little additional reduction. ByteSize therefore makes no general compression-percentage claim for either format; both are reconstructed byte for byte.</p>
 </section>

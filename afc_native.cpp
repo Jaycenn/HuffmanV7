@@ -401,6 +401,42 @@ struct U64Counter {
   }
 };
 
+// [v9] Every tunable the search profiles vary lives here.  The five original
+// fields keep their meaning and their defaults, so afc_compress and
+// afc_compress_ex behave exactly as before; the six added below were
+// `static const` until now, which is why a preset could only ever deepen the
+// search rather than reshape it.
+struct Params {
+  int dp = 1;
+  int dp_rounds = DP_ROUNDS;
+  int merge_rounds = MERGE_ROUNDS_V4;
+  int min_freq = MIN_CANDIDATE_FREQ;
+  int tune = 1;
+  uint32_t scan_window = SCAN_WINDOW;
+  int ngram_max = NGRAM_MAX;
+  uint32_t max_initial_dict = MAX_INITIAL_DICT;
+  uint32_t max_dict = MAX_DICT;
+  uint32_t max_block = MAX_BLOCK;
+  int merges_per_round = MERGES_PER_ROUND;
+
+  void clamp() {
+    if (dp_rounds < 0) dp_rounds = 0;
+    if (merge_rounds < 0) merge_rounds = 0;
+    // min_freq must stay >= 2: the small-file trial also runs min_freq - 1,
+    // and a floor of 0 would admit every n-gram and blow up the candidate set.
+    if (min_freq < 2) min_freq = 2;
+    if (scan_window < 1024u) scan_window = 1024u;
+    // n-gram keys are packed into a uint64, so 8 bytes is the hard ceiling.
+    if (ngram_max < NGRAM_MIN) ngram_max = NGRAM_MIN;
+    if (ngram_max > 8) ngram_max = 8;
+    if (max_dict < 256u) max_dict = 256u;
+    if (max_initial_dict > max_dict) max_initial_dict = max_dict;
+    if (max_block < 2u) max_block = 2u;
+    if (max_block > 65535u) max_block = 65535u;
+    if (merges_per_round < 1) merges_per_round = 1;
+  }
+};
+
 // Tier-2 n-gram counting for one length (thread worker).  n-grams of
 // length <= 8 pack into a uint64 key (big-endian byte order), which is much
 // faster to hash than heap strings; the counts are identical.
@@ -419,26 +455,28 @@ static void count_len(const uint8_t* win, uint32_t wn, int L,
 }
 
 static void select_candidates(const uint8_t* data, uint32_t n, int min_freq,
-                              const int* lit_bits, vector<string>& patterns) {
-  uint32_t wn = n < SCAN_WINDOW ? n : SCAN_WINDOW;
+                              const int* lit_bits, const Params& P,
+                              vector<string>& patterns) {
+  uint32_t wn = n < P.scan_window ? n : P.scan_window;
+  const int ngram_max = P.ngram_max;
   // Tier-2: one thread per n-gram length (deterministic: separate maps);
   // below ~16 KB thread spawn costs more than the scan itself, so go serial
-  U64Counter maps[NGRAM_MAX - NGRAM_MIN + 1];
+  U64Counter maps[8 - NGRAM_MIN + 1];
 #ifndef AFC_NO_THREADS
   if (wn >= 16384) {
     vector<thread> th;
-    for (int L = NGRAM_MIN; L <= NGRAM_MAX; ++L)
+    for (int L = NGRAM_MIN; L <= ngram_max; ++L)
       th.emplace_back(count_len, data, wn, L, &maps[L - NGRAM_MIN]);
     for (auto& t : th) t.join();
   } else
 #endif
   {
-    for (int L = NGRAM_MIN; L <= NGRAM_MAX; ++L)
+    for (int L = NGRAM_MIN; L <= ngram_max; ++L)
       count_len(data, wn, L, &maps[L - NGRAM_MIN]);
   }
   unordered_map<string, uint32_t> cands;
   cands.reserve(maps[0].used + maps[1].used + 64);
-  for (int L = NGRAM_MIN; L <= NGRAM_MAX; ++L) {
+  for (int L = NGRAM_MIN; L <= ngram_max; ++L) {
     U64Counter& m = maps[L - NGRAM_MIN];
     for (size_t slot = 0; slot < m.key.size(); ++slot) {
       if (m.key[slot] == 0 || m.cnt[slot] < (uint32_t)min_freq) continue;
@@ -486,8 +524,8 @@ static void select_candidates(const uint8_t* data, uint32_t n, int min_freq,
          return a.second < b.second;                         // pattern asc
        });
   patterns.clear();
-  size_t take = scored.size() < MAX_INITIAL_DICT ? scored.size()
-                                                 : MAX_INITIAL_DICT;
+  size_t take = scored.size() < P.max_initial_dict ? scored.size()
+                                                   : P.max_initial_dict;
   patterns.reserve(take);
   for (size_t k = 0; k < take; ++k) patterns.push_back(move(scored[k].second));
 }
@@ -524,7 +562,7 @@ struct Automaton {
   vector<int32_t> fail;      // failure link
   vector<int32_t> out_link;  // next terminal up the failure chain (0 = none)
   vector<int32_t> term_pat;  // pattern id ending at this node, else -1
-  vector<uint8_t> term_len;  // its length (<= MAX_BLOCK)
+  vector<uint16_t> term_len; // its length (<= Params::max_block)
   vector<uint64_t> gk;       // open-addressed goto edges, key (node<<8|byte)+1
   vector<int32_t> gv;
   vector<int32_t> root_next; // depth-1 transitions, -1 when absent
@@ -613,7 +651,7 @@ struct Automaton {
       // upstream), but keeping the first id is the deterministic choice.
       if (term_pat[node] < 0) {
         term_pat[node] = (int32_t)pi;
-        term_len[node] = (uint8_t)p.size();
+        term_len[node] = (uint16_t)p.size();
       }
     }
 
@@ -762,9 +800,9 @@ struct GrowCand {
 };
 
 static void grow_blocks(vector<uint32_t>& ids, vector<string>& patterns,
-                        int rounds, int min_freq) {
+                        int rounds, int min_freq, const Params& P) {
   for (int r = 0; r < rounds; ++r) {
-    if (patterns.size() >= MAX_DICT) break;
+    if (patterns.size() >= P.max_dict) break;
     uint32_t total = (uint32_t)ids.size();
     if (total < 2) break;
     U64Counter pairs;
@@ -812,7 +850,7 @@ static void grow_blocks(vector<uint32_t>& ids, vector<string>& patterns,
       uint64_t pk = pairs.key[slot] - 1;
       uint32_t a = (uint32_t)(pk >> 32), b = (uint32_t)pk;
       uint32_t mlen = symlen[a] + symlen[b];
-      if (mlen > MAX_BLOCK) continue;
+      if (mlen > P.max_block) continue;
       int64_t gain = (int64_t)f * ((spelled[a] + spelled[b])
                                    - est_code_len(f, total))
                      - 8 * ((int64_t)mlen + 3);
@@ -831,14 +869,14 @@ static void grow_blocks(vector<uint32_t>& ids, vector<string>& patterns,
            if (x.a != y.a) return x.a < y.a;
            return x.b < y.b;
          });
-    uint32_t room = MAX_DICT - (uint32_t)patterns.size();
+    uint32_t room = P.max_dict - (uint32_t)patterns.size();
     unordered_map<uint64_t, uint32_t> chosen;
     unordered_map<string, uint32_t> pat_index;
     pat_index.reserve(patterns.size() * 2 + 8);
     for (uint32_t i = 0; i < patterns.size(); ++i) pat_index[patterns[i]] = i;
-    size_t lim = accepted.size() < (size_t)MERGES_PER_ROUND
+    size_t lim = accepted.size() < (size_t)P.merges_per_round
                      ? accepted.size()
-                     : (size_t)MERGES_PER_ROUND;
+                     : (size_t)P.merges_per_round;
     for (size_t k = 0; k < lim; ++k) {
       GrowCand& gc = accepted[k];
       uint64_t pk = ((uint64_t)gc.a << 32) | gc.b;
@@ -944,24 +982,16 @@ static void build_lengths(const vector<uint32_t>& ids,
 //
 // Defaults reproduce the historical compiled-in behaviour byte-for-byte, so
 // afc_compress() (the original ABI) is unchanged for existing callers.
-struct Params {
-  int dp = 1;
-  int dp_rounds = DP_ROUNDS;
-  int merge_rounds = MERGE_ROUNDS_V4;
-  int min_freq = MIN_CANDIDATE_FREQ;
-  int tune = 1;
-};
-
 static string compress_core(const uint8_t* data, uint32_t n, int fmt,
                             int min_freq, int rounds, const int* lit_bits,
                             const Params& P) {
   vector<string> patterns;
-  select_candidates(data, n, min_freq, lit_bits, patterns);
+  select_candidates(data, n, min_freq, lit_bits, P, patterns);
   Automaton ac;
   ac.build(patterns);
   vector<uint32_t> ids;
   segment_greedy(data, n, ac, ids);
-  grow_blocks(ids, patterns, rounds, min_freq);
+  grow_blocks(ids, patterns, rounds, min_freq, P);
   final_audit(ids, patterns, lit_bits);
 
   unordered_map<uint32_t, int> lengths;
@@ -1080,12 +1110,45 @@ AFC_API int afc_compress_ex(const uint8_t* data, uint32_t n, int adaptive, int f
                     int tune, void** out, uint32_t* outn) {
   Params P;
   P.dp = dp;
-  P.dp_rounds = dp_rounds > 0 ? dp_rounds : 0;
-  P.merge_rounds = merge_rounds >= 0 ? merge_rounds : 0;
-  // min_freq must stay >= 2: the small-file trial also runs min_freq - 1, and
-  // a floor of 0 would admit every n-gram and blow up the candidate set.
-  P.min_freq = min_freq >= 2 ? min_freq : 2;
+  P.dp_rounds = dp_rounds;
+  P.merge_rounds = merge_rounds;
+  P.min_freq = min_freq;
   P.tune = tune;
+  P.clamp();
+  return afc_compress_impl(data, n, adaptive, fmt, P, out, outn);
+}
+
+// [v9] Profile-aware entry point.
+//
+// The caller passes a flat int32 array so the ABI can gain fields without
+// another export: `nparams` says how many were supplied and anything beyond
+// it keeps the engine default. Order:
+//
+//   0 dp   1 dp_rounds   2 merge_rounds   3 min_freq   4 tune
+//   5 scan_window   6 ngram_max   7 max_initial_dict   8 max_dict
+//   9 max_block    10 merges_per_round
+//
+// Fields 5..10 were compile-time constants before v9. Varying them is what
+// lets one file be compressed under several search profiles so the smallest
+// container can be kept; none of them changes the decoder, because the
+// dictionary and the code lengths are written into the container explicitly.
+AFC_API int afc_compress_v9(const uint8_t* data, uint32_t n, int adaptive,
+                            int fmt, const int32_t* params, int32_t nparams,
+                            void** out, uint32_t* outn) {
+  Params P;
+  if (params == nullptr) nparams = 0;
+  if (nparams > 0) P.dp = params[0];
+  if (nparams > 1) P.dp_rounds = params[1];
+  if (nparams > 2) P.merge_rounds = params[2];
+  if (nparams > 3) P.min_freq = params[3];
+  if (nparams > 4) P.tune = params[4];
+  if (nparams > 5 && params[5] > 0) P.scan_window = (uint32_t)params[5];
+  if (nparams > 6) P.ngram_max = params[6];
+  if (nparams > 7 && params[7] > 0) P.max_initial_dict = (uint32_t)params[7];
+  if (nparams > 8 && params[8] > 0) P.max_dict = (uint32_t)params[8];
+  if (nparams > 9 && params[9] > 0) P.max_block = (uint32_t)params[9];
+  if (nparams > 10) P.merges_per_round = params[10];
+  P.clamp();
   return afc_compress_impl(data, n, adaptive, fmt, P, out, outn);
 }
 

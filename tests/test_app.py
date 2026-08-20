@@ -713,6 +713,38 @@ def test_branding_and_about_evidence(app):
               and format(compressed, ",") in about
               and ("%.2f%%" % saved) in about
               and ("benchmarks/" + name) in about)
+    # [v9] The current-engine row has to trace to its CSV as well, and that
+    # CSV has to describe THIS engine -- otherwise the page would quietly go
+    # on quoting a previous version's numbers.
+    repo_csv = os.path.join(ROOT, "benchmarks", "v9_repo_corpus.csv")
+    with open(repo_csv, newline="", encoding="utf-8") as handle:
+        repo_rows = [r for r in _csv.DictReader(handle)
+                     if r["preset"] == "balanced"]
+    original = sum(int(r["original_bytes"]) for r in repo_rows)
+    compressed = sum(int(r["compressed_bytes"]) for r in repo_rows)
+    saved = 100.0 * (1.0 - compressed / original)
+    check("About repository-corpus numbers trace to CSV",
+          format(original, ",") in about
+          and format(compressed, ",") in about
+          and ("%.2f%%" % saved) in about
+          and "benchmarks/v9_repo_corpus.csv" in about)
+    check("every repository-corpus row is verified lossless",
+          all(r["byte_equal"] == "True" and r["sha256_equal"] == "True"
+              for r in repo_rows) and len(repo_rows) >= 20, len(repo_rows))
+    check("the AFC 1.3 rows are labelled as the historical audit",
+          "AFC 1.3 audit" in about and "not" in about)
+
+    import presets as _presets
+    spot = [("canterbury", "alice29.txt"), ("corpus", "data.json"),
+            ("documents", "docx_zip_stored.docx")]
+    for group, fname in spot:
+        row = next(r for r in repo_rows
+                   if r["group"] == group and r["file"] == fname)
+        raw = open(os.path.join(ROOT, "benchmarks", group, fname), "rb").read()
+        blob, _u, _b = _presets.compress_with(raw, "balanced", fmt="auto")
+        check("published size still reproduces: %s" % fname,
+              len(blob) == int(row["compressed_bytes"]),
+              "%d != %s" % (len(blob), row["compressed_bytes"]))
     check("document claim distinguishes both component classes",
           "internally uncompressed" in about
           and "producer-compressed" in about
@@ -743,27 +775,28 @@ def _pin_corpus():
 
 
 PINNED_CONTAINERS = {
-    ("prose", "fast"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486),
-    ("prose", "balanced"): ("c4164fade8982dafc813552a904aaf5c", 865),
-    ("prose", "maximum"): ("c4164fade8982dafc813552a904aaf5c", 865),
-    ("csvish", "fast"): ("dc67eace6449ca2dc449f5cf142689a5", 2503),
-    ("csvish", "balanced"): ("91e1a9ffade15428c92f2ebf5c2ce069", 2335),
-    ("csvish", "maximum"): ("91e1a9ffade15428c92f2ebf5c2ce069", 2335),
-    ("jsonish", "fast"): ("4189e69d98a2382747def080987c9a90", 1246),
-    ("jsonish", "balanced"): ("18c517088ebbc7918b051d0d690820fc", 1461),
-    ("jsonish", "maximum"): ("18c517088ebbc7918b051d0d690820fc", 1461),
-    ("code", "fast"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473),
-    ("code", "balanced"): ("1dd29ae7c9ecc8207ca589de4b72a71a", 848),
-    ("code", "maximum"): ("1dd29ae7c9ecc8207ca589de4b72a71a", 848),
-    ("binary", "fast"): ("a0a19f3f609b9290471181001a02e5d2", 5436),
-    ("binary", "balanced"): ("71c9095563c98bdb31248b85f95aeffa", 3344),
-    ("binary", "maximum"): ("a1021bd1ffa1bac243b27e50c0f390ea", 2801),
-    ("incompressible", "fast"): ("62e57bf89140815e79ea50d554bca7da", 3826),
-    ("incompressible", "balanced"): ("596595ba7b52c42a1a170cbfae8c1b78", 3197),
-    ("incompressible", "maximum"): ("596595ba7b52c42a1a170cbfae8c1b78", 3197),
-    ("repetitive", "fast"): ("f06c7f8ddba83f685adedfb7865f50d9", 96),
-    ("repetitive", "balanced"): ("4df17b63eef46dd475cedb950287aeb0", 109),
-    ("repetitive", "maximum"): ("4df17b63eef46dd475cedb950287aeb0", 109),
+    # (name, preset): (sha256[:32], bytes now, bytes under the V7 engine)
+    ("prose", "fast"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486, 486),
+    ("prose", "balanced"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486, 865),
+    ("prose", "maximum"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486, 865),
+    ("csvish", "fast"): ("dc67eace6449ca2dc449f5cf142689a5", 2503, 2503),
+    ("csvish", "balanced"): ("91e1a9ffade15428c92f2ebf5c2ce069", 2335, 2335),
+    ("csvish", "maximum"): ("d746c723d1a19f2f5d6e7907e43a1e97", 2291, 2335),
+    ("jsonish", "fast"): ("4189e69d98a2382747def080987c9a90", 1246, 1246),
+    ("jsonish", "balanced"): ("9c44277dc5092815e69773d507db6d7f", 1178, 1461),
+    ("jsonish", "maximum"): ("9c44277dc5092815e69773d507db6d7f", 1178, 1461),
+    ("code", "fast"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473, 473),
+    ("code", "balanced"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473, 848),
+    ("code", "maximum"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473, 848),
+    ("binary", "fast"): ("a0a19f3f609b9290471181001a02e5d2", 5436, 5436),
+    ("binary", "balanced"): ("92529110a69d47ab931c5512af5356c8", 2962, 3344),
+    ("binary", "maximum"): ("33725610bbf986c00b2e60335f7e6835", 2364, 2801),
+    ("incompressible", "fast"): ("62e57bf89140815e79ea50d554bca7da", 3826, 3826),
+    ("incompressible", "balanced"): ("b2625c816e67c00b8c207916ccfc9791", 2885, 3197),
+    ("incompressible", "maximum"): ("b2625c816e67c00b8c207916ccfc9791", 2885, 3197),
+    ("repetitive", "fast"): ("f06c7f8ddba83f685adedfb7865f50d9", 96, 96),
+    ("repetitive", "balanced"): ("528e09942cc001850704d032eae34449", 58, 109),
+    ("repetitive", "maximum"): ("528e09942cc001850704d032eae34449", 58, 109),
 }
 
 
@@ -774,14 +807,37 @@ def test_container_bytes_are_pinned():
         for preset in ("fast", "balanced", "maximum"):
             blob, _used, _backend = presets.compress_with(data, preset,
                                                           fmt="auto")
-            want_sha, want_len = PINNED_CONTAINERS[(name, preset)]
+            want_sha, want_len, v7_len = PINNED_CONTAINERS[(name, preset)]
             got = hashlib.sha256(blob).hexdigest()[:32]
             check("container bytes unchanged: %s/%s" % (name, preset),
                   got == want_sha and len(blob) == want_len,
                   "%s/%d (expected %s/%d)" % (got, len(blob), want_sha,
                                               want_len))
+            # The third column is what the pre-search V7 engine emitted. It
+            # never has to be revisited, and it makes the ratchet one-way:
+            # the engine may not regress past the version this corpus was
+            # first measured on.
+            check("no regression against the V7 engine: %s/%s" % (name, preset),
+                  len(blob) <= v7_len, "%d > %d" % (len(blob), v7_len))
             check("pinned container round-trips: %s/%s" % (name, preset),
                   afc2.decompress_bytes(blob) == data)
+
+def test_preset_size_is_monotonic():
+    """A costlier preset must never produce a LARGER container.
+
+    Presets search progressively harder, but a deeper search that lands on a
+    worse container is a regression a user can see in their own file sizes."""
+    import presets
+    for name, data in _pin_corpus():
+        sizes = {}
+        for preset in ("fast", "balanced", "maximum"):
+            blob, _used, _backend = presets.compress_with(data, preset,
+                                                          fmt="auto")
+            sizes[preset] = len(blob)
+        check("balanced is not larger than fast: %s" % name,
+              sizes["balanced"] <= sizes["fast"], sizes)
+        check("maximum is not larger than balanced: %s" % name,
+              sizes["maximum"] <= sizes["balanced"], sizes)
 
 def test_analytics_routes_removed(app):
     c = app.test_client()
@@ -2687,6 +2743,7 @@ def main():
         test_intended_destination_preserved(app)
         test_branding_and_about_evidence(app)
         test_container_bytes_are_pinned()
+        test_preset_size_is_monotonic()
         test_analytics_routes_removed(app)
         test_persistent_artifact_access(app, appmod)
         test_storage_quota_and_transient_restore(app)
