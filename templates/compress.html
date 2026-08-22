@@ -156,7 +156,7 @@
       <div id="sPre" class="hidden space-y-4">
         <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
           <h3 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">
-            Estimated compressibility</h3>
+            Shannon entropy (order-0)</h3>
           <div class="flex items-baseline gap-2 mt-2">
             <span id="sEntVal" class="font-data tabular text-2xl">—</span>
             <span class="text-[11px] text-dim dark:text-[#9c968a]">bits/byte</span>
@@ -164,7 +164,7 @@
           <div class="mt-2 h-2 bg-line dark:bg-[#35322c] rounded-sm overflow-hidden">
             <div id="sEntBar" class="h-2 bg-maroon" style="width:0%"></div></div>
           <p id="sEntBand" class="text-sm mt-2"></p>
-          <p class="text-[11px] text-dim dark:text-[#9c968a] mt-2">Order-0 estimate only. Structural blocks may capture repetition that a byte histogram cannot represent.</p>
+          <p class="text-[11px] text-dim dark:text-[#9c968a] mt-2">Computed from this file's byte histogram (Shannon, 1948); it is a measured bound, not a prediction. It is the limit of coding one byte at a time, which structural blocks routinely exceed because a byte histogram cannot represent multi-byte repetition.</p>
         </div>
         <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
           <h3 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">
@@ -218,7 +218,7 @@
   <div id="prePanel" class="hidden mt-4 grid gap-3 lg:grid-cols-2">
     <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
       <h3 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">
-        Estimated compressibility <span id="preName" class="normal-case"></span></h3>
+        Shannon entropy (order-0) <span id="preName" class="normal-case"></span></h3>
       <div class="flex items-baseline gap-3 mt-2">
         <span id="entVal" class="font-data tabular text-2xl">—</span>
         <span class="text-xs text-dim dark:text-[#9c968a]">bits/byte (Shannon, Tier-1 histogram)</span>
@@ -227,9 +227,11 @@
         <div id="entBar" class="h-2 bg-maroon" style="width:0%"></div></div>
       <p id="entBand" class="text-sm mt-2"></p>
       <p id="entNote" class="text-xs text-dim dark:text-[#9c968a] mt-1"></p>
-      <p class="text-[11px] text-dim dark:text-[#9c968a] mt-2 italic">Estimate only: this is a
-        per-byte (order-0) figure. AFC routinely beats it because structural
-        blocks capture multi-byte structure a byte histogram cannot see.</p>
+      <p class="text-[11px] text-dim dark:text-[#9c968a] mt-2 italic">A measured bound,
+        not a prediction: it is computed from this file's own byte histogram
+        (Shannon, 1948) and is the limit of coding one byte at a time. AFC
+        routinely exceeds it, because structural blocks capture multi-byte
+        regularity a byte histogram cannot see.</p>
       <div id="entHist" class="mt-3 flex items-end gap-[2px] h-16"></div>
     </div>
     <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">

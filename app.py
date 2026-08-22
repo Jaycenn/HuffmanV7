@@ -56,7 +56,7 @@ ANALYSIS AND COMPATIBILITY API
 ------------------------------
   GET  /compare                   -> side-by-side diff of two history entries
   GET  /api/history/search        -> filtered/sorted/paginated history
-  POST /api/entropy               -> pre-compression compressibility estimate
+  POST /api/entropy               -> order-0 Shannon entropy of the input
   POST /api/preview               -> text head / hex view before compressing
   GET  /api/tree/<token>          -> hybrid Huffman tree of a produced file
   GET  /api/presets               -> Fast/Balanced/Maximum descriptions
@@ -1023,11 +1023,14 @@ def api_history_search():
 @main.post("/api/entropy")
 @auth.login_required
 def api_entropy():
-    """Feature 6 — pre-compression compressibility estimate.
+    """Feature 6 — order-0 Shannon entropy of the input.
 
     Shannon entropy over the Tier-1 byte histogram, computed by reading the
-    uploaded bytes. Read-only: no engine state is touched and nothing is
-    stored. Called the moment a file is selected, before any compression."""
+    uploaded bytes. This is a measured bound rather than a prediction: no
+    model is fitted and no inference is performed, so the same file always
+    yields the same figure. Read-only: no engine state is touched and nothing
+    is stored. Called the moment a file is selected, before any
+    compression."""
     f = request.files.get("file")
     if f is None or not f.filename:
         return jsonify(error="No file supplied."), 400

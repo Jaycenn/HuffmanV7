@@ -439,10 +439,10 @@
         $("entVal").textContent = j.entropy_bits_per_byte.toFixed(3);
         $("entBar").style.width =
           (100 * j.entropy_bits_per_byte / 8).toFixed(1) + "%";
-        $("entBand").innerHTML = "Predicted compressibility: <strong>" +
-          esc(j.band) + "</strong> (order-0 floor ≈ " +
-          j.order0_ratio.toFixed(2) + "×, " + j.unique_bytes +
-          " distinct byte values)";
+        // Not a prediction: the measured order-0 bound for this file.
+        $("entBand").innerHTML = "Byte-level coding limit ≈ <strong>" +
+          j.order0_ratio.toFixed(2) + "×</strong> — " + esc(j.band) +
+          " redundancy, " + j.unique_bytes + " distinct byte values";
         $("entNote").textContent = j.note;
         var hist = $("entHist");
         hist.innerHTML = "";
