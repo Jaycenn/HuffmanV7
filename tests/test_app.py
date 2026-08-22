@@ -682,8 +682,12 @@ def test_branding_and_about_evidence(app):
                   and config.ENGINE_VERSION.encode() not in body)
     for path in workspace_paths:
         body = signed_in.get(path).data
-        check("workspace carries the ByteSize B mark: %s" % path,
-              b'class="brand-mark" aria-hidden="true">B<' in body)
+        # [v10] The brand mark became an image when the ByteSize logo
+        # replaced the letterform. The check still asserts that every
+        # workspace page carries the mark -- matched on the element and its
+        # source rather than on the glyph it used to contain.
+        check("workspace carries the ByteSize brand mark: %s" % path,
+              b'class="brand-mark"' in body and b'img/logo.png' in body)
 
     standalone = open(os.path.join(ROOT, "AFC_WebApp.html"),
                       encoding="utf-8").read()
@@ -852,25 +856,33 @@ def _pin_corpus():
 
 PINNED_CONTAINERS = {
     # (name, preset): (sha256[:32], bytes now, bytes under the V7 engine)
+    #
+    # [v10] Re-pinned after two deliberate changes: the Fast ladder gained an
+    # ngram8 rung and the Maximum ladder gained the many-merges and wide-scan
+    # shapes. Eleven rows moved and every one of them got SMALLER; the V7
+    # column is untouched, so the one-way ratchet still holds on every row.
+    # Regenerated with a profile-capable native library -- the previously
+    # shipped Windows build did not export afc_compress_v9, which silently
+    # collapsed every ladder to its default shape.
     ("prose", "fast"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486, 486),
     ("prose", "balanced"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486, 865),
     ("prose", "maximum"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486, 865),
-    ("csvish", "fast"): ("dc67eace6449ca2dc449f5cf142689a5", 2503, 2503),
-    ("csvish", "balanced"): ("91e1a9ffade15428c92f2ebf5c2ce069", 2335, 2335),
-    ("csvish", "maximum"): ("d746c723d1a19f2f5d6e7907e43a1e97", 2291, 2335),
-    ("jsonish", "fast"): ("4189e69d98a2382747def080987c9a90", 1246, 1246),
-    ("jsonish", "balanced"): ("9c44277dc5092815e69773d507db6d7f", 1178, 1461),
-    ("jsonish", "maximum"): ("9c44277dc5092815e69773d507db6d7f", 1178, 1461),
+    ("csvish", "fast"): ("d98ebeb68d2929e0e373ca2ee958953b", 2254, 2503),
+    ("csvish", "balanced"): ("d98ebeb68d2929e0e373ca2ee958953b", 2254, 2335),
+    ("csvish", "maximum"): ("d98ebeb68d2929e0e373ca2ee958953b", 2254, 2335),
+    ("jsonish", "fast"): ("f9246f33e04335398e60aa0c556e64a5", 969, 1246),
+    ("jsonish", "balanced"): ("f9246f33e04335398e60aa0c556e64a5", 969, 1461),
+    ("jsonish", "maximum"): ("f9246f33e04335398e60aa0c556e64a5", 969, 1461),
     ("code", "fast"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473, 473),
     ("code", "balanced"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473, 848),
     ("code", "maximum"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473, 848),
-    ("binary", "fast"): ("a0a19f3f609b9290471181001a02e5d2", 5436, 5436),
+    ("binary", "fast"): ("20e0e75c78bfdffd164b8f82c6eae9d5", 4516, 5436),
     ("binary", "balanced"): ("92529110a69d47ab931c5512af5356c8", 2962, 3344),
     ("binary", "maximum"): ("d9ffd867fd3c012e032426dd2c0bf9f6", 2358, 2801),
-    ("incompressible", "fast"): ("62e57bf89140815e79ea50d554bca7da", 3826, 3826),
+    ("incompressible", "fast"): ("d1f026095e89c55f777594d8cec2a062", 3818, 3826),
     ("incompressible", "balanced"): ("b2625c816e67c00b8c207916ccfc9791", 2885, 3197),
     ("incompressible", "maximum"): ("b2625c816e67c00b8c207916ccfc9791", 2885, 3197),
-    ("repetitive", "fast"): ("f06c7f8ddba83f685adedfb7865f50d9", 96, 96),
+    ("repetitive", "fast"): ("02d410ddcfa57980e42eb8c18b25e2c7", 68, 96),
     ("repetitive", "balanced"): ("528e09942cc001850704d032eae34449", 58, 109),
     ("repetitive", "maximum"): ("528e09942cc001850704d032eae34449", 58, 109),
 }
