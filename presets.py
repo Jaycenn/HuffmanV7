@@ -173,6 +173,16 @@ def _shapes_for(nbytes):
 
 def _ladder(name, shapes):
     rungs = [("fast", "default")]
+    # [v10] Fast gets the wider n-gram scan as a second rung. Measured on 14
+    # Govdocs1 PDFs (3.7 MB of pooled transformable text), ngram8 is smaller on
+    # 13 of them and 5.74% smaller overall; on the repo corpus it is 3.84%
+    # smaller but LOSES on data.csv (-2.1%) and records.bin (-4.4%), so it is
+    # added as a rung to choose between rather than as a new default. Guarded
+    # on membership so the >=8 MB ladder, where ngram8 is a measured loss, is
+    # untouched; the nesting fast <= balanced <= maximum is preserved because
+    # both richer ladders start from this same list.
+    if "ngram8" in shapes:
+        rungs.append(("fast", "ngram8"))
     if name in ("balanced", "maximum"):
         rungs += [("balanced", shape) for shape in shapes]
     if name == "maximum":

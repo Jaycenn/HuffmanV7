@@ -1313,6 +1313,11 @@ def create_app(db_path=None, testing=False, storage_dir=None):
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["CSRF_PROTECT"] = not testing
+    # Pick up template and static edits without a restart. The server runs
+    # with debug off, which otherwise caches compiled templates for the
+    # life of the process; both checks are cheap next to a local request.
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
     app.secret_key = ("afc-test-secret-not-for-production-0001"
                       if testing else _installation_secret())
     if db_path:
