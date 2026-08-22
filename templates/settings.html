@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="rule2">
+  <p class="eyebrow">Workspace preferences</p>
+  <h1>Settings</h1>
+  <p class="text-dim text-sm mt-1">Account, file limits, privacy, and engine availability.</p>
+</div>
+
+<div class="settings-grid">
+  <section class="settings-card">
+    <p class="eyebrow">Account</p>
+    <h2>{{ current_user['username'] }}</h2>
+    <dl>
+      <div><dt>Email</dt><dd>{{ current_user['email'] }}</dd></div>
+      <div><dt>Role</dt><dd>{{ current_user['role'] }}</dd></div>
+      <div><dt>Created</dt><dd>{{ current_user['created_at'] }}</dd></div>
+    </dl>
+    <a class="button button-secondary button-small" href="{{ url_for('auth.change_password') }}">Change password</a>
+  </section>
+
+  <section class="settings-card">
+    <p class="eyebrow">File limits</p>
+    <h2>Processing policy</h2>
+    <dl>
+      <div><dt>Minimum file</dt><dd>{{ human(cfg.MIN_FILE_SIZE) }}</dd></div>
+      <div><dt>Maximum file</dt><dd>{{ human(cfg.MAX_FILE_SIZE) }}</dd></div>
+      <div><dt>Maximum batch</dt><dd>{{ human(cfg.MAX_BATCH_SIZE) }}</dd></div>
+      <div><dt>Concurrent jobs</dt><dd>{{ cfg.MAX_CONCURRENT_JOBS }}</dd></div>
+    </dl>
+  </section>
+
+  <section class="settings-card settings-wide">
+    <p class="eyebrow">Privacy</p>
+    <h2>Local processing and storage</h2>
+    <p>Accounts and processing history stay in the local SQLite database. ByteSize stores only completed compressed AFC files in private local storage so you can download them later. Uploaded originals and decompressed output are never persisted, and file contents are not sent to an external service.</p>
+    <dl>
+      <div><dt>Stored-file quota</dt><dd>{{ human(cfg.MAX_STORED_BYTES_PER_USER) }}</dd></div>
+      <div><dt>Retention</dt><dd>{{ 'Until owner deletion' if cfg.RESULT_RETENTION_DAYS == 0 else cfg.RESULT_RETENTION_DAYS ~ ' days' }}</dd></div>
+    </dl>
+  </section>
+
+  <section class="settings-card settings-wide">
+    <p class="eyebrow">Compression engine</p>
+    <h2 id="beState">Checking backend…</h2>
+    <p id="beReason"></p>
+    <div class="backend-list" id="bePresets"></div>
+    <pre id="beSteps" class="hidden"></pre>
+    <p class="settings-note">Python and native execution produce the same AFC output; the backend changes processing speed only.</p>
+  </section>
+</div>
+
+<script>
+fetch("/api/status").then(function (r) { return r.json(); }).then(function (j) {
+  var ok = j.native_available;
+  var state = document.getElementById("beState");
+  state.textContent = ok ? "C++ native is active" : "Portable Python fallback is active";
+  state.classList.add(ok ? "backend-ok" : "backend-warning");
+  document.getElementById("beReason").textContent = j.native_reason || "";
+  var list = document.getElementById("bePresets");
+  Object.keys(j.preset_backends || {}).forEach(function (name) {
+    var row = document.createElement("div");
+    row.innerHTML = "<span>" + name + "</span><strong>" + j.preset_backends[name] + "</strong>";
+    list.appendChild(row);
+  });
+  if (!ok && (j.native_diagnostics || []).length) {
+    var pre = document.getElementById("beSteps");
+    pre.textContent = j.native_diagnostics.map(function (d) {
+      return (d.ok ? "[ok] " : "[issue] ") + d.step + (d.detail ? " - " + d.detail : "");
+    }).join("\n");
+    pre.classList.remove("hidden");
+  }
+});
+</script>
+{% endblock %}

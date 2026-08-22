@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}About{% endblock %}
+
+{#  One body, two shells. `/about` is public, so the same thesis content is
+    rendered inside the public website chrome for a signed-out reader and
+    inside the ByteSize Workspace shell once there is an account. #}
+{% set body %}
+<header class="about-hero">
+  <p class="eyebrow">Method and evidence</p>
+  <h1>Adaptive File Compression System Using Multi-Level Frequency Analysis &amp; Hybrid Huffman</h1>
+  <p>ByteSize is the working interface for the thesis system. It keeps the
+     project’s Hybrid Huffman pipeline intact and verifies every completed
+     compression round trip with SHA-256.</p>
+</header>
+
+<section class="about-section" aria-labelledby="pipelineTitle">
+  <div class="section-row">
+    <div><p class="eyebrow">Pipeline</p><h2 id="pipelineTitle">Three decisions, one lossless stream</h2></div>
+  </div>
+  <ol class="pipeline-list">
+    <li><span>01</span><div><h3>Multi-tier frequency scan</h3><p>Counts individual bytes and repeated multi-byte structures at several candidate lengths.</p></div></li>
+    <li><span>02</span><div><h3>Bit Cost Decision Engine</h3><p>Compares the encoded cost of structural blocks against literal-byte coding and keeps only useful candidates.</p></div></li>
+    <li><span>03</span><div><h3>Hybrid Huffman encoding</h3><p>Builds a canonical Huffman code over the selected structural blocks and remaining literal bytes, then records enough metadata for exact reconstruction.</p></div></li>
+  </ol>
+</section>
+
+<section class="about-section" aria-labelledby="evidenceTitle">
+  <div class="section-row">
+    <div><p class="eyebrow">Measured evidence</p><h2 id="evidenceTitle">Balanced preset, native backend</h2></div>
+  </div>
+  <p class="evidence-note">Every row below records byte equality and SHA-256 equality for the whole round trip. Sizes are reproducible; timings are machine-dependent and no speed claim is made from a single trial.</p>
+  <div class="table-shell">
+    <table class="w-full text-sm">
+      <thead><tr><th>Corpus</th><th class="text-right">Files</th><th class="text-right">Original bytes</th><th class="text-right">AFC bytes</th><th class="text-right">Saved</th><th>Source</th></tr></thead>
+      <tbody>
+        <tr><td>Silesia <small class="history-operation">current engine</small></td><td class="metric-cell">12</td><td class="metric-cell">211,938,580</td><td class="metric-cell">87,133,292</td><td class="metric-cell">58.89%</td><td class="source-cell">benchmarks/external_corpus.csv</td></tr>
+        <tr><td>Silesia <small class="history-operation">AFC 1.3 audit</small></td><td class="metric-cell">12</td><td class="metric-cell">211,938,580</td><td class="metric-cell">91,315,157</td><td class="metric-cell">56.91%</td><td class="source-cell">benchmarks/afc_1_3_silesia_native_summary.csv</td></tr>
+        <tr><td>GovDocs1 <small class="history-operation">thread 000 · current engine</small></td><td class="metric-cell">981</td><td class="metric-cell">758,799,412</td><td class="metric-cell">526,316,829</td><td class="metric-cell">30.64%</td><td class="source-cell">benchmarks/external_corpus.csv</td></tr>
+        <tr><td>Repository corpus <small class="history-operation">current engine</small></td><td class="metric-cell">31</td><td class="metric-cell">13,495,863</td><td class="metric-cell">4,710,247</td><td class="metric-cell">65.10%</td><td class="source-cell">benchmarks/v9_repo_corpus.csv</td></tr>
+        <tr><td>Canterbury <small class="history-operation">AFC 1.3 audit</small></td><td class="metric-cell">11</td><td class="metric-cell">2,810,784</td><td class="metric-cell">826,154</td><td class="metric-cell">70.61%</td><td class="source-cell">benchmarks/afc_1_3_canterbury_native_summary.csv</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="document-note"><strong>The two Silesia rows are the same twelve files, measured twice.</strong>
+     The originals total 211,938,580 bytes in both, so the comparison is exact: the current engine writes
+     <strong>4,181,865 fewer bytes</strong> than the AFC 1.3 audit at the Balanced preset (−4.58%), and
+     6,810,146 fewer at Maximum (60.13% saved) — smaller on every one of the twelve files, not merely on average.
+     Silesia is regenerated with <code>benchmarks/external_corpus.py</code>, which takes the corpus as a path
+     because it is separately licensed and not redistributed here; the repository-corpus row is regenerated with
+     <code>benchmarks/v9_repo_corpus.py</code> and needs no download. The Canterbury row remains the AFC 1.3
+     audit over the full eleven-file corpus and is <strong>not</strong> a claim about the current engine: the
+     official corpus could not be re-measured here, and a partial re-run over only its text files would flatter
+     the result by omitting the binary members that pull the ratio down.</p>
+  <p class="document-note"><strong>PDF and DOCX need class-qualified interpretation, and GovDocs1 shows why.</strong>
+     Across 981 real government documents the result splits sharply by what is already compressed inside the file.
+     Structured and textual formats reduce well — XLS 68.75% over 62 files, CSV 66.00%, TXT 65.57% over 154 files,
+     HTML 64.38% over 181 files, PostScript 62.87% — while formats whose payloads are already entropy-coded barely
+     move: PDF 12.50% over 200 files, PPT 9.21%, SWF 2.99%, GIF 2.88%, JPEG 1.50%, gzip 0.93%. Sixty-one of the 981
+     files (6.2%) did not shrink at all and were stored verbatim rather than expanded.
+     ByteSize therefore makes <strong>no general compression-percentage claim</strong> for PDF or DOCX: a PDF of
+     uncompressed text streams behaves like the text it contains, and a PDF of JPEGs behaves like the JPEGs.
+     Every file above — including the ones that did not shrink — was reconstructed byte for byte and SHA-256
+     verified.</p>
+</section>
+{% endset %}
+
+{% block content %}{{ body }}{% endblock %}
+
+{% block public_content %}
+<main id="mainContent" class="public-page" tabindex="-1">{{ body }}</main>
+<footer class="public-footer">
+  <span>ByteSize</span>
+  <span>Static canonical Hybrid Huffman · Local and lossless ·
+    <a href="{{ url_for('main.landing') }}">Back to the overview</a></span>
+</footer>
+{% endblock %}

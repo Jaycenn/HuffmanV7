@@ -1,0 +1,398 @@
+{% extends "base.html" %}
+{% block title %}Compress{% endblock %}
+{#
+   COMPRESS PAGE — compression only.
+   Decompression lives at /decompress and is never reachable from this page's
+   upload box. Dropping an .afc here is refused with a link to the right page
+   rather than silently switching operation.
+
+   The "Single file" pane is the spec workflow. "Queue & batch" and
+   "Folder → archive" are the pre-existing multi-file features, preserved
+   unchanged — their markup ids are the ones static/js/queue.js binds to.
+#}
+{% block content %}
+<div class="rule2 pt-4">
+  <p class="eyebrow">New compression</p>
+  <h1 class="font-display text-2xl">Compress Files</h1>
+  <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Choose a file, select a profile, and create a lossless AFC container.</p>
+</div>
+
+<!-- tabs -->
+<div class="flex flex-wrap gap-2 mt-5 border-b border-line dark:border-[#35322c] no-print" role="tablist">
+  {% for id, label in [('single','Single file'), ('queue','Queue &amp; batch'),
+                       ('archive','Folder → archive')] %}
+  <button class="tab px-4 py-2 text-sm border-b-2 -mb-px
+                 {% if loop.first %}border-maroon text-maroon font-semibold
+                 {% else %}border-transparent text-dim dark:text-[#9c968a] hover:text-ink{% endif %}"
+          id="tab-{{ id }}" data-tab="{{ id }}" role="tab"
+          aria-controls="pane-{{ id }}"
+          aria-selected="{{ 'true' if loop.first else 'false' }}"
+          tabindex="{{ '0' if loop.first else '-1' }}">{{ label|safe }}</button>
+  {% endfor %}
+</div>
+
+<!-- ================= SINGLE FILE ================= -->
+<section id="pane-single" class="pane mt-5" role="tabpanel"
+         aria-labelledby="tab-single">
+  <div class="grid gap-5 lg:grid-cols-3">
+    <div class="lg:col-span-2">
+      <div id="sDrop" tabindex="0" role="button"
+           aria-label="Drop a file here or click to choose one"
+           class="border-2 border-dashed border-line dark:border-[#35322c] rounded-lg
+                  px-4 py-12 sm:py-16 text-center cursor-pointer hover:border-maroon
+                  focus:outline-none focus:ring-2 focus:ring-maroon/40 transition-colors">
+        <svg class="mx-auto mb-3 text-maroon" width="34" height="34" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+        </svg>
+        <p class="text-base font-semibold">Drag &amp; drop file here</p>
+        <p class="text-sm text-dim dark:text-[#9c968a] mt-1">or</p>
+        <span class="inline-block mt-2 px-4 py-2 rounded-md border border-line
+                     dark:border-[#35322c] text-sm hover:border-maroon">Select File</span>
+        <p class="font-data text-[11px] text-dim dark:text-[#9c968a] mt-4 max-w-md mx-auto">
+          Any file is accepted and restored exactly. Reduction is largest on
+          TXT, CSV, JSON, SQL, XML, HTML, LOG and source code. A PDF depends on
+          its contents — text streams reduce well, scanned images barely at
+          all.</p>
+        <p class="font-data text-[11px] text-dim dark:text-[#9c968a] mt-1" id="sLimit">…</p>
+      </div>
+      <input type="file" id="sInput" class="hidden">
+
+      <!-- selected file + detected type (container-aware formats are handled
+           automatically; the user never extracts PDF/DOCX internals by hand) -->
+      <div id="sPicked" class="hidden mt-4 bg-white dark:bg-[#1c1b18] border border-line
+                               dark:border-[#35322c] rounded-lg p-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="font-semibold break-all" id="sPickName">—</p>
+            <p class="font-data text-xs text-dim dark:text-[#9c968a] mt-1">
+              <span id="sPickSize"></span> · <span id="sPickType">detecting…</span></p>
+          </div>
+          <button id="sClear" class="text-xs text-maroon underline shrink-0">remove</button>
+        </div>
+        <p id="sAuto" class="hidden text-xs mt-3 border border-gold/40 bg-gold/10
+                             rounded-md px-3 py-2"></p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3 mt-4">
+        <button id="sRun" disabled
+                class="px-6 py-3 rounded-md bg-maroon text-white text-sm font-semibold
+                       hover:bg-maroondark disabled:opacity-40
+                       disabled:cursor-not-allowed">Compress File</button>
+        <span id="sStatus" role="status" aria-live="polite"
+              class="font-data text-xs text-dim dark:text-[#9c968a]"></span>
+      </div>
+
+      <!-- progress -->
+      <div id="sProgWrap" class="hidden mt-4">
+        <div class="h-2 bg-line dark:bg-[#35322c] rounded-sm overflow-hidden">
+          <div id="sProg" class="h-2 bg-maroon transition-all" style="width:0%"></div></div>
+      </div>
+
+      <p id="sErr" class="hidden error-panel text-sm mt-3 rounded-md px-3 py-2" role="alert"></p>
+
+      <!-- ---------------- RESULT ---------------- -->
+      <div id="sResult" class="hidden mt-5 bg-white dark:bg-[#1c1b18] border border-line
+                               dark:border-[#35322c] rounded-lg overflow-hidden">
+        <div class="px-5 py-3 bg-maroon text-white">
+          <h2 class="font-display text-lg">Compression Complete</h2></div>
+        <div class="p-5">
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div>
+              <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Original</p>
+              <p class="font-semibold break-all mt-1" id="rOrigName">—</p>
+              <p class="font-data tabular text-sm text-dim dark:text-[#9c968a]" id="rOrigSize">—</p>
+            </div>
+            <div>
+              <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Compressed</p>
+              <p class="font-semibold break-all mt-1" id="rCompName">—</p>
+              <p class="font-data tabular text-sm text-dim dark:text-[#9c968a]" id="rCompSize">—</p>
+            </div>
+          </div>
+
+          <div class="grid gap-4 grid-cols-2 lg:grid-cols-4 mt-5 pt-5
+                      border-t border-line dark:border-[#35322c]">
+            <div>
+              <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Space Saved</p>
+              <p class="font-data tabular text-2xl text-maroon mt-1" id="rSaved">—</p></div>
+            <div>
+              <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Compression Ratio</p>
+              <p class="font-data tabular text-2xl mt-1" id="rRatio">—</p></div>
+            <div>
+              <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Compression Time</p>
+              <p class="font-data tabular text-2xl mt-1" id="rTime">—</p></div>
+            <div>
+              <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Backend Used</p>
+              <p class="font-data text-sm mt-2" id="rEngine">—</p>
+              <p class="font-data text-[10px] text-dim dark:text-[#9c968a]" id="rContainer"></p></div>
+          </div>
+          <div id="rNative" class="hidden warning-panel mt-4 border
+                                   rounded-md px-3 py-2 text-sm" role="alert">
+          </div>
+
+          <div class="mt-5 pt-5 border-t border-line dark:border-[#35322c]">
+            <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Verification</p>
+            <p class="mt-1" id="rVerify">—</p>
+            <p class="font-data text-[10px] text-dim dark:text-[#9c968a] break-all mt-1"
+               id="rSha"></p>
+          </div>
+
+          <p id="rExplain" class="text-sm mt-4"></p>
+
+          <div class="flex flex-wrap gap-3 mt-5">
+            <a id="rDownload" href="#" download
+               class="px-6 py-3 rounded-md bg-maroon text-white text-sm font-semibold
+                      hover:bg-maroondark">Download .afc file</a>
+            <a href="{{ url_for('main.decompress_page') }}"
+               class="px-4 py-3 rounded-md border border-line dark:border-[#35322c]
+                      text-sm hover:border-maroon">Go to Decompress →</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- side: estimate + preview (Feature 6 + 11), shown before compressing -->
+    <div class="lg:col-span-1">
+      <div id="sPre" class="hidden space-y-4">
+        <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
+          <h3 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">
+            Estimated compressibility</h3>
+          <div class="flex items-baseline gap-2 mt-2">
+            <span id="sEntVal" class="font-data tabular text-2xl">—</span>
+            <span class="text-[11px] text-dim dark:text-[#9c968a]">bits/byte</span>
+          </div>
+          <div class="mt-2 h-2 bg-line dark:bg-[#35322c] rounded-sm overflow-hidden">
+            <div id="sEntBar" class="h-2 bg-maroon" style="width:0%"></div></div>
+          <p id="sEntBand" class="text-sm mt-2"></p>
+          <p class="text-[11px] text-dim dark:text-[#9c968a] mt-2">Order-0 estimate only. Structural blocks may capture repetition that a byte histogram cannot represent.</p>
+        </div>
+        <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
+          <h3 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">
+            Preview <span id="sPrevKind" class="normal-case"></span></h3>
+          <pre id="sPrevBody" class="mt-2 text-[10px] font-data overflow-auto
+                                     max-h-48 whitespace-pre"></pre>
+        </div>
+      </div>
+
+      <div class="mt-4 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
+        <h3 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Options</h3>
+        {# The container choice was removed: the engine already emits whichever
+           of AFC1/AFC2 is smaller for the file, so every other value could
+           only make the user's result larger. The API still accepts `format`
+           for the benchmarks and the test suite. #}
+        <label class="block mt-3 font-data text-xs text-dim dark:text-[#9c968a]">method
+          <select id="sMode" class="mt-1 w-full border border-line dark:border-[#35322c]
+                                    rounded-md px-2 py-2 bg-white dark:bg-[#1c1b18] text-ink
+                                    dark:text-[#ECE8E0]">
+            <option value="adaptive" selected>ByteSize (adaptive)</option>
+            <option value="baseline">Plain Huffman (baseline)</option>
+          </select></label>
+        <label class="block mt-3 font-data text-xs text-dim dark:text-[#9c968a]">preset
+          <select id="sPreset" class="mt-1 w-full border border-line dark:border-[#35322c]
+                                      rounded-md px-2 py-2 bg-white dark:bg-[#1c1b18] text-ink
+                                      dark:text-[#ECE8E0]">
+            <option value="fast">Fast</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="maximum">Maximum</option>
+          </select></label>
+        <p id="sPresetNote" class="mt-2 font-data text-[10px] text-dim dark:text-[#9c968a]"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= QUEUE ================= -->
+<section id="pane-queue" class="pane hidden mt-5" role="tabpanel"
+         aria-labelledby="tab-queue">
+  <div id="drop" tabindex="0" role="button"
+       class="border border-dashed border-line dark:border-[#35322c] rounded-md px-4 py-10 text-center
+              cursor-pointer hover:border-maroon focus:outline-none
+              focus:ring-2 focus:ring-maroon/40">
+    <p class="text-sm">Drop files here, or click to choose (multiple allowed)</p>
+    <p class="font-data text-xs text-dim dark:text-[#9c968a] mt-1" id="limitHint">…</p>
+  </div>
+  <input type="file" id="fileInput" class="hidden" multiple>
+
+  <!-- Feature 6 + 11: pre-compression estimate and preview, shown the moment
+       a file is selected and BEFORE any compression runs -->
+  <div id="prePanel" class="hidden mt-4 grid gap-3 lg:grid-cols-2">
+    <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
+      <h3 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">
+        Estimated compressibility <span id="preName" class="normal-case"></span></h3>
+      <div class="flex items-baseline gap-3 mt-2">
+        <span id="entVal" class="font-data tabular text-2xl">—</span>
+        <span class="text-xs text-dim dark:text-[#9c968a]">bits/byte (Shannon, Tier-1 histogram)</span>
+      </div>
+      <div class="mt-2 h-2 bg-line dark:bg-[#35322c] rounded-sm overflow-hidden">
+        <div id="entBar" class="h-2 bg-maroon" style="width:0%"></div></div>
+      <p id="entBand" class="text-sm mt-2"></p>
+      <p id="entNote" class="text-xs text-dim dark:text-[#9c968a] mt-1"></p>
+      <p class="text-[11px] text-dim dark:text-[#9c968a] mt-2 italic">Estimate only: this is a
+        per-byte (order-0) figure. AFC routinely beats it because structural
+        blocks capture multi-byte structure a byte histogram cannot see.</p>
+      <div id="entHist" class="mt-3 flex items-end gap-[2px] h-16"></div>
+    </div>
+    <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-4">
+      <h3 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">
+        Preview <span id="prevKind" class="normal-case"></span></h3>
+      <pre id="prevBody" class="mt-2 text-[11px] font-data overflow-auto
+                                max-h-56 whitespace-pre"></pre>
+    </div>
+  </div>
+
+  <div class="flex flex-wrap items-center gap-3 mt-4">
+    <button id="runBtn" disabled
+            class="px-5 py-3 rounded-md bg-maroon text-white text-sm font-semibold
+                   hover:bg-maroondark disabled:opacity-40
+                   disabled:cursor-not-allowed">Start queue</button>
+    <button id="clearBtn"
+            class="px-4 py-3 rounded-md border border-line dark:border-[#35322c] text-sm hover:border-maroon">
+      Clear queue</button>
+    <label class="font-data text-xs text-dim dark:text-[#9c968a]">method
+      <select id="mode" class="ml-1 border border-line dark:border-[#35322c] rounded-md px-2 py-2 bg-white dark:bg-[#1c1b18]">
+        <option value="adaptive" selected>ByteSize (adaptive)</option>
+        <option value="baseline">Plain Huffman (baseline)</option>
+      </select></label>
+    <label class="font-data text-xs text-dim dark:text-[#9c968a]">preset
+      <select id="preset" class="ml-1 border border-line dark:border-[#35322c] rounded-md px-2 py-2 bg-white dark:bg-[#1c1b18]">
+        <option value="fast">Fast</option>
+        <option value="balanced" selected>Balanced</option>
+        <option value="maximum">Maximum</option>
+      </select></label>
+    <span id="presetNote" class="font-data text-[10px] text-dim dark:text-[#9c968a]"></span>
+    <span id="queueTotal" class="font-data text-xs text-dim dark:text-[#9c968a] ml-auto"></span>
+  </div>
+  <p id="err" class="hidden error-panel text-sm mt-3 rounded-md px-3 py-2" role="alert"></p>
+
+  <!-- queue rows -->
+  <div id="queueWrap" class="hidden mt-4 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg
+                             overflow-x-auto">
+    <table class="w-full text-sm"><thead class="border-b border-line dark:border-[#35322c] text-left">
+      <tr class="text-[11px] uppercase text-dim dark:text-[#9c968a]">
+        <th class="px-3 py-2">File</th><th class="px-3 py-2 text-right">Size</th>
+        <th class="px-3 py-2">Status</th><th class="px-3 py-2 w-40">Progress</th>
+        <th class="px-3 py-2"></th></tr></thead>
+      <tbody id="queueBody"></tbody></table>
+  </div>
+
+  <!-- results -->
+  <div id="resultsWrap" class="hidden mt-6">
+    <div class="flex flex-wrap items-center gap-3">
+      <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Batch results</h2>
+      <a id="csvBtn" href="{{ url_for('main.report_csv') }}"
+         class="px-3 py-2 rounded-md border border-line dark:border-[#35322c] text-xs hover:border-maroon">
+         Download CSV</a>
+      <a id="pdfBtn" href="{{ url_for('main.report_pdf') }}" target="_blank"
+         class="px-3 py-2 rounded-md border border-line dark:border-[#35322c] text-xs hover:border-maroon">
+         Download PDF</a>
+    </div>
+    <div class="mt-2 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg overflow-x-auto">
+      <table class="w-full text-sm" id="resTable">
+        <thead class="border-b border-line dark:border-[#35322c] text-left">
+          <tr class="text-[11px] uppercase text-dim dark:text-[#9c968a]">
+            {% for h in ['File','Original','Result','Ratio','Saved %','Engine','Container','Lossless',''] %}
+            <th class="px-3 py-2 {% if not loop.last %}cursor-pointer select-none hover:text-maroon{% endif %}"
+                {% if not loop.last %}data-sort="{{ loop.index0 }}"{% endif %}>
+              {{ h }}{% if not loop.last %} <span class="opacity-40">⇅</span>{% endif %}</th>
+            {% endfor %}
+          </tr></thead>
+        <tbody id="resBody"></tbody>
+        <tfoot id="resFoot" class="border-t-2 border-maroon font-semibold"></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <!-- Feature 7 + 8: hybrid Huffman tree and plain-language explainer -->
+  <div id="treeWrap" class="hidden mt-6 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-5">
+    <div class="flex flex-wrap items-center gap-3">
+      <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Hybrid Huffman tree</h2>
+      <select id="treePick"
+              class="border border-line dark:border-[#35322c] rounded-md px-2 py-1 text-sm bg-white dark:bg-[#1c1b18]"></select>
+      <span id="treeSummary" class="font-data text-xs text-dim dark:text-[#9c968a] ml-auto"></span>
+    </div>
+    <p id="explainLine" class="mt-3 text-sm"></p>
+    <div class="mt-3 flex flex-wrap gap-4 text-xs font-data">
+      <span><span class="inline-block w-3 h-3 align-middle rounded-sm"
+        style="background:#146C5E"></span> structural block (multi-byte)</span>
+      <span><span class="inline-block w-3 h-3 align-middle rounded-sm"
+        style="background:#9A6614"></span> literal byte</span>
+      <span><span class="inline-block w-3 h-3 align-middle rounded-sm"
+        style="background:#DCE2DC"></span> collapsed subtree</span>
+    </div>
+    <div class="mt-3 overflow-x-auto">
+      <svg id="treeSvg" width="100%" height="330" viewBox="0 0 980 330"
+           role="img" aria-label="Hybrid Huffman tree"></svg></div>
+    <div id="lenChart" class="mt-2"></div>
+    <div id="attrBars" class="mt-2"></div>
+  </div>
+</section>
+
+<!-- ================= ARCHIVE ================= -->
+<section id="pane-archive" class="pane hidden mt-5" role="tabpanel"
+         aria-labelledby="tab-archive">
+  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-6">
+    <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Folder or multiple files
+      → one {{ cfg.ARCHIVE_EXT }}</h2>
+    <p class="text-xs text-dim dark:text-[#9c968a] mt-2">Each file is compressed independently by the
+      AFC engine; the archive stores a JSON manifest plus the AFC payloads with
+      <strong>no additional compression</strong> and no cross-file references.
+      Extract archives on the
+      <a href="{{ url_for('main.decompress_page') }}"
+         class="text-maroon underline">Decompress</a> page.</p>
+    <div class="flex flex-wrap gap-3 mt-4">
+      <label class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
+                    hover:border-maroon cursor-pointer">
+        Choose folder<input type="file" id="dirInput" webkitdirectory directory
+                            multiple class="hidden"></label>
+      <label class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
+                    hover:border-maroon cursor-pointer">
+        Choose files<input type="file" id="multiInput" multiple class="hidden"></label>
+      <input id="archName" placeholder="archive name" value="archive"
+             class="border border-line dark:border-[#35322c] rounded-md px-3 py-2 text-sm">
+      <button id="packBtn" disabled
+              class="px-5 py-2 rounded-md bg-maroon text-white text-sm font-semibold
+                     hover:bg-maroondark disabled:opacity-40">Create archive</button>
+    </div>
+    <p id="archInfo" class="font-data text-xs text-dim dark:text-[#9c968a] mt-3"></p>
+    <p id="archErr" class="hidden error-panel text-sm mt-3 rounded-md px-3 py-2" role="alert"></p>
+    <div id="archResult" class="hidden mt-4 border border-line dark:border-[#35322c] rounded-md p-4">
+      <p class="text-sm" id="archSummary"></p>
+      <a id="archDl" href="#" class="inline-block mt-3 px-5 py-2 rounded-md
+         bg-maroon text-white text-sm font-semibold hover:bg-maroondark">
+         Download archive</a>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/queue.js') }}"></script>
+<script src="{{ url_for('static', filename='js/compress.js') }}"></script>
+<script>
+// Baseline is the single-tier Huffman control kept for the method comparison,
+// not a setting anyone would pick to get a smaller file. The presets tune the
+// adaptive pipeline only, so under baseline they genuinely do nothing --
+// disable the control and say why, instead of leaving it looking live.
+(function () {
+  function link(modeId, presetId, noteId) {
+    var mode = document.getElementById(modeId);
+    var preset = document.getElementById(presetId);
+    var note = document.getElementById(noteId);
+    if (!mode || !preset) return;
+    function paint() {
+      var baseline = mode.value === "baseline";
+      preset.disabled = baseline;
+      if (note) {
+        note.textContent = baseline
+          ? "Presets tune the adaptive pipeline; baseline ignores them."
+          : "";
+      }
+    }
+    mode.addEventListener("change", paint);
+    paint();
+  }
+  link("sMode", "sPreset", "sPresetNote");
+  link("mode", "preset", "presetNote");
+})();
+</script>
+{% endblock %}

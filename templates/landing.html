@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block public_content %}
+<main id="mainContent" tabindex="-1">
+  <section class="landing-hero">
+    <div class="hero-copy">
+      <p class="eyebrow">Lossless file compression</p>
+      <h1>Find the structure a byte-by-byte encoder misses.</h1>
+      <p class="hero-lead">ByteSize combines multi-level frequency analysis, a bit-cost decision rule, and canonical Huffman coding to reduce repetitive files without changing a single original byte.</p>
+      <div class="hero-actions">
+        <a class="button button-primary" href="{{ url_for('auth.login') }}">Sign in to compress</a>
+        <a class="button button-secondary" href="#method">See how it works</a>
+      </div>
+      <p class="privacy-line"><span aria-hidden="true">●</span> Local processing · SHA-256 verified · No lossy conversion</p>
+    </div>
+
+    <div class="product-preview" aria-label="Preview of the signed-in compression workspace">
+      <div class="preview-topbar">
+        <span class="preview-brand">ByteSize</span>
+        <span class="preview-status">Sign-in required</span>
+      </div>
+      <div class="preview-body">
+        <div class="preview-heading">
+          <div><small>NEW COMPRESSION</small><strong>Choose a file</strong></div>
+          <span>Balanced</span>
+        </div>
+        <div class="preview-drop">
+          <span class="preview-arrow" aria-hidden="true">↑</span>
+          <strong>Drop a file here</strong>
+          <small>Text, source code, markup, structured data, logs and PDF — any file is accepted</small>
+        </div>
+        <div class="preview-metrics">
+          <div><small>MODE</small><strong>Adaptive</strong></div>
+          <div><small>VERIFY</small><strong>SHA-256</strong></div>
+          <div><small>BACKEND</small><strong>{{ backend }}</strong></div>
+        </div>
+      </div>
+      <a class="preview-lock" href="{{ url_for('auth.login') }}">Sign in to use the workspace →</a>
+    </div>
+  </section>
+
+  <section class="landing-section" id="method">
+    <div class="section-heading">
+      <p class="eyebrow">The method</p>
+      <h2>One pipeline. Three deliberate decisions.</h2>
+      <p>The system stays inside the Huffman family. It does not switch to an unrelated compressor behind the scenes.</p>
+    </div>
+    <div class="method-grid">
+      <article><span>01</span><h3>Analyze at multiple levels</h3><p>Count individual bytes, recurring sequences, and structural word patterns in the uploaded file.</p></article>
+      <article><span>02</span><h3>Keep only patterns that pay</h3><p>The Bit Cost Decision Engine rejects candidates whose dictionary cost would erase their savings.</p></article>
+      <article><span>03</span><h3>Encode and verify</h3><p>Canonical Hybrid Huffman coding produces the AFC file, then an automatic round trip confirms exact bytes and SHA-256.</p></article>
+    </div>
+  </section>
+
+  <section class="landing-section formats-section" id="formats">
+    <div class="formats-copy">
+      <p class="eyebrow">Where the method applies</p>
+      <h2>Built for files that still have structure to find.</h2>
+      <p>Every category below is one ByteSize has been measured on, and each result is published in this repository. PDF depends entirely on what is inside it: a book stored as text streams reduces like the text it contains — 71.8% on the Silesia <em>reymont</em> volume — while a PDF of scanned images has nothing left to find, and across 200 real-world documents the average was 12.5%. Any file at all is accepted, and every one is reconstructed byte for byte.</p>
+    </div>
+    {# Each chip must correspond to a measured row in a committed result file;
+       test_advertised_formats_are_measured enforces that, so a category cannot
+       be advertised here before it has been benchmarked. #}
+    <div class="format-list" aria-label="File categories ByteSize is measured on">
+      <span>TXT</span><span>CSV</span><span>JSON</span><span>SQL</span>
+      <span>XML</span><span>HTML</span><span>LOG</span>
+      <span>Source code</span><span>PDF</span>
+    </div>
+  </section>
+
+  <section class="landing-cta">
+    <div><p class="eyebrow">Ready when you are</p><h2>Compress locally. Restore exactly.</h2></div>
+    <a class="button button-primary" href="{{ url_for('auth.register') }}">Create an account</a>
+  </section>
+</main>
+<footer class="public-footer">
+  <span>ByteSize</span>
+  <span>Static canonical Hybrid Huffman · Local and lossless ·
+    <a href="{{ url_for('main.about_page') }}">About the method</a></span>
+</footer>
+{% endblock %}

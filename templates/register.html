@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Create account{% endblock %}
+{% block auth_content %}
+<div class="auth-shell">
+  <section class="auth-intro">
+    <p class="eyebrow">Local by design</p>
+    <h1>Create a private workspace on this machine.</h1>
+    <p>Your account and processing history stay in the local database. Uploaded file contents are not sent to an external service.</p>
+    <a href="{{ url_for('main.landing') }}">← Back to ByteSize</a>
+  </section>
+  <form method="post" class="auth-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div><p class="eyebrow">Get started</p><h2>Create account</h2></div>
+    {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+    <label for="username">Username
+      <input id="username" name="username" required value="{{ username or '' }}" autocomplete="username">
+      <small>3–32 characters: letters, numbers, periods, underscores, or hyphens.</small>
+    </label>
+    <label for="email">Email
+      <input id="email" name="email" type="email" required value="{{ email or '' }}" autocomplete="email">
+    </label>
+    <label for="password">Password
+      <input id="password" name="password" type="password" required autocomplete="new-password">
+      <small>At least {{ cfg.MIN_PASSWORD_LENGTH }} characters.</small>
+    </label>
+    <label for="confirm">Confirm password
+      <input id="confirm" name="confirm" type="password" required autocomplete="new-password">
+    </label>
+    <input type="hidden" name="next"
+           value="{{ next_path or request.args.get('next', '') }}">
+    <button class="button button-primary button-full">Create account</button>
+    <p class="auth-switch">Already registered? <a href="{{ url_for('auth.login', next=(next_path or request.args.get('next', ''))) }}">Sign in</a></p>
+  </form>
+</div>
+{% endblock %}

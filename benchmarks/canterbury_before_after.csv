@@ -1,0 +1,11 @@
+file,mode,orig_bytes,v3_bytes,v4_bytes,size_delta_pct,v3_comp_ms_native,v4_comp_ms_native,v4_dec_ms_native,v4_comp_ms_python
+alice29.txt,adaptive,152089,77407,61692,-20.30,326.24,1533.00,33.57,1533.43
+alice29.txt,baseline,152089,87846,87809,-0.04,35.91,36.26,50.70,37.15
+asyoulik.txt,adaptive,125179,66774,54741,-18.02,249.39,1084.84,21.49,1100.37
+asyoulik.txt,baseline,125179,75952,75918,-0.04,30.30,31.85,41.92,31.30
+cp.html,adaptive,24603,14864,10869,-26.88,48.33,375.13,6.08,357.95
+cp.html,baseline,24603,16382,16338,-0.27,6.49,6.64,8.75,6.41
+fields.c,adaptive,11150,7455,5330,-28.50,21.99,143.71,2.33,142.89
+fields.c,baseline,11150,7215,7170,-0.62,3.33,3.33,3.94,3.46
+grammar.lsp,adaptive,3721,2350,1927,-18.00,7.88,42.26,0.93,42.49
+grammar.lsp,baseline,3721,2331,2293,-1.63,1.35,1.40,1.44,1.36

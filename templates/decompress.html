@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}Decompress{% endblock %}
+{#
+   DECOMPRESS PAGE — decompression only.
+   Accepts .afc containers (and, in the second tab, .afcpak archives). A
+   normal file dropped here is refused with a link to the Compress page; the
+   operation never silently flips.
+
+   Both panes call the SAME engine as before (afc2.decompress_bytes via
+   /api/decompress and /api/archive/extract). Nothing here is a second decoder.
+#}
+{% block content %}
+<div class="rule2 pt-4">
+  <p class="eyebrow">Exact restoration</p>
+  <h1 class="font-display text-2xl">Decompress Files</h1>
+  <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Restore an AFC file to its original format and verify its integrity.</p>
+</div>
+
+<!-- tabs -->
+<div class="flex flex-wrap gap-2 mt-5 border-b border-line dark:border-[#35322c] no-print" role="tablist">
+  {% for id, label in [('dsingle','Single .afc file'),
+                       ('dextract','Extract ' ~ cfg.ARCHIVE_EXT ~ ' archive')] %}
+  <button class="dtab px-4 py-2 text-sm border-b-2 -mb-px
+                 {% if loop.first %}border-maroon text-maroon font-semibold
+                 {% else %}border-transparent text-dim dark:text-[#9c968a] hover:text-ink{% endif %}"
+          id="dtab-{{ id }}" data-dtab="{{ id }}" role="tab"
+          aria-controls="dpane-{{ id }}"
+          aria-selected="{{ 'true' if loop.first else 'false' }}"
+          tabindex="{{ '0' if loop.first else '-1' }}">{{ label }}</button>
+  {% endfor %}
+</div>
+
+<!-- ================= SINGLE .afc ================= -->
+<section id="dpane-dsingle" class="dpane mt-5" role="tabpanel"
+         aria-labelledby="dtab-dsingle">
+  <div class="max-w-3xl">
+    <div id="dDrop" tabindex="0" role="button"
+         aria-label="Drop an AFC file here or click to choose one"
+         class="border-2 border-dashed border-line dark:border-[#35322c] rounded-lg
+                px-4 py-12 sm:py-16 text-center cursor-pointer hover:border-maroon
+                focus:outline-none focus:ring-2 focus:ring-maroon/40 transition-colors">
+      <svg class="mx-auto mb-3 text-maroon" width="34" height="34" viewBox="0 0 24 24"
+           fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path d="M12 4v12m0 0 4-4m-4 4-4-4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+      </svg>
+      <p class="text-base font-semibold">Drag &amp; drop AFC file here</p>
+      <p class="text-sm text-dim dark:text-[#9c968a] mt-1">or</p>
+      <span class="inline-block mt-2 px-4 py-2 rounded-md border border-line
+                   dark:border-[#35322c] text-sm hover:border-maroon">Select AFC File</span>
+      <p class="font-data text-[11px] text-dim dark:text-[#9c968a] mt-4">
+        Accepts <code>.afc</code> containers (AFC1 through AFC6)</p>
+    </div>
+    <input type="file" id="dInput" class="hidden" accept=".afc">
+
+    <div id="dPicked" class="hidden mt-4 bg-white dark:bg-[#1c1b18] border border-line
+                             dark:border-[#35322c] rounded-lg p-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="font-semibold break-all" id="dPickName">—</p>
+          <p class="font-data text-xs text-dim dark:text-[#9c968a] mt-1">
+            <span id="dPickSize"></span> · <span id="dPickType">checking…</span></p>
+        </div>
+        <button id="dClear" class="text-xs text-maroon underline shrink-0">remove</button>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-3 mt-4">
+      <button id="dRun" disabled
+              class="px-6 py-3 rounded-md bg-maroon text-white text-sm font-semibold
+                     hover:bg-maroondark disabled:opacity-40
+                     disabled:cursor-not-allowed">Decompress File</button>
+      <span id="dStatus" role="status" aria-live="polite"
+            class="font-data text-xs text-dim dark:text-[#9c968a]"></span>
+    </div>
+
+    <div id="dProgWrap" class="hidden mt-4">
+      <div class="h-2 bg-line dark:bg-[#35322c] rounded-sm overflow-hidden">
+        <div id="dProg" class="h-2 bg-maroon transition-all" style="width:0%"></div></div>
+    </div>
+
+    <p id="dErr" class="hidden error-panel text-sm mt-3 rounded-md px-3 py-2" role="alert"></p>
+
+    <!-- ---------------- RESULT ---------------- -->
+    <div id="dResult" class="hidden mt-5 bg-white dark:bg-[#1c1b18] border border-line
+                             dark:border-[#35322c] rounded-lg overflow-hidden">
+      <div class="px-5 py-3 bg-maroon text-white">
+        <h2 class="font-display text-lg">Decompression Complete</h2></div>
+      <div class="p-5">
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Compressed</p>
+            <p class="font-semibold break-all mt-1" id="dAfcName">—</p>
+            <p class="font-data tabular text-sm text-dim dark:text-[#9c968a]" id="dAfcSize">—</p>
+          </div>
+          <div>
+            <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Restored</p>
+            <p class="font-semibold break-all mt-1" id="dResName">—</p>
+            <p class="font-data tabular text-sm text-dim dark:text-[#9c968a]" id="dResSize">—</p>
+          </div>
+        </div>
+
+        <div class="grid gap-4 grid-cols-2 lg:grid-cols-3 mt-5 pt-5
+                    border-t border-line dark:border-[#35322c]">
+          <div>
+            <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Decompression Time</p>
+            <p class="font-data tabular text-2xl mt-1" id="dTime">—</p></div>
+          <div>
+            <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Container Format</p>
+            <p class="font-data text-sm mt-2" id="dContainer">—</p>
+            <p class="font-data text-[10px] text-dim dark:text-[#9c968a]" id="dMode"></p></div>
+          <div>
+            <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Restored Type</p>
+            <p class="font-data text-sm mt-2" id="dType">—</p>
+            <p class="font-data text-[10px] text-dim dark:text-[#9c968a]" id="dEngine"></p></div>
+        </div>
+
+        <!-- integrity + SHA-256, reported separately and never assumed -->
+        <div class="grid gap-4 sm:grid-cols-2 mt-5 pt-5
+                    border-t border-line dark:border-[#35322c]">
+          <div>
+            <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Integrity</p>
+            <p class="text-lg font-semibold mt-1" id="dIntegrity">—</p>
+            <p class="text-[11px] text-dim dark:text-[#9c968a] mt-1" id="dIntegrityNote"></p>
+          </div>
+          <div>
+            <p class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">SHA-256</p>
+            <p class="text-lg font-semibold mt-1" id="dShaVerdict">—</p>
+            <p class="text-[11px] text-dim dark:text-[#9c968a] mt-1" id="dShaNote"></p>
+          </div>
+        </div>
+        <p class="font-data text-[10px] text-dim dark:text-[#9c968a] break-all mt-3"
+           id="dShaValue"></p>
+
+        <div class="flex flex-wrap gap-3 mt-5">
+          <a id="dDownload" href="#" download
+             class="px-6 py-3 rounded-md bg-maroon text-white text-sm font-semibold
+                    hover:bg-maroondark">Download original file</a>
+          <a href="{{ url_for('main.compress_page') }}"
+             class="px-4 py-3 rounded-md border border-line dark:border-[#35322c]
+                    text-sm hover:border-maroon">← Go to Compress</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= EXTRACT ARCHIVE ================= -->
+<section id="dpane-dextract" class="dpane hidden mt-5" role="tabpanel"
+         aria-labelledby="dtab-dextract">
+  <div class="bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg p-6 max-w-3xl">
+    <h2 class="font-data text-[11px] uppercase text-dim dark:text-[#9c968a]">Extract a
+      {{ cfg.ARCHIVE_EXT }} archive</h2>
+    <p class="text-xs text-dim dark:text-[#9c968a] mt-2">Reads the manifest, decompresses every
+      member, verifies each SHA-256, and lists the original folder structure for
+      download. Create archives on the
+      <a href="{{ url_for('main.compress_page') }}"
+         class="text-maroon underline">Compress</a> page.</p>
+    <div class="flex flex-wrap gap-3 mt-4">
+      <label class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
+                    hover:border-maroon cursor-pointer">
+        Choose archive<input type="file" id="pakInput"
+                             accept="{{ cfg.ARCHIVE_EXT }}" class="hidden"></label>
+      <button id="extractBtn" disabled
+              class="px-5 py-2 rounded-md bg-maroon text-white text-sm font-semibold
+                     hover:bg-maroondark disabled:opacity-40">Extract</button>
+    </div>
+    <p id="pakInfo" class="font-data text-xs text-dim dark:text-[#9c968a] mt-3"></p>
+    <p id="pakErr" class="hidden error-panel text-sm mt-3 rounded-md px-3 py-2" role="alert"></p>
+    <div id="pakResult" class="hidden mt-4 overflow-x-auto">
+      <table class="w-full text-sm"><thead class="border-b border-line dark:border-[#35322c] text-left">
+        <tr class="text-[11px] uppercase text-dim dark:text-[#9c968a]">
+          <th class="px-3 py-2">Path</th><th class="px-3 py-2 text-right">Bytes</th>
+          <th class="px-3 py-2">SHA-256</th><th class="px-3 py-2"></th></tr></thead>
+        <tbody id="pakBody"></tbody></table>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/queue.js') }}"></script>
+<script src="{{ url_for('static', filename='js/decompress.js') }}"></script>
+{% endblock %}

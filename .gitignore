@@ -1,0 +1,13 @@
+__pycache__/
+.venv/
+*.pyc
+*.so
+*.dll
+!/afc_kernels.dll
+afc_app.sqlite3*
+afc_results/
+.afc_secret
+node_modules/
+package-lock.json
+benchmarks/canterbury_official/
+benchmarks/silesia/

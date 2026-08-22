@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Admin · Users{% endblock %}
+{% block content %}
+<div class="rule2 pt-4">
+  <h1 class="font-display text-2xl">Users</h1>
+  <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Admin view. {{ users|length }} account(s).</p>
+</div>
+<div class="mt-4 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead class="text-left border-b border-line dark:border-[#35322c]">
+      <tr class="text-[11px] uppercase text-dim dark:text-[#9c968a]">
+        <th class="px-3 py-2">User</th><th class="px-3 py-2">Email</th>
+        <th class="px-3 py-2">Role</th><th class="px-3 py-2 text-right">Files</th>
+        <th class="px-3 py-2 text-right">Original</th>
+        <th class="px-3 py-2 text-right">Compressed</th>
+        <th class="px-3 py-2 text-right">Stored</th>
+        <th class="px-3 py-2">Last login</th><th class="px-3 py-2">Actions</th></tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr class="border-b border-line/60 dark:border-[#35322c]/60">
+        <td class="px-3 py-2 font-semibold">{{ u['username'] }}</td>
+        <td class="px-3 py-2 break-all text-xs">{{ u['email'] }}</td>
+        <td class="px-3 py-2 font-data text-xs">{{ u['role'] }}</td>
+        <td class="px-3 py-2 text-right font-data tabular">{{ u['file_count'] }}</td>
+        <td class="px-3 py-2 text-right font-data tabular">{{ human(u['total_original']) }}</td>
+        <td class="px-3 py-2 text-right font-data tabular">{{ human(u['total_compressed']) }}</td>
+        <td class="px-3 py-2 text-right font-data tabular">{{ human(u['stored_bytes']) }}</td>
+        <td class="px-3 py-2 font-data text-xs text-dim dark:text-[#9c968a]">{{ u['last_login_at'] or '—' }}</td>
+        <td class="px-3 py-2">
+          <form method="post" action="{{ url_for('admin.toggle_active', user_id=u['id']) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="active" value="{{ 0 if u['is_active'] else 1 }}">
+            <button class="text-xs underline
+                    {% if u['is_active'] %}status-ok{% else %}status-error{% endif %}"
+                    {% if u['id'] == current_user['id'] %}disabled title="You cannot disable your own account"{% endif %}>
+              {{ 'active' if u['is_active'] else 'disabled' }}</button>
+          </form>
+          {% if u['role'] != 'admin' %}
+          <form class="mt-2" method="post"
+                action="{{ url_for('admin.delete_user', user_id=u['id']) }}"
+                onsubmit="return confirm('Delete this account and all of its stored compressed files?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="text-xs status-error underline">delete account</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#f5f6f2">
+<meta name="csrf-token" content="{{ csrf_token }}">
+<title>{% block title %}Workspace{% endblock %} · ByteSize</title>
+{#  Inline B mark so the tab icon matches the brand without shipping a binary
+    asset (and without a 404 on /favicon.ico). #}
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23146c5e'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' text-anchor='middle' fill='%23ffffff'%3EB%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+<script>
+(function () {
+  try {
+    if (localStorage.getItem("afc-theme-v2") === "dark") {
+      document.documentElement.classList.add("dark");
+    }
+  } catch (e) {}
+})();
+</script>
+{% block head %}{% endblock %}
+</head>
+<body class="bg-paper text-ink min-h-screen">
+<a class="skip-link" href="#mainContent">Skip to main content</a>
+
+{#  Two shells, one distinction: the public website for signed-out visitors and
+    the ByteSize Workspace for signed-in users. Compression itself is gated on
+    the server (every /api action is login_required), so the public side never
+    needs a half-working copy of the workspace. #}
+{% if current_user %}
+<div class="app-mobilebar no-print">
+  <button id="navToggle" class="nav-toggle" aria-label="Open navigation" aria-expanded="false">
+    <span aria-hidden="true">&#9776;</span>
+  </button>
+  <a class="brand brand-compact" href="{{ url_for('main.dashboard') }}">
+    <span class="brand-mark" aria-hidden="true">B</span>
+    <span class="mobile-brand-copy"><strong>ByteSize</strong><small>Hybrid Huffman compression</small></span>
+  </a>
+</div>
+
+<div class="app-frame">
+  <div id="navScrim" class="nav-scrim hidden no-print"></div>
+  <aside id="sidebar" class="app-sidebar hidden lg:block no-print">
+    <a class="brand sidebar-brand" href="{{ url_for('main.dashboard') }}">
+      <span class="brand-mark" aria-hidden="true">B</span>
+      <span>
+        <strong>ByteSize</strong>
+        <small>Hybrid Huffman compression</small>
+      </span>
+    </a>
+
+    <nav class="app-nav" aria-label="Main navigation">
+      {% for ep, label in [
+           ('main.dashboard','Workspace'),
+           ('main.compress_page','Compress'),
+           ('main.decompress_page','Decompress'),
+           ('main.files_page','Files'),
+           ('main.about_page','About')] %}
+      <a href="{{ url_for(ep) }}"
+         {% if request.endpoint == ep %}class="active" aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+
+      <div class="nav-divider"></div>
+      <a href="{{ url_for('main.settings_page') }}"
+         {% if request.endpoint == 'main.settings_page' %}class="active" aria-current="page"{% endif %}>Settings</a>
+
+      {% if current_user['role'] == 'admin' %}
+      <p class="nav-label">Administration</p>
+      <a href="{{ url_for('admin.users') }}"
+         {% if request.endpoint == 'admin.users' %}class="active" aria-current="page"{% endif %}>Users</a>
+      <a href="{{ url_for('admin.audit_log') }}"
+         {% if request.endpoint == 'admin.audit_log' %}class="active" aria-current="page"{% endif %}>Audit log</a>
+      {% endif %}
+    </nav>
+
+    <div class="sidebar-account">
+      <div class="account-row">
+        <span class="account-avatar" aria-hidden="true">{{ current_user['username'][0]|upper }}</span>
+        <span class="account-copy">
+          <strong>{{ current_user['username'] }}</strong>
+          <small>{{ current_user['role'] }}</small>
+        </span>
+      </div>
+      <button id="themeToggle" type="button" class="quiet-button" aria-pressed="false">
+        <span id="themeLabel">Dark mode</span>
+      </button>
+      <form method="post" action="{{ url_for('auth.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="quiet-button">Sign out</button>
+      </form>
+    </div>
+  </aside>
+
+  <main id="mainContent" class="app-main" tabindex="-1">
+    {% with msgs = get_flashed_messages() %}
+      {% if msgs %}<div class="flash-message">{{ msgs|join(' ') }}</div>{% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+<nav class="app-bottomnav no-print" aria-label="Primary navigation">
+  {% for ep, short in [('main.dashboard','Home'),('main.compress_page','Compress'),
+                       ('main.decompress_page','Decompress'),('main.files_page','Files')] %}
+  <a href="{{ url_for(ep) }}" {% if request.endpoint == ep %}class="active" aria-current="page"{% endif %}>{{ short }}</a>
+  {% endfor %}
+</nav>
+
+<script>
+(function () {
+  var toggle = document.getElementById("themeToggle");
+  function paint() {
+    var dark = document.documentElement.classList.contains("dark");
+    var label = document.getElementById("themeLabel");
+    if (label) label.textContent = dark ? "Light mode" : "Dark mode";
+    if (toggle) toggle.setAttribute("aria-pressed", dark ? "true" : "false");
+  }
+  if (toggle) toggle.addEventListener("click", function () {
+    var dark = document.documentElement.classList.toggle("dark");
+    try { localStorage.setItem("afc-theme-v2", dark ? "dark" : "light"); } catch (e) {}
+    paint();
+  });
+  paint();
+})();
+(function () {
+  var button = document.getElementById("navToggle");
+  var sidebar = document.getElementById("sidebar");
+  var scrim = document.getElementById("navScrim");
+  if (!button) return;
+  function setOpen(open) {
+    sidebar.classList.toggle("hidden", !open);
+    scrim.classList.toggle("hidden", !open);
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) sidebar.querySelector("a").focus();
+  }
+  button.addEventListener("click", function () { setOpen(sidebar.classList.contains("hidden")); });
+  scrim.addEventListener("click", function () { setOpen(false); });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") { setOpen(false); button.focus(); }
+  });
+})();
+</script>
+
+{% else %}
+{% set next_target = request.args.get('next') or '' %}
+<header class="public-header">
+  <div class="public-nav">
+    <a class="brand" href="{{ url_for('main.landing') }}">
+      <span class="brand-mark" aria-hidden="true">B</span>
+      <span><strong>ByteSize</strong><small>Lossless file compression</small></span>
+    </a>
+    <nav aria-label="Public navigation">
+      {% if request.endpoint == 'main.landing' %}
+      <a class="public-nav-link public-nav-jump" href="#method">How it works</a>
+      <a class="public-nav-link public-nav-jump" href="#formats">Formats</a>
+      {% endif %}
+      <a class="public-nav-link public-nav-secondary" href="{{ url_for('main.about_page') }}">About</a>
+      <a class="public-nav-link" href="{{ url_for('auth.login', next=next_target) if next_target else url_for('auth.login') }}">Sign in</a>
+      <a class="button button-primary button-small"
+         href="{{ url_for('auth.register', next=next_target) if next_target else url_for('auth.register') }}">Create account</a>
+    </nav>
+  </div>
+</header>
+{% block public_content %}
+<main id="mainContent" class="auth-page" tabindex="-1">
+  {% block auth_content %}{% endblock %}
+</main>
+{% endblock %}
+{% endif %}
+
+<script>
+{#  CSRF for same-origin unsafe requests, installed before any page script so
+    fetch/XHR callers never have to remember the header themselves. #}
+(function () {
+  var meta = document.querySelector('meta[name="csrf-token"]');
+  if (!meta) return;
+  var token = meta.content;
+  var unsafe = {POST:true, PUT:true, PATCH:true, DELETE:true};
+  var originalFetch = window.fetch;
+  window.fetch = function (input, options) {
+    options = options || {};
+    var method = String(options.method || "GET").toUpperCase();
+    var raw = typeof input === "string" ? input : input.url;
+    var target = new URL(raw, window.location.href);
+    if (unsafe[method] && target.origin === window.location.origin) {
+      var headers = new Headers(options.headers || {});
+      headers.set("X-CSRF-Token", token);
+      options.headers = headers;
+    }
+    return originalFetch.call(this, input, options);
+  };
+  var originalOpen = XMLHttpRequest.prototype.open;
+  var originalSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (method, url) {
+    var target = new URL(url, window.location.href);
+    this._bytesizeCsrf = unsafe[String(method).toUpperCase()] &&
+      target.origin === window.location.origin;
+    return originalOpen.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function () {
+    if (this._bytesizeCsrf) this.setRequestHeader("X-CSRF-Token", token);
+    return originalSend.apply(this, arguments);
+  };
+})();
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

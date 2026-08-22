@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Admin · Audit log{% endblock %}
+{% block content %}
+<div class="rule2 pt-4">
+  <h1 class="font-display text-2xl">Audit log</h1>
+  <p class="text-dim dark:text-[#9c968a] text-sm mt-1">Logins, failed logins, password changes and
+    admin actions. Local only.</p>
+</div>
+<div class="mt-4 bg-white dark:bg-[#1c1b18] border border-line dark:border-[#35322c] rounded-lg overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead class="text-left border-b border-line dark:border-[#35322c]">
+      <tr class="text-[11px] uppercase text-dim dark:text-[#9c968a]">
+        <th class="px-3 py-2">When</th><th class="px-3 py-2">Event</th>
+        <th class="px-3 py-2">User</th><th class="px-3 py-2">Detail</th>
+        <th class="px-3 py-2">IP</th></tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr class="border-b border-line/60 dark:border-[#35322c]/60">
+        <td class="px-3 py-2 font-data text-xs text-dim dark:text-[#9c968a]">{{ r['created_at'] }}</td>
+        <td class="px-3 py-2 font-data text-xs
+            {% if 'failed' in r['event'] or r['event'] in ('forbidden','rate_limited') %}text-maroon{% endif %}">
+          {{ r['event'] }}</td>
+        <td class="px-3 py-2">{{ r['username'] or '—' }}</td>
+        <td class="px-3 py-2 text-xs break-all">{{ r['detail'] }}</td>
+        <td class="px-3 py-2 font-data text-xs text-dim dark:text-[#9c968a]">{{ r['ip_address'] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ByteSize — Standalone Browser App</title>
+<style>
+  :root {
+    --paper:#FBFAF7; --ink:#21201C; --dim:#6B675E; --line:#E4E0D6;
+    --maroon:#8E1F1F; --maroondark:#701717; --gold:#B57A17;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--paper); color:var(--ink);
+         font-family:Georgia,"Times New Roman",serif; min-height:100vh; }
+  main { max-width:42rem; margin:0 auto; padding:0 1.25rem 4rem; }
+  .mono { font-family:ui-monospace,Consolas,monospace; }
+  .tabular { font-variant-numeric:tabular-nums; }
+  .rule2 { border-top:2.5px solid var(--maroon);
+           box-shadow:0 4px 0 -2.5px var(--maroon); }
+  header { padding-top:2.5rem; }
+  header .mono { font-size:11px; letter-spacing:.18em; text-transform:uppercase;
+                 color:var(--maroon); }
+  h1 { font-size:1.85rem; margin-top:.5rem; }
+  .sub { color:var(--dim); font-size:.9rem; margin-top:.25rem; }
+  section { margin-top:1.5rem; background:#fff; border:1px solid var(--line);
+            border-radius:.5rem; padding:1.5rem; }
+  .label { font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+           color:var(--dim); font-family:ui-monospace,Consolas,monospace; }
+  #drop { margin-top:.75rem; border:1px dashed var(--line);
+          border-radius:.4rem; padding:2.5rem 1rem; text-align:center;
+          cursor:pointer; }
+  #drop:hover, #drop.hot { border-color:var(--maroon); }
+  #drop p { font-size:.9rem; }
+  #drop .mono { font-size:12px; color:var(--dim); margin-top:.25rem; }
+  .row { display:flex; flex-wrap:wrap; gap:.75rem; align-items:center;
+         margin-top:.75rem; }
+  select { font:inherit; padding:.45rem .6rem; border:1px solid var(--line);
+           border-radius:.4rem; background:#fff; }
+  button { font:inherit; font-weight:600; font-size:.9rem; color:#fff;
+           background:var(--maroon); border:0; border-radius:.4rem;
+           padding:.8rem 1.5rem; cursor:pointer; }
+  button:hover { background:var(--maroondark); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.act { padding:.5rem 1rem; font-weight:600; }
+  button.ghost { color:var(--ink); background:#fff;
+                 border:1px solid var(--line); font-weight:400; }
+  button.ghost:hover { border-color:var(--maroon); }
+  #busy { color:var(--gold); font-size:12px; margin-top:.75rem; }
+  #err { color:var(--maroon); font-size:.9rem; margin-top:.75rem;
+         border:1px solid rgba(142,31,31,.3); background:rgba(142,31,31,.05);
+         border-radius:.4rem; padding:.5rem .75rem; }
+  .grid { display:grid; grid-template-columns:repeat(2,1fr); gap:.75rem;
+          margin-top:1rem; }
+  @media(min-width:540px){ .grid { grid-template-columns:repeat(4,1fr);} }
+  .cell { border:1px solid var(--line); border-radius:.4rem; padding:.75rem; }
+  .cell .t { font-size:11px; color:var(--dim); text-transform:uppercase; }
+  .cell .v { font-size:1.1rem; margin-top:.25rem;
+             font-family:ui-monospace,Consolas,monospace; }
+  .cell .v.m { color:var(--maroon); }
+  .ruler { margin-top:1rem; }
+  .rrow { display:grid; grid-template-columns:130px 1fr 90px; gap:.75rem;
+          align-items:center; margin-top:.5rem; }
+  .rrow .mono { font-size:12px; }
+  .bar { display:block; height:.75rem; border-radius:2px; background:var(--line); }
+  .bar.strong { background:var(--maroon); }
+  .rnum { font-size:12px; color:var(--dim); text-align:right; }
+  .hidden { display:none; }
+  footer { margin-top:2.5rem; padding-top:.75rem; }
+  footer p { font-size:11px; color:var(--dim);
+             font-family:ui-monospace,Consolas,monospace; }
+  .ok { color:#15803d; } .bad { color:var(--maroon); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="rule2" style="padding-top:1rem">
+      <p class="mono">ByteSize · Lossless file compression</p>
+      <h1>Standalone browser build</h1>
+      <p class="sub">Multi-Level Frequency Analysis &amp; Hybrid Huffman.
+        Runs entirely in this page — no server, files never leave this
+        computer. Byte-compatible with the Python and C++ engines.</p>
+    </div>
+  </header>
+
+  <section>
+    <h2 class="label">1 · Target file</h2>
+    <div id="drop" tabindex="0" role="button" aria-label="Choose a file">
+      <p>Drop a test file here, or click to choose</p>
+      <p class="mono">any file compresses · .afc files decompress · up to 8 MB</p>
+    </div>
+    <input type="file" id="fileInput" class="hidden">
+    <p id="chosen" class="mono hidden" style="font-size:12px;margin-top:.75rem"></p>
+    <p id="detected" class="mono hidden" style="font-size:12px;margin-top:.25rem"></p>
+
+    <h2 class="label" style="margin-top:1.5rem">2 · Action</h2>
+    <div class="row" role="radiogroup" aria-label="What to do with the file">
+      <button type="button" class="act" data-act="auto" aria-pressed="true">
+        Auto-detect</button>
+      <button type="button" class="act ghost" data-act="compress"
+              aria-pressed="false">Compress</button>
+      <button type="button" class="act ghost" data-act="decompress"
+              aria-pressed="false">Decompress</button>
+    </div>
+    <div class="row" id="encOpts">
+      <label class="mono" style="font-size:12px">container
+        <select id="fmt">
+          <option value="auto" selected>auto (smallest)</option>
+          <option value="afc1">AFC1 (legacy)</option>
+          <option value="afc2">AFC2 (compact)</option>
+        </select>
+      </label>
+      <label class="mono" style="font-size:12px">mode
+        <select id="mode">
+          <option value="adaptive" selected>adaptive (all tiers)</option>
+          <option value="baseline">baseline (single tier)</option>
+        </select>
+      </label>
+    </div>
+
+    <h2 class="label" style="margin-top:1.5rem">3 · Run</h2>
+    <div class="row">
+      <button id="runBtn" disabled>Run multi-tier compression</button>
+    </div>
+    <p id="busy" class="mono hidden" aria-live="polite">
+      Scanning tiers, deciding bit costs, building the hybrid tree…</p>
+    <p id="err" class="hidden" role="alert"></p>
+  </section>
+
+  <section id="results" class="hidden">
+    <h2 class="label">4 · Results <span id="fname" style="color:var(--ink);
+      text-transform:none;letter-spacing:0"></span></h2>
+    <div class="grid">
+      <div class="cell"><p class="t" id="lOrig">Original</p>
+        <p class="v tabular" id="mOrig"></p></div>
+      <div class="cell"><p class="t" id="lComp">Compressed</p>
+        <p class="v tabular m" id="mComp"></p></div>
+      <div class="cell"><p class="t">Space saved</p>
+        <p class="v tabular" id="mSaved"></p></div>
+      <div class="cell"><p class="t">Ratio</p>
+        <p class="v tabular" id="mRatio"></p></div>
+    </div>
+    <div class="ruler" id="rulerWrap">
+      <p class="label">Byte ruler</p>
+      <div id="ruler"></div>
+      <p id="vsBase" class="sub" style="font-size:.8rem;margin-top:.5rem"></p>
+    </div>
+    <div class="row" style="margin-top:1.5rem">
+      <button id="dl">Download result</button>
+      <button id="again" class="ghost">Process another file</button>
+      <span id="lossless" class="mono" style="font-size:12px;margin-left:auto"></span>
+      <span id="timing" class="mono" style="font-size:12px;color:var(--dim)"></span>
+    </div>
+  </section>
+
+  <footer class="rule2">
+    <p>Hybrid Huffman engine (multi-tier scan · bit-cost decision engine ·
+      structural block growth · DP optimal parse · hybrid canonical Huffman) —
+      identical file format to afc2.py and afc_native.cpp.
+      <span id="engineBadge"></span></p>
+  </footer>
+</main>
+
+<script src="afc_engine.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const LIMIT = 8 * 1024 * 1024;
+  let chosen = null, outBlob = null, outName = "";
+  let isContainer = false;     // set by sniffing the first 4 bytes
+  let action = "auto";         // auto | compress | decompress
+
+  function effective() {
+    if (action === "auto") return isContainer ? "decompress" : "compress";
+    return action;
+  }
+
+  function refreshUI() {
+    const eff = effective();
+    $("runBtn").textContent = eff === "decompress"
+      ? "Decompress this file" : "Run multi-tier compression";
+    // encoder options are meaningless when decoding
+    $("encOpts").style.display = eff === "decompress" ? "none" : "";
+    document.querySelectorAll(".act").forEach((b) => {
+      const on = b.dataset.act === action;
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+      b.classList.toggle("ghost", !on);
+    });
+    const d = $("detected");
+    if (!chosen) { d.classList.add("hidden"); return; }
+    if (isContainer) {
+      d.textContent = "Detected: AFC container — this file will be decompressed.";
+      d.style.color = "#15803d";
+    } else if (action === "decompress") {
+      d.textContent = "This file is not an AFC container; decompressing it will fail.";
+      d.style.color = "var(--maroon)";
+    } else {
+      d.textContent = "Detected: ordinary file — this file will be compressed.";
+      d.style.color = "var(--dim)";
+    }
+    d.classList.remove("hidden");
+  }
+
+  // Engine selection: try the WebAssembly core first (afc_core.wasm built
+  // from afc_native.cpp with tools/build_wasm.sh); fall back to the
+  // verified JavaScript engine.  Both produce identical bytes.
+  let engine = { compress: (d, a, f) => AFC.compressBytes(d, a, f),
+                 decompress: (d) => AFC.decompressBytes(d),
+                 name: "JavaScript engine" };
+  (async function tryWasm() {
+    try {
+      // file:// pages cannot fetch the wasm (CORS blocks it), so don't even
+      // try — the JS engine is byte-identical.  Serve the folder over HTTP
+      // (python -m http.server) to use the WebAssembly core.
+      if (!/^https?:$/.test(location.protocol)) return;
+      const resp = await fetch("afc_core.wasm");
+      if (!resp.ok) return;
+      const { instance } = await WebAssembly.instantiate(
+        await resp.arrayBuffer(), {
+          env: {},
+          wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }),
+        });
+      const ex = instance.exports;
+      if (!ex.afc_compress || !ex.afc_decompress || !ex.malloc) return;
+      const FMT = { auto: 0, afc1: 1, afc2: 2 };
+      function run(fn, data, extra) {
+        const mem = () => new Uint8Array(ex.memory.buffer);
+        const inPtr = ex.malloc(data.length || 1);
+        mem().set(data, inPtr);
+        const outPP = ex.malloc(8), outNP = ex.malloc(4);
+        const rc = fn(inPtr, data.length, ...(extra || []), outPP, outNP);
+        if (rc !== 0) { ex.free(inPtr); throw new Error("wasm rc=" + rc); }
+        const dv = new DataView(ex.memory.buffer);
+        const outPtr = dv.getUint32(outPP, true);
+        const outN = dv.getUint32(outNP, true);
+        const res = mem().slice(outPtr, outPtr + outN);
+        ex.afc_free(outPtr); ex.free(inPtr); ex.free(outPP); ex.free(outNP);
+        return res;
+      }
+      engine = {
+        compress: (d, a, f) => run(ex.afc_compress, d, [a ? 1 : 0, FMT[f]]),
+        decompress: (d) => run(ex.afc_decompress, d),
+        name: "WebAssembly core",
+      };
+    } catch (e) { /* JS fallback stays active */ }
+    finally { $("engineBadge").textContent = "Active: " + engine.name + "."; }
+  })();
+  $("engineBadge").textContent = "Active: " + engine.name + ".";
+
+  const kb = (n) => n < 1024 ? n + " B"
+      : n < 1048576 ? (n / 1024).toFixed(1) + " KB"
+      : (n / 1048576).toFixed(2) + " MB";
+  const num = (n) => n.toLocaleString("en-US");
+  function setError(m) {
+    $("err").textContent = m || "";
+    $("err").classList.toggle("hidden", !m);
+  }
+  function pick(f) {
+    if (f.size > LIMIT) { setError("Demo limit is 8 MB per file."); return; }
+    if (f.size === 0) { setError("That file is empty (0 bytes)."); return; }
+    chosen = f;
+    $("chosen").textContent = "Selected: " + f.name + " · " + kb(f.size);
+    $("chosen").classList.remove("hidden");
+    $("runBtn").disabled = false;
+    setError("");
+    isContainer = false;
+    const fr = new FileReader();
+    fr.onload = () => {
+      const b = new Uint8Array(fr.result);
+      const m = b.length >= 4
+        ? String.fromCharCode(b[0], b[1], b[2], b[3]) : "";
+      isContainer = (m === "AFC1" || m === "AFC2");
+      refreshUI();
+    };
+    fr.onerror = () => refreshUI();
+    fr.readAsArrayBuffer(f.slice(0, 4));
+    refreshUI();
+  }
+
+  document.querySelectorAll(".act").forEach((b) => {
+    b.addEventListener("click", () => { action = b.dataset.act; refreshUI(); });
+  });
+  const drop = $("drop"), input = $("fileInput");
+  drop.addEventListener("click", () => input.click());
+  drop.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); }
+  });
+  ["dragover", "dragenter"].forEach((ev) => drop.addEventListener(ev, (e) => {
+    e.preventDefault(); drop.classList.add("hot"); }));
+  ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => {
+    e.preventDefault(); drop.classList.remove("hot"); }));
+  drop.addEventListener("drop", (e) => {
+    const f = e.dataTransfer.files[0]; if (f) pick(f);
+  });
+  input.addEventListener("change", () => {
+    if (input.files[0]) pick(input.files[0]); input.value = "";
+  });
+
+  function bar(label, size, max, strong) {
+    const w = Math.max(1.5, 100 * size / max).toFixed(1);
+    return '<div class="rrow"><span class="mono">' + label + '</span>' +
+      '<span class="bar' + (strong ? " strong" : "") + '" style="width:' +
+      w + '%"></span><span class="mono tabular rnum">' + num(size) +
+      ' B</span></div>';
+  }
+
+  $("runBtn").addEventListener("click", () => {
+    if (!chosen) { setError("No file selected. Choose a file first."); return; }
+    setError(""); $("results").classList.add("hidden");
+    $("busy").textContent = effective() === "decompress"
+      ? "Reading the container, rebuilding the hybrid tree, expanding symbols…"
+      : "Scanning tiers, deciding bit costs, building the hybrid tree…";
+    $("runBtn").disabled = true; $("busy").classList.remove("hidden");
+    const fmt = $("fmt").value, mode = $("mode").value;
+    const reader = new FileReader();
+    reader.onload = () => {
+      // setTimeout lets the busy note paint before the engine runs
+      setTimeout(() => {
+        try {
+          const data = new Uint8Array(reader.result);
+          const magic = data.length >= 4
+            ? String.fromCharCode(data[0], data[1], data[2], data[3]) : "";
+          const isCt = (magic === "AFC1" || magic === "AFC2");
+          const eff = action === "auto"
+            ? (isCt ? "decompress" : "compress") : action;
+          if (eff === "decompress" && !isCt)
+            throw new Error("Decompress was selected, but this file is not an "
+              + "AFC container (it does not start with AFC1 or AFC2). Choose a "
+              + ".afc file, or switch the action to Compress.");
+          const t0 = performance.now();
+          if (eff === "decompress") {
+            const restored = engine.decompress(data);
+            const secs = ((performance.now() - t0) / 1000).toFixed(2);
+            outBlob = restored;
+            outName = chosen.name.toLowerCase().endsWith(".afc")
+              ? chosen.name.slice(0, -4) : chosen.name + ".restored";
+            render({ kind: "decompress", name: chosen.name,
+                     original: data.length, restored: restored.length,
+                     seconds: secs, container: magic });
+          } else {
+            const blob = engine.compress(data, mode === "adaptive", fmt);
+            const secs = ((performance.now() - t0) / 1000).toFixed(2);
+            const baseline = engine.compress(data, false, "afc1");
+            const rt = engine.decompress(blob);
+            let lossless = rt.length === data.length;
+            if (lossless)
+              for (let i = 0; i < rt.length; i++)
+                if (rt[i] !== data[i]) { lossless = false; break; }
+            outBlob = blob;
+            outName = chosen.name + ".afc";
+            render({ kind: "compress", name: chosen.name,
+                     original: data.length, compressed: blob.length,
+                     baseline: baseline.length, lossless, seconds: secs,
+                     container: String.fromCharCode(blob[0], blob[1],
+                                                    blob[2], blob[3]) });
+          }
+        } catch (e) {
+          setError(e.message || String(e));
+        } finally {
+          $("runBtn").disabled = false; $("busy").classList.add("hidden");
+        }
+      }, 30);
+    };
+    reader.onerror = () => {
+      setError("Could not read that file.");
+      $("runBtn").disabled = false; $("busy").classList.add("hidden");
+    };
+    reader.readAsArrayBuffer(chosen);
+  });
+
+  function render(j) {
+    $("fname").textContent = " — " + j.name;
+    const dec = j.kind === "decompress";
+    $("lOrig").textContent = dec ? "Compressed input" : "Original";
+    $("lComp").textContent = dec ? "Restored output" : "Compressed";
+    $("rulerWrap").classList.toggle("hidden", dec);
+    if (dec) {
+      $("mOrig").textContent = kb(j.original);
+      $("mComp").textContent = kb(j.restored);
+      $("mSaved").textContent = "—";
+      $("mRatio").textContent = "—";
+      $("dl").textContent = "Download restored file";
+      $("lossless").innerHTML =
+        '<span class="ok">✓ ' + j.container + ' container decoded</span>';
+    } else {
+      $("mOrig").textContent = kb(j.original);
+      $("mComp").textContent = kb(j.compressed);
+      $("mSaved").textContent =
+        (100 * (1 - j.compressed / j.original)).toFixed(2) + "%";
+      $("mRatio").textContent = (j.original / j.compressed).toFixed(3) + "×";
+      $("ruler").innerHTML =
+        bar("Original", j.original, j.original, false) +
+        bar("Std Huffman", j.baseline, j.original, false) +
+        bar("AFC (this study)", j.compressed, j.original, true);
+      const vs = (100 * (1 - j.compressed / j.baseline)).toFixed(1);
+      $("vsBase").textContent = vs > 0
+        ? "AFC output is " + vs + "% smaller than the standard single-tier " +
+          "Huffman control."
+        : "AFC matched the single-tier Huffman control on this file.";
+      $("dl").textContent = "Download compressed file";
+      $("lossless").innerHTML = j.lossless
+        ? '<span class="ok">✓ lossless verified</span>'
+        : '<span class="bad">✗ LOSSLESS CHECK FAILED</span>';
+    }
+    $("timing").textContent =
+      j.seconds + " s · " + engine.name + " · " + j.container;
+    $("results").classList.remove("hidden");
+    $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  $("dl").addEventListener("click", () => {
+    if (!outBlob) return;
+    const url = URL.createObjectURL(new Blob([outBlob],
+      { type: "application/octet-stream" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = outName;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  });
+  $("again").addEventListener("click", () => {
+    chosen = null; outBlob = null; isContainer = false;
+    $("chosen").classList.add("hidden");
+    $("detected").classList.add("hidden");
+    refreshUI();
+    $("results").classList.add("hidden");
+    $("runBtn").disabled = true;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+})();
+</script>
+</body>
+</html>

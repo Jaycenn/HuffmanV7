@@ -1,0 +1,63 @@
+{
+  "backend": "native",
+  "groups": [
+    "balanced",
+    "fast",
+    "maximum"
+  ],
+  "metric": "compressed_bytes",
+  "results": [
+    {
+      "backend": "native",
+      "left": "balanced",
+      "median_difference_left_minus_right": -304405.5,
+      "median_left": 4222914.5,
+      "median_right": 4970831.5,
+      "method": "exact signed-rank distribution",
+      "metric": "compressed_bytes",
+      "n": 12,
+      "p": 0.00048828125,
+      "p_holm": 0.00146484375,
+      "paired_files": 12,
+      "rank_biserial": -1.0,
+      "right": "fast",
+      "w_minus": 78.0,
+      "w_plus": 0
+    },
+    {
+      "backend": "native",
+      "left": "balanced",
+      "median_difference_left_minus_right": 92006.0,
+      "median_left": 4222914.5,
+      "median_right": 4076819.5,
+      "method": "exact signed-rank distribution",
+      "metric": "compressed_bytes",
+      "n": 12,
+      "p": 0.00048828125,
+      "p_holm": 0.00146484375,
+      "paired_files": 12,
+      "rank_biserial": 1.0,
+      "right": "maximum",
+      "w_minus": 0,
+      "w_plus": 78.0
+    },
+    {
+      "backend": "native",
+      "left": "fast",
+      "median_difference_left_minus_right": 428483.5,
+      "median_left": 4970831.5,
+      "median_right": 4076819.5,
+      "method": "exact signed-rank distribution",
+      "metric": "compressed_bytes",
+      "n": 12,
+      "p": 0.00048828125,
+      "p_holm": 0.00146484375,
+      "paired_files": 12,
+      "rank_biserial": 1.0,
+      "right": "maximum",
+      "w_minus": 0,
+      "w_plus": 78.0
+    }
+  ],
+  "unit_of_analysis": "file"
+}

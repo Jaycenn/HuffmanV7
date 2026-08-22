@@ -1,0 +1,19 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<title>ByteSize Compression Report</title>
+<style>
+ body{font-family:Arial,sans-serif;color:#17201d;margin:2rem} h1{font-size:1.6rem;margin:0 0 .3rem}
+ .meta{font:11px ui-monospace,Consolas,monospace;color:#65706c} .brand{color:#146c5e;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+ table{width:100%;border-collapse:collapse;margin-top:1.4rem;font-size:12px} th,td{border-bottom:1px solid #dde2dd;padding:7px 8px;text-align:left}
+ th{font-size:10px;text-transform:uppercase;color:#65706c} td.n{text-align:right;font:12px ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums}
+ tfoot td{font-weight:bold;border-top:2px solid #146c5e}.ok{color:#146c5e}.bad{color:#9f2d36}.header{border-bottom:3px solid #146c5e;padding-bottom:1rem}
+ button{margin-top:1rem;padding:.55rem 1rem;background:#146c5e;color:white;border:0;border-radius:5px}@media print{.no-print{display:none}}
+</style></head><body>
+<div class="header"><p class="brand">ByteSize</p><h1>Compression report</h1>
+  <p>Adaptive File Compression System Using Multi-Level Frequency Analysis &amp; Hybrid Huffman</p>
+  <p class="meta">Generated {{ generated }} · user {{ current_user['username'] }}</p></div>
+<button class="no-print" onclick="window.print()">Save as PDF / Print</button>
+<table><thead><tr><th>File</th><th>Original</th><th>Compressed</th><th>Ratio</th><th>Saved %</th><th>Engine</th><th>Container</th><th>Lossless</th><th>ms</th></tr></thead>
+<tbody>{% for r in rows %}<tr><td>{{ r['filename'] }}</td><td class="n">{{ r['original_bytes'] }}</td><td class="n">{{ r['compressed_bytes'] }}</td><td class="n">{{ '%.3f'|format(r['ratio']) }}×</td><td class="n">{{ '%.2f'|format(r['space_saved_pct']) }}</td><td>{{ r['engine'] }}</td><td>{{ r['container_format'] }}</td><td class="{{ 'ok' if r['lossless_verified'] else 'bad' }}">{{ 'verified' if r['lossless_verified'] else 'NOT VERIFIED' }}</td><td class="n">{{ '%.1f'|format(r['duration_ms']) }}</td></tr>{% endfor %}</tbody>
+<tfoot><tr><td>TOTAL ({{ rows|length }} files)</td><td class="n">{{ total_original }}</td><td class="n">{{ total_compressed }}</td><td class="n">{{ '%.3f'|format(overall_ratio) }}×</td><td class="n">{{ '%.2f'|format(saved_pct) }}</td><td colspan="2"></td><td>{{ verified }}/{{ rows|length }} verified</td><td></td></tr></tfoot></table>
+<p class="meta" style="margin-top:1.5rem">Lossless status is verified by SHA-256 round trip at processing time. Entropy coding uses static canonical Hybrid Huffman coding.</p>
+</body></html>

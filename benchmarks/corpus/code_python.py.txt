@@ -1,0 +1,1196 @@
+#!/usr/bin/env python3
+"""
+afc.py — AFC v1 core: container I/O, canonical hybrid Huffman, baseline
+single-tier engine, and the universal decoder (AFC1 legacy + AFC2 compact).
+
+This file is the pure-Python reference implementation.  Everything here is
+integer-only and fully deterministic (same input -> same bytes on every
+platform / implementation: Python, C++, JavaScript).
+
+Container formats
+-----------------
+AFC1 (legacy, byte-compatible with the original v3 tool chain):
+    "AFC1" | mode u8 | varint orig_len
+    mode 0 : raw stored bytes follow (fallback, always lossless)
+    mode>0 : varint dict_count
+             per entry: varint len | len raw bytes
+             varint used_symbol_count
+             per symbol: varint id | u8 code_length
+             canonical-Huffman bitstream (MSB-first)
+
+AFC2 (compact header, v4):
+    "AFC2" | mode u8 | varint orig_len
+    mode 0 : raw stored bytes follow
+    mode>0 : varint used_symbol_count U
+             varint id[0], then U-1 varints of (id[k]-id[k-1]-1)   (ids ascending)
+             ceil(U/2) bytes of 4-bit packed (code_length-1), first symbol in
+             the high nibble (lengths are limited to 16 by package-merge)
+             varint dict_count D
+             if D>0: u8 flag (0 = raw entries, 1 = entries coded with the
+                     literal Huffman codes)
+                     D varints: pattern lengths
+                     flag 0: concatenated raw pattern bytes
+                     flag 1: one MSB-first bitstream of all pattern bytes,
+                             each byte written with its literal Huffman code,
+                             zero-padded to a byte boundary
+             canonical-Huffman bitstream (MSB-first, same packing as AFC1)
+
+Canonical code assignment (both formats): symbols sorted by
+(code_length asc, symbol_id asc); codes assigned sequentially, shifting left
+by the length difference when the length increases.
+
+Symbol space: 0..255 literal bytes, 256+i dictionary pattern i.
+"""
+
+import hashlib
+import sys
+from array import array
+
+MAGIC1 = b"AFC1"
+MAGIC2 = b"AFC2"
+MODE_RAW = 0
+MODE_BASELINE = 1
+MODE_ADAPTIVE = 2
+
+MAX_CODE_LEN = 16          # package-merge limit (fits the AFC2 4-bit nibble)
+NOCODE_COST = 18           # DP cost for a symbol that has no code yet
+
+
+# --------------------------------------------------------------------------
+# varints (LSB base-128, continuation bit 0x80 — identical to the native rv())
+# --------------------------------------------------------------------------
+
+def write_varint(out: bytearray, v: int) -> None:
+    while True:
+        b = v & 0x7F
+        v >>= 7
+        if v:
+            out.append(b | 0x80)
+        else:
+            out.append(b)
+            return
+
+
+def read_varint(buf, pos: int):
+    v = 0
+    sh = 0
+    while True:
+        x = buf[pos]
+        pos += 1
+        v |= (x & 0x7F) << sh
+        if not (x & 0x80):
+            return v, pos
+        sh += 7
+
+
+# --------------------------------------------------------------------------
+# integer bit-cost estimate used by the Bit Cost Decision Engine.
+# est_code_len(freq,total) ~= ceil(-log2(freq/total)) computed with integers
+# only, so Python / C++ / JS agree bit-for-bit.
+# --------------------------------------------------------------------------
+
+def est_code_len(freq: int, total: int) -> int:
+    if freq <= 0:
+        return NOCODE_COST
+    q = total // freq
+    if q < 1:
+        q = 1
+    L = q.bit_length()
+    return 1 if L < 1 else (24 if L > 24 else L)
+
+
+# --------------------------------------------------------------------------
+# Huffman code lengths
+# --------------------------------------------------------------------------
+
+def huffman_lengths(freqs: dict) -> dict:
+    """Unlimited-depth Huffman lengths via the deterministic two-queue method.
+    freqs: {symbol_id: count>0}.  Ties: leaves before internal nodes, lower
+    symbol id first.  Returns {symbol_id: length}."""
+    items = sorted(freqs.items(), key=lambda kv: (kv[1], kv[0]))
+    n = len(items)
+    if n == 0:
+        return {}
+    if n == 1:
+        return {items[0][0]: 1}
+    # nodes: (freq, node_index); leaves 0..n-1, merges n..2n-2
+    parent = [0] * (2 * n - 1)
+    leafq = list(range(n))          # ascending freq order
+    mergq = []
+    li = mi = 0
+    next_node = n
+    freq_of = [kv[1] for kv in items] + [0] * (n - 1)
+
+    def take():
+        nonlocal li, mi
+        lf = freq_of[leafq[li]] if li < len(leafq) else None
+        mf = freq_of[mergq[mi]] if mi < len(mergq) else None
+        if mf is None or (lf is not None and lf <= mf):
+            li += 1
+            return leafq[li - 1]
+        mi += 1
+        return mergq[mi - 1]
+
+    for _ in range(n - 1):
+        a = take()
+        b = take()
+        freq_of[next_node] = freq_of[a] + freq_of[b]
+        parent[a] = next_node
+        parent[b] = next_node
+        mergq.append(next_node)
+        next_node += 1
+
+    root = next_node - 1
+    depth = [0] * (2 * n - 1)
+    for node in range(root - 1, -1, -1):
+        depth[node] = depth[parent[node]] + 1
+    return {items[k][0]: max(1, depth[k]) for k in range(n)}
+
+
+def package_merge_lengths(freqs: dict, limit: int = MAX_CODE_LEN) -> dict:
+    """Optimal length-limited Huffman lengths (package-merge), deterministic.
+    freqs: {symbol_id: count>0}.
+
+    Portability contract (mirrored bit-for-bit in afc_native.cpp and
+    afc_engine.js): leaves are sorted by (freq asc, id asc); at every level
+    the leaf list is two-pointer merged with the pairwise packages of the
+    previous level, and on equal weight the LEAF comes first."""
+    items = sorted(freqs.items(), key=lambda kv: (kv[1], kv[0]))
+    n = len(items)
+    if n == 0:
+        return {}
+    if n == 1:
+        return {items[0][0]: 1}
+    if n > (1 << limit):
+        raise ValueError("alphabet larger than 2^limit")
+    leaf_w = [kv[1] for kv in items]
+    # each element: (weight, leaves) where leaves is a list of leaf indices
+    prev_w = []
+    prev_l = []
+    for _ in range(limit):
+        pack_w = []
+        pack_l = []
+        for i in range(0, len(prev_w) - 1, 2):
+            pack_w.append(prev_w[i] + prev_w[i + 1])
+            pack_l.append(prev_l[i] + prev_l[i + 1])
+        cur_w = []
+        cur_l = []
+        li = pi = 0
+        while li < n or pi < len(pack_w):
+            if pi >= len(pack_w) or (li < n and leaf_w[li] <= pack_w[pi]):
+                cur_w.append(leaf_w[li])
+                cur_l.append([li])
+                li += 1
+            else:
+                cur_w.append(pack_w[pi])
+                cur_l.append(pack_l[pi])
+                pi += 1
+        prev_w, prev_l = cur_w, cur_l
+    lengths = [0] * n
+    for leaves in prev_l[:2 * n - 2]:
+        for k in leaves:
+            lengths[k] += 1
+    return {items[k][0]: max(1, lengths[k]) for k in range(n)}
+
+
+def canonical_codes(lengths: dict) -> dict:
+    """{id: length} -> {id: (code,length)} with (length asc, id asc) order."""
+    syms = sorted(lengths.items(), key=lambda kv: (kv[1], kv[0]))
+    out = {}
+    code = 0
+    prev = syms[0][1] if syms else 1
+    for sid, L in syms:
+        code <<= (L - prev)
+        prev = L
+        out[sid] = (code, L)
+        code += 1
+    return out
+
+
+# --------------------------------------------------------------------------
+# bitstream writer (MSB-first, identical packing to the native pack_bits)
+# --------------------------------------------------------------------------
+
+class BitWriter:
+    __slots__ = ("buf", "acc", "nb")
+
+    def __init__(self):
+        self.buf = bytearray()
+        self.acc = 0
+        self.nb = 0
+
+    def put(self, code: int, length: int) -> None:
+        self.acc = (self.acc << length) | code
+        self.nb += length
+        while self.nb >= 8:
+            self.nb -= 8
+            self.buf.append((self.acc >> self.nb) & 0xFF)
+            self.acc &= (1 << self.nb) - 1
+
+    def finish(self) -> bytearray:
+        if self.nb:
+            self.buf.append((self.acc << (8 - self.nb)) & 0xFF)
+            self.acc = 0
+            self.nb = 0
+        return self.buf
+
+
+def pack_ids(ids, codes: dict) -> bytes:
+    bw = BitWriter()
+    put = bw.put
+    for sid in ids:
+        c, L = codes[sid]
+        put(c, L)
+    return bytes(bw.finish())
+
+
+# --------------------------------------------------------------------------
+# container emit
+# --------------------------------------------------------------------------
+
+def emit_afc1(mode: int, orig_len: int, patterns, lengths: dict,
+              bitstream: bytes) -> bytes:
+    out = bytearray(MAGIC1)
+    out.append(mode)
+    write_varint(out, orig_len)
+    write_varint(out, len(patterns))
+    for p in patterns:
+        write_varint(out, len(p))
+        out += p
+    write_varint(out, len(lengths))
+    for sid in sorted(lengths):
+        write_varint(out, sid)
+        out.append(lengths[sid])
+    out += bitstream
+    return bytes(out)
+
+
+def emit_afc2(mode: int, orig_len: int, patterns, lengths: dict,
+              bitstream: bytes) -> bytes:
+    out = bytearray(MAGIC2)
+    out.append(mode)
+    write_varint(out, orig_len)
+    ids = sorted(lengths)
+    write_varint(out, len(ids))
+    prev = -1
+    for sid in ids:
+        write_varint(out, sid if prev < 0 else sid - prev - 1)
+        prev = sid
+    # 4-bit packed lengths (L-1), first symbol in the high nibble
+    nib = bytearray((len(ids) + 1) // 2)
+    for k, sid in enumerate(ids):
+        L = lengths[sid]
+        if not (1 <= L <= 16):
+            raise ValueError("AFC2 requires code lengths 1..16")
+        v = L - 1
+        if k & 1:
+            nib[k >> 1] |= v
+        else:
+            nib[k >> 1] = v << 4
+    out += nib
+    write_varint(out, len(patterns))
+    if patterns:
+        codes = canonical_codes(lengths)
+        can = all((b in codes) for p in patterns for b in p)
+        blob = None
+        if can:
+            bw = BitWriter()
+            for p in patterns:
+                for b in p:
+                    c, L = codes[b]
+                    bw.put(c, L)
+            blob = bytes(bw.finish())
+        rawlen = sum(len(p) for p in patterns)
+        if blob is not None and len(blob) < rawlen:
+            out.append(1)
+            for p in patterns:
+                write_varint(out, len(p))
+            out += blob
+        else:
+            out.append(0)
+            for p in patterns:
+                write_varint(out, len(p))
+            for p in patterns:
+                out += p
+    out += bitstream
+    return bytes(out)
+
+
+def emit_raw(orig: bytes, magic: bytes = MAGIC1) -> bytes:
+    out = bytearray(magic)
+    out.append(MODE_RAW)
+    write_varint(out, len(orig))
+    out += orig
+    return bytes(out)
+
+
+def finish_container(mode: int, data: bytes, patterns, lengths, bitstream,
+                     fmt: str = "auto") -> bytes:
+    """Build the requested container; 'auto' keeps AFC1 unless AFC2 is
+    strictly smaller.  Falls back to raw storage when coding does not pay."""
+    if fmt == "afc1":
+        blob = emit_afc1(mode, len(data), patterns, lengths, bitstream)
+    elif fmt == "afc2":
+        blob = emit_afc2(mode, len(data), patterns, lengths, bitstream)
+    else:
+        b1 = emit_afc1(mode, len(data), patterns, lengths, bitstream)
+        b2 = emit_afc2(mode, len(data), patterns, lengths, bitstream)
+        blob = b2 if len(b2) < len(b1) else b1
+    raw = emit_raw(data, MAGIC2 if fmt == "afc2" else MAGIC1)
+    return raw if len(raw) <= len(blob) else blob
+
+
+# --------------------------------------------------------------------------
+# decoder (both containers, LUT-accelerated)
+# --------------------------------------------------------------------------
+
+def _build_decode_lut(lengths: dict, patterns):
+    """Single-level LUT decode table for maxlen<=16: index = next maxlen bits,
+    value = (advance_bits, expansion_bytes or literal int)."""
+    maxlen = max(lengths.values())
+    codes = canonical_codes(lengths)
+    size = 1 << maxlen
+    sym_of = array("i", [-1]) * 1
+    sym_of = array("i", bytes(4 * size))
+    adv_of = bytearray(size)
+    for sid, (c, L) in codes.items():
+        base = c << (maxlen - L)
+        for k in range(1 << (maxlen - L)):
+            sym_of[base + k] = sid
+            adv_of[base + k] = L
+    return maxlen, sym_of, adv_of
+
+
+def _decode_bitstream(blob, pos, orig, patterns, lengths):
+    out = bytearray()
+    maxlen = max(lengths.values()) if lengths else 0
+    if 0 < maxlen <= 16:
+        ml, sym_of, adv_of = _build_decode_lut(lengths, patterns)
+        acc = 0
+        nb = 0
+        n = len(blob)
+        mask = (1 << ml) - 1
+        while len(out) < orig:
+            while nb < ml and pos < n:
+                acc = (acc << 8) | blob[pos]
+                pos += 1
+                nb += 8
+            if nb >= ml:
+                idx = (acc >> (nb - ml)) & mask
+            else:
+                idx = (acc << (ml - nb)) & mask
+            sid = sym_of[idx]
+            L = adv_of[idx]
+            if L == 0 or sid < 0 or L > nb + (8 * (n - pos)):
+                raise ValueError("corrupt bitstream")
+            if nb >= L:
+                nb -= L
+                acc &= (1 << nb) - 1
+            else:
+                raise ValueError("corrupt bitstream")
+            if sid < 256:
+                out.append(sid)
+            else:
+                p = patterns[sid - 256]
+                room = orig - len(out)
+                out += p if len(p) <= room else p[:room]
+        return bytes(out)
+    # legacy long-code path: firstcode/firstidx walk (like the native decoder)
+    syms = sorted(lengths.items(), key=lambda kv: (kv[1], kv[0]))
+    firstcode = {}
+    firstidx = {}
+    cnt = {}
+    order = []
+    code = 0
+    prev = syms[0][1]
+    for k, (sid, L) in enumerate(syms):
+        code <<= (L - prev)
+        prev = L
+        if L not in cnt:
+            firstcode[L] = code
+            firstidx[L] = k
+            cnt[L] = 0
+        cnt[L] += 1
+        order.append(sid)
+        code += 1
+    code = 0
+    L = 0
+    for i in range(pos, len(blob)):
+        byte = blob[i]
+        for sh in range(7, -1, -1):
+            code = (code << 1) | ((byte >> sh) & 1)
+            L += 1
+            if L in cnt and firstcode[L] <= code < firstcode[L] + cnt[L]:
+                sid = order[firstidx[L] + code - firstcode[L]]
+                if sid < 256:
+                    out.append(sid)
+                else:
+                    p = patterns[sid - 256]
+                    room = orig - len(out)
+                    out += p if len(p) <= room else p[:room]
+                code = 0
+                L = 0
+                if len(out) >= orig:
+                    return bytes(out)
+    if len(out) != orig:
+        raise ValueError("truncated bitstream")
+    return bytes(out)
+
+
+def decompress_bytes(blob: bytes) -> bytes:
+    if len(blob) < 6 or blob[:4] not in (MAGIC1, MAGIC2):
+        raise ValueError("not a valid AFC container")
+    magic = blob[:4]
+    mode = blob[4]
+    pos = 5
+    orig, pos = read_varint(blob, pos)
+    if mode == MODE_RAW:
+        if pos + orig > len(blob):
+            raise ValueError("truncated raw container")
+        return bytes(blob[pos:pos + orig])
+    if orig == 0:
+        return b""
+    if magic == MAGIC1:
+        dc, pos = read_varint(blob, pos)
+        patterns = []
+        for _ in range(dc):
+            L, pos = read_varint(blob, pos)
+            patterns.append(bytes(blob[pos:pos + L]))
+            pos += L
+        used, pos = read_varint(blob, pos)
+        lengths = {}
+        for _ in range(used):
+            sid, pos = read_varint(blob, pos)
+            lengths[sid] = blob[pos]
+            pos += 1
+        return _decode_bitstream(blob, pos, orig, patterns, lengths)
+    # AFC2
+    used, pos = read_varint(blob, pos)
+    ids = []
+    prev = -1
+    for _ in range(used):
+        d, pos = read_varint(blob, pos)
+        sid = d if prev < 0 else prev + 1 + d
+        ids.append(sid)
+        prev = sid
+    lengths = {}
+    nbytes = (used + 1) // 2
+    for k, sid in enumerate(ids):
+        b = blob[pos + (k >> 1)]
+        v = (b >> 4) if not (k & 1) else (b & 0x0F)
+        lengths[sid] = v + 1
+    pos += nbytes
+    dc, pos = read_varint(blob, pos)
+    patterns = []
+    if dc:
+        flag = blob[pos]
+        pos += 1
+        plens = []
+        for _ in range(dc):
+            L, pos = read_varint(blob, pos)
+            plens.append(L)
+        if flag == 0:
+            for L in plens:
+                patterns.append(bytes(blob[pos:pos + L]))
+                pos += L
+        else:
+            lit_lengths = {sid: L for sid, L in lengths.items() if sid < 256}
+            total = sum(plens)
+            raw = _decode_bitstream(blob, pos, total, [], lit_lengths)
+            # advance pos over the ceil(bits/8) bytes we consumed
+            codes = canonical_codes(lit_lengths)
+            bits = sum(codes[b][1] for b in raw)
+            pos += (bits + 7) // 8
+            off = 0
+            for L in plens:
+                patterns.append(raw[off:off + L])
+                off += L
+    return _decode_bitstream(blob, pos, orig, patterns, lengths)
+
+
+# --------------------------------------------------------------------------
+# v1 baseline engine: single-tier byte-frequency canonical Huffman (the
+# dashboard control row) — Tier-1 only, no dictionary.
+# --------------------------------------------------------------------------
+
+def _baseline_lengths(data: bytes) -> dict:
+    freqs = {}
+    for b in data:
+        freqs[b] = freqs.get(b, 0) + 1
+    return package_merge_lengths(freqs, MAX_CODE_LEN)
+
+
+def compress_bytes(data: bytes, adaptive: bool = False,
+                   fmt: str = "afc1") -> bytes:
+    """v1 API.  adaptive=True delegates to the v3/v4 engine in afc2.py."""
+    if adaptive:
+        import afc2
+        return afc2.compress_bytes(data, True, fmt=fmt)
+    if len(data) == 0:
+        return emit_raw(data, MAGIC2 if fmt == "afc2" else MAGIC1)
+    lengths = _baseline_lengths(data)
+    codes = canonical_codes(lengths)
+    bitstream = pack_ids(data, codes)
+    return finish_container(MODE_BASELINE, data, [], lengths, bitstream, fmt)
+
+
+# --------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------
+
+def _cli():
+    import argparse
+    ap = argparse.ArgumentParser(description="AFC v1 baseline engine")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for c in ("compress", "decompress", "verify"):
+        s = sub.add_parser(c)
+        s.add_argument("infile")
+        if c != "verify":
+            s.add_argument("outfile")
+        if c == "compress":
+            s.add_argument("--format", choices=("afc1", "afc2", "auto"),
+                           default="afc1")
+    a = ap.parse_args()
+    data = open(a.infile, "rb").read()
+    if a.cmd == "compress":
+        blob = compress_bytes(data, False, fmt=a.format)
+        open(a.outfile, "wb").write(blob)
+        print(f"{len(data)} -> {len(blob)} bytes")
+    elif a.cmd == "decompress":
+        out = decompress_bytes(data)
+        open(a.outfile, "wb").write(out)
+        print(f"{len(data)} -> {len(out)} bytes")
+    else:
+        blob = compress_bytes(data, False)
+        ok = hashlib.sha256(decompress_bytes(blob)).hexdigest() == \
+            hashlib.sha256(data).hexdigest()
+        print("LOSSLESS OK" if ok else "ROUND-TRIP FAILED")
+        sys.exit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    _cli()
+
+
+#!/usr/bin/env python3
+"""
+afc2.py — AFC adaptive engine (v3 pipeline).
+
+Pipeline (thesis terminology):
+  Tier-1  byte-frequency scan
+  Tier-2  n-gram scan (2..5 bytes, windowed)
+  Tier-3  word-token scan
+  Bit Cost Decision Engine:
+      accept a pattern only if
+      freq * (bits_spelled_out - bits_as_one_symbol) > 8 * (pattern_len + 3)
+  greedy longest-match segmentation
+  engine-gated structural block growth (adjacent-pair merging,
+      blocks <= 128 bytes, dictionary cap 4096)
+  strict final audit with actual counts
+  canonical hybrid Huffman over mixed symbols (literals 0..255,
+      patterns 256+i) -> AFC1 container, raw-storage fallback
+
+Pure-Python throughout; afc_native.py kernels are used when available and
+produce byte-identical output.
+"""
+
+import hashlib
+import os
+import sys
+import time
+from collections import Counter
+
+import afc
+from afc import (MODE_ADAPTIVE, est_code_len, huffman_lengths,
+                 canonical_codes, pack_ids, emit_afc1, emit_raw)
+
+try:
+    import afc_native as _native
+    NATIVE = _native.AVAILABLE and not os.environ.get("AFC_NO_NATIVE")
+except Exception:
+    _native = None
+    NATIVE = False
+
+# ---- v3 engine constants -------------------------------------------------
+SCAN_WINDOW = 1 << 20        # Tier-2 n-gram scan window
+NGRAM_MIN, NGRAM_MAX = 2, 5  # Tier-2 range
+MIN_CANDIDATE_FREQ = 4       # Tier-2/Tier-3 admission floor
+WORD_MIN, WORD_MAX = 3, 24   # Tier-3 token lengths
+MAX_INITIAL_DICT = 3072      # room left below the 4096 cap for block growth
+MAX_DICT = 4096              # structural dictionary cap
+MAX_BLOCK = 128              # structural block growth byte cap
+MERGE_ROUNDS = 3             # adjacent-pair merge rounds
+MERGES_PER_ROUND = 32        # accepted merges per round
+
+_WORD_CHARS = frozenset(
+    b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+
+
+# --------------------------------------------------------------------------
+# Tier scans
+# --------------------------------------------------------------------------
+
+def _tier2_ngrams(data: bytes) -> dict:
+    """n-gram frequencies (lengths 2..5) over the scan window, freq >= 4."""
+    win = data[:SCAN_WINDOW]
+    if NATIVE:
+        return _native.ngram_candidates(bytes(win), SCAN_WINDOW)
+    out = {}
+    n = len(win)
+    for L in range(NGRAM_MIN, NGRAM_MAX + 1):
+        if L > n:
+            break
+        cnt = Counter(bytes(win[i:i + L]) for i in range(n - L + 1))
+        for pat, f in cnt.items():
+            if f >= MIN_CANDIDATE_FREQ:
+                out[pat] = f
+    return out
+
+
+def _tier3_words(data: bytes) -> dict:
+    """Word tokens: maximal [A-Za-z0-9_] runs of length 3..24, freq >= 4."""
+    import re
+    cnt = Counter(m.group(0) for m in
+                  re.finditer(rb"[0-9A-Z_a-z]{3,}", data)
+                  if len(m.group(0)) <= WORD_MAX)
+    return {w: f for w, f in cnt.items() if f >= MIN_CANDIDATE_FREQ}
+
+
+# --------------------------------------------------------------------------
+# Bit Cost Decision Engine
+# --------------------------------------------------------------------------
+
+def _bit_cost_gain(pat: bytes, freq: int, lit_bits, sym_bits: int) -> int:
+    """Net bit gain per thesis rule; positive means the pattern pays for
+    itself: freq*(bits_spelled_out - bits_as_one_symbol) - 8*(len+3)."""
+    spelled = 0
+    for b in pat:
+        spelled += lit_bits[b]
+    return freq * (spelled - sym_bits) - 8 * (len(pat) + 3)
+
+
+def _select_candidates(data: bytes) -> list:
+    total = len(data)
+    tier1 = [0] * 256
+    for b in data:
+        tier1[b] += 1
+    lit_bits = [est_code_len(f, total) for f in tier1]
+    cands = _tier2_ngrams(data)
+    for w, f in _tier3_words(data).items():
+        if w not in cands:
+            cands[w] = f
+    scored = []
+    for pat, f in cands.items():
+        gain = _bit_cost_gain(pat, f, lit_bits, est_code_len(f, total))
+        if gain > 0:
+            scored.append((gain, pat))
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    return [pat for _, pat in scored[:MAX_INITIAL_DICT]]
+
+
+# --------------------------------------------------------------------------
+# greedy longest-match segmentation
+# --------------------------------------------------------------------------
+
+def _segment_greedy(data: bytes, patterns: list) -> list:
+    if NATIVE:
+        return list(_native.segment_ids(bytes(data), patterns))
+    pset = {p: i for i, p in enumerate(patterns)}
+    by_first = {}
+    for p in patterns:
+        by_first.setdefault(p[0], set()).add(len(p))
+    lens_of = {b: sorted(s, reverse=True) for b, s in by_first.items()}
+    ids = []
+    push = ids.append
+    n = len(data)
+    i = 0
+    mv = memoryview(data)
+    while i < n:
+        b = data[i]
+        ls = lens_of.get(b)
+        if ls:
+            for L in ls:
+                if i + L <= n:
+                    idx = pset.get(bytes(mv[i:i + L]))
+                    if idx is not None:
+                        push(256 + idx)
+                        i += L
+                        break
+            else:
+                push(b)
+                i += 1
+        else:
+            push(b)
+            i += 1
+    return ids
+
+
+# --------------------------------------------------------------------------
+# engine-gated structural block growth (adjacent-pair merging)
+# --------------------------------------------------------------------------
+
+def _grow_blocks(ids: list, patterns: list, total_syms: int) -> tuple:
+    """Merge frequent adjacent symbol pairs into larger structural blocks,
+    each merge gated by the Bit Cost Decision Engine.  Returns (ids,
+    patterns)."""
+    def expand(sid):
+        return bytes([sid]) if sid < 256 else patterns[sid - 256]
+
+    for _ in range(MERGE_ROUNDS):
+        if len(patterns) >= MAX_DICT:
+            break
+        total = len(ids)
+        if total < 2:
+            break
+        pairs = Counter(zip(ids, ids[1:]))
+        lit_counts = Counter(ids)
+        lit_bits = [est_code_len(lit_counts.get(b, 0), total)
+                    for b in range(256)]
+        accepted = []
+        for (a, b), f in pairs.items():
+            if f < MIN_CANDIDATE_FREQ:
+                continue
+            merged = expand(a) + expand(b)
+            if len(merged) > MAX_BLOCK:
+                continue
+            gain = _bit_cost_gain(merged, f, lit_bits,
+                                  est_code_len(f, total))
+            if gain > 0:
+                accepted.append((gain, merged, a, b))
+        if not accepted:
+            break
+        accepted.sort(key=lambda t: (-t[0], t[1]))
+        room = MAX_DICT - len(patterns)
+        chosen = {}
+        pat_index = {p: i for i, p in enumerate(patterns)}
+        for gain, merged, a, b in accepted[:MERGES_PER_ROUND]:
+            if (a, b) in chosen:
+                continue
+            if merged in pat_index:
+                chosen[(a, b)] = 256 + pat_index[merged]
+            elif room > 0:
+                patterns.append(merged)
+                pat_index[merged] = len(patterns) - 1
+                chosen[(a, b)] = 256 + len(patterns) - 1
+                room -= 1
+        if not chosen:
+            break
+        out = []
+        push = out.append
+        i = 0
+        n = len(ids)
+        while i < n:
+            if i + 1 < n:
+                nid = chosen.get((ids[i], ids[i + 1]))
+                if nid is not None:
+                    push(nid)
+                    i += 2
+                    continue
+            push(ids[i])
+            i += 1
+        ids = out
+    return ids, patterns
+
+
+# --------------------------------------------------------------------------
+# strict final audit with actual counts
+# --------------------------------------------------------------------------
+
+def _final_audit(ids: list, patterns: list) -> tuple:
+    """Re-check every pattern against the Bit Cost Decision Engine using the
+    ACTUAL post-segmentation counts; expand losers back to literals, drop
+    unused entries, remap ids densely."""
+    counts = Counter(ids)
+    total = len(ids)
+    lit_bits = [est_code_len(counts.get(b, 0), total) for b in range(256)]
+    drop = set()
+    for idx, pat in enumerate(patterns):
+        sid = 256 + idx
+        f = counts.get(sid, 0)
+        if f == 0:
+            drop.add(sid)
+            continue
+        gain = _bit_cost_gain(pat, f, lit_bits, est_code_len(f, total))
+        if gain <= 0:
+            drop.add(sid)
+    if drop:
+        out = []
+        push = out.append
+        for sid in ids:
+            if sid in drop and sid >= 256:
+                if counts.get(sid, 0):
+                    out.extend(patterns[sid - 256])
+                continue
+            push(sid)
+        ids = out
+        counts = Counter(ids)
+    keep = [i for i in range(len(patterns)) if (256 + i) in counts]
+    remap = {256 + old: 256 + new for new, old in enumerate(keep)}
+    patterns = [patterns[i] for i in keep]
+    if remap:
+        ids = [remap.get(sid, sid) for sid in ids]
+    return ids, patterns
+
+
+# --------------------------------------------------------------------------
+# top level
+# --------------------------------------------------------------------------
+
+def compress_bytes(data: bytes, adaptive: bool = True,
+                   fmt: str = "afc1") -> bytes:
+    if not adaptive:
+        return afc.compress_bytes(data, False, fmt=fmt)
+    if len(data) == 0:
+        return emit_raw(data)
+    patterns = _select_candidates(data)
+    ids = _segment_greedy(data, patterns)
+    ids, patterns = _grow_blocks(ids, patterns, len(ids))
+    ids, patterns = _final_audit(ids, patterns)
+    lengths = huffman_lengths(Counter(ids))
+    codes = canonical_codes(lengths)
+    if NATIVE and max(L for _, L in codes.values()) <= 32:
+        from array import array
+        bitstream = _native.pack_bits(array("I", ids), codes,
+                                      max(codes) if codes else 0)
+    else:
+        bitstream = pack_ids(ids, codes)
+    blob = emit_afc1(MODE_ADAPTIVE, len(data), patterns, lengths, bitstream)
+    raw = emit_raw(data)
+    return raw if len(raw) <= len(blob) else blob
+
+
+def decompress_bytes(blob: bytes) -> bytes:
+    if NATIVE and blob[:4] == afc.MAGIC1:
+        return _native.decompress(bytes(blob))
+    return afc.decompress_bytes(blob)
+
+
+# --------------------------------------------------------------------------
+# CLI: compress / decompress / verify / benchmark
+# --------------------------------------------------------------------------
+
+def _cli():
+    import argparse
+    ap = argparse.ArgumentParser(description="AFC adaptive engine (v3)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for c in ("compress", "decompress", "verify", "benchmark"):
+        s = sub.add_parser(c)
+        if c == "benchmark":
+            s.add_argument("files", nargs="+")
+            s.add_argument("--runs", type=int, default=7)
+        else:
+            s.add_argument("infile")
+            if c != "verify":
+                s.add_argument("outfile")
+        if c in ("compress", "verify", "benchmark"):
+            s.add_argument("--baseline", action="store_true")
+        if c == "compress":
+            s.add_argument("--format", choices=("afc1",), default="afc1")
+    a = ap.parse_args()
+
+    if a.cmd == "compress":
+        data = open(a.infile, "rb").read()
+        blob = compress_bytes(data, not a.baseline, fmt=a.format)
+        open(a.outfile, "wb").write(blob)
+        print(f"{len(data)} -> {len(blob)} bytes "
+              f"({100.0 * (1 - len(blob) / max(1, len(data))):.2f}% saved)")
+    elif a.cmd == "decompress":
+        blob = open(a.infile, "rb").read()
+        out = decompress_bytes(blob)
+        open(a.outfile, "wb").write(out)
+        print(f"{len(blob)} -> {len(out)} bytes")
+    elif a.cmd == "verify":
+        data = open(a.infile, "rb").read()
+        ref = hashlib.sha256(data).hexdigest()
+        ok = True
+        for label, adaptive in (("adaptive", True), ("baseline", False)):
+            blob = compress_bytes(data, adaptive)
+            good = hashlib.sha256(decompress_bytes(blob)).hexdigest() == ref
+            ok &= good
+            print(f"{label:9s} {len(data):>9} -> {len(blob):>9}  "
+                  f"{'LOSSLESS OK' if good else 'ROUND-TRIP FAILED'}")
+        sys.exit(0 if ok else 1)
+    else:  # benchmark
+        print("file,mode,orig_bytes,afc_bytes,comp_ms_median,dec_ms_median")
+        for path in a.files:
+            data = open(path, "rb").read()
+            for label, adaptive in (("adaptive", True), ("baseline", False)):
+                if a.baseline and not adaptive:
+                    continue
+                ct, dt = [], []
+                blob = b""
+                for _ in range(a.runs):
+                    t0 = time.perf_counter()
+                    blob = compress_bytes(data, adaptive)
+                    ct.append((time.perf_counter() - t0) * 1000)
+                    t0 = time.perf_counter()
+                    out = decompress_bytes(blob)
+                    dt.append((time.perf_counter() - t0) * 1000)
+                assert out == data, f"round-trip failed on {path}"
+                ct.sort()
+                dt.sort()
+                print(f"{path},{label},{len(data)},{len(blob)},"
+                      f"{ct[len(ct) // 2]:.2f},{dt[len(dt) // 2]:.2f}")
+
+
+if __name__ == "__main__":
+    _cli()
+
+
+#!/usr/bin/env python3
+"""ctypes bridge to afc_native.cpp. Auto-loads a prebuilt afc_kernels.dll/.so,
+attempts a one-time g++ build if only the source is present, and exposes
+AVAILABLE=False (callers fall back to pure Python) when neither works."""
+import ctypes
+import os
+import subprocess
+from array import array
+
+_DIR = os.path.dirname(os.path.abspath(__file__))
+_LIB = None
+
+
+def _load():
+    global _LIB
+    for name in ("afc_kernels.dll", "afc_kernels.so", "libafc_kernels.so"):
+        p = os.path.join(_DIR, name)
+        if os.path.exists(p):
+            try:
+                _LIB = ctypes.CDLL(p)
+                return True
+            except OSError:
+                pass
+    return False
+
+
+def _build():
+    src = os.path.join(_DIR, "afc_native.cpp")
+    if not os.path.exists(src):
+        return False
+    if os.name == "nt":
+        out = os.path.join(_DIR, "afc_kernels.dll")
+        cmd = ["g++", "-O3", "-shared", "-static", src, "-o", out]
+    else:
+        out = os.path.join(_DIR, "afc_kernels.so")
+        cmd = ["g++", "-O3", "-shared", "-fPIC", src, "-o", out]
+    try:
+        r = subprocess.run(cmd, capture_output=True)
+        return r.returncode == 0 and _load()
+    except FileNotFoundError:
+        return False
+
+
+AVAILABLE = _load() or _build()
+
+if AVAILABLE:
+    _p32 = ctypes.POINTER(ctypes.c_uint32)
+    _LIB.afc_free.argtypes = [ctypes.c_void_p]
+    for fn in ("count_ngrams", "segment_ids", "afc_decompress"):
+        getattr(_LIB, fn).argtypes = [
+            ctypes.c_char_p, ctypes.c_uint32,
+        ] + ([ctypes.c_uint32] if fn == "count_ngrams" else
+             [ctypes.c_char_p, ctypes.c_uint32] if fn == "segment_ids" else []) + [
+            ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_uint32)]
+        getattr(_LIB, fn).restype = ctypes.c_int
+    _LIB.pack_bits.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
+                               ctypes.c_void_p, ctypes.c_void_p,
+                               ctypes.POINTER(ctypes.c_void_p),
+                               ctypes.POINTER(ctypes.c_uint32)]
+    _LIB.pack_bits.restype = ctypes.c_int
+
+
+def _take(outp, outn):
+    data = ctypes.string_at(outp, outn.value)
+    _LIB.afc_free(outp)
+    return data
+
+
+def ngram_candidates(data: bytes, window: int) -> dict:
+    outp, outn = ctypes.c_void_p(), ctypes.c_uint32()
+    _LIB.count_ngrams(data, len(data), window,
+                      ctypes.byref(outp), ctypes.byref(outn))
+    buf = _take(outp, outn)
+    count = int.from_bytes(buf[:4], "little")
+    pos, out = 4, {}
+    for _ in range(count):
+        ln = buf[pos]; pos += 1
+        pat = buf[pos:pos + ln]; pos += ln
+        f = int.from_bytes(buf[pos:pos + 4], "little"); pos += 4
+        out[pat] = f
+    return out
+
+
+def _pats_blob(plist):
+    b = bytearray(len(plist).to_bytes(4, "little"))
+    for p in plist:
+        b.append(len(p))
+        b += p
+    return bytes(b)
+
+
+def segment_ids(data: bytes, plist) -> array:
+    outp, outn = ctypes.c_void_p(), ctypes.c_uint32()
+    blob = _pats_blob(plist)
+    _LIB.segment_ids(data, len(data), blob, len(blob),
+                     ctypes.byref(outp), ctypes.byref(outn))
+    raw = ctypes.string_at(outp, outn.value * 4)
+    _LIB.afc_free(outp)
+    a = array("I")
+    a.frombytes(raw)
+    return a
+
+
+def pack_bits(ids: array, codes: dict, max_id: int) -> bytes:
+    carr = array("I", [0]) * 1
+    carr = array("I", bytes(4 * (max_id + 1)))
+    larr = bytearray(max_id + 1)
+    for sid, (c, L) in codes.items():
+        carr[sid] = c
+        larr[sid] = L
+    outp, outn = ctypes.c_void_p(), ctypes.c_uint32()
+    _LIB.pack_bits(ids.buffer_info()[0], len(ids),
+                   (ctypes.c_char * len(carr) * 4).from_buffer(carr) if False else carr.buffer_info()[0],
+                   bytes(larr),
+                   ctypes.byref(outp), ctypes.byref(outn))
+    return _take(outp, outn)
+
+
+def decompress(blob: bytes) -> bytes:
+    outp, outn = ctypes.c_void_p(), ctypes.c_uint32()
+    rc = _LIB.afc_decompress(blob, len(blob),
+                             ctypes.byref(outp), ctypes.byref(outn))
+    if rc != 0:
+        raise ValueError(f"not a valid AFC container (native rc={rc})")
+    return _take(outp, outn)
+
+
+#!/usr/bin/env python3
+"""
+AFC Thesis Dashboard — Flask backend.
+
+Wraps the Adaptive File Compression engine (afc2.py, which builds on afc.py)
+for a local web presentation. Both engine files must sit in the same folder
+as this app.
+
+Run:
+    pip install flask
+    python app.py
+The browser opens automatically at http://127.0.0.1:5000
+"""
+
+import io
+import threading
+import time
+import uuid
+import webbrowser
+
+from flask import Flask, abort, jsonify, render_template, request, send_file
+
+try:
+    import afc          # v1 engine: decompress + baseline Huffman control
+    import afc2 as engine   # v2 engine: multi-tier scan + bit-cost + block growth
+except ImportError:
+    raise SystemExit(
+        "ERROR: afc.py and afc2.py must be in the same folder as app.py."
+    )
+
+app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024   # hard upload cap
+DEMO_LIMIT = 8 * 1024 * 1024                           # single-file demo cap
+
+RESULTS = {}     # token -> (download_name, compressed_bytes)
+MAX_KEEP = 20    # keep only the most recent results in memory
+
+
+@app.get("/")
+def index():
+    return render_template("index.html")
+
+
+@app.post("/compress")
+def compress():
+    f = request.files.get("file")
+    if f is None or f.filename == "":
+        return jsonify(error="No file selected. Choose a file first."), 400
+
+    data = f.read()
+    if len(data) == 0:
+        return jsonify(error="That file is empty (0 bytes)."), 400
+    if len(data) > DEMO_LIMIT:
+        return jsonify(error="Demo limit is 8 MB per file. For larger runs "
+                             "use the afc2.py command-line tool."), 400
+
+    # AFC container detected -> decompress instead
+    if data[:4] == b"AFC1":
+        try:
+            t0 = time.perf_counter()
+            restored = engine.decompress_bytes(data)
+            elapsed = time.perf_counter() - t0
+        except Exception as exc:
+            return jsonify(error=f"This looks like an AFC file but could not "
+                                 f"be decompressed: {exc}"), 400
+        name = (f.filename[:-4] if f.filename.lower().endswith(".afc")
+                else f.filename + ".restored")
+        token = uuid.uuid4().hex
+        RESULTS[token] = (name, restored)
+        while len(RESULTS) > MAX_KEEP:
+            RESULTS.pop(next(iter(RESULTS)))
+        return jsonify(kind="decompress", name=f.filename,
+                       original=len(data), restored=len(restored),
+                       seconds=round(elapsed, 2), token=token,
+                       engine="C++ native" if engine.NATIVE else "pure Python")
+
+    try:
+        t0 = time.perf_counter()
+        blob = engine.compress_bytes(data, True)          # AFC v2, all tiers
+        elapsed = time.perf_counter() - t0
+        baseline = afc.compress_bytes(data, False)        # single-tier control
+        lossless = engine.decompress_bytes(blob) == data  # round-trip proof
+    except Exception as exc:                              # never crash the app
+        return jsonify(error=f"Compression failed: {exc}"), 500
+
+    token = uuid.uuid4().hex
+    RESULTS[token] = (f.filename + ".afc", blob)
+    while len(RESULTS) > MAX_KEEP:
+        RESULTS.pop(next(iter(RESULTS)))
+
+    return jsonify(
+        kind="compress",
+        engine="C++ native" if engine.NATIVE else "pure Python",
+        name=f.filename,
+        original=len(data),
+        compressed=len(blob),
+        baseline=len(baseline),
+        saved=round(100.0 * (1 - len(blob) / len(data)), 2),
+        ratio=round(len(data) / len(blob), 3),
+        vs_baseline=round(100.0 * (1 - len(blob) / len(baseline)), 1),
+        seconds=round(elapsed, 2),
+        lossless=lossless,
+        token=token,
+    )
+
+
+@app.get("/download/<token>")
+def download(token):
+    item = RESULTS.get(token)
+    if item is None:
+        abort(404)
+    name, blob = item
+    return send_file(io.BytesIO(blob), as_attachment=True,
+                     download_name=name,
+                     mimetype="application/octet-stream")
+
+
+@app.errorhandler(413)
+def too_large(_):
+    return jsonify(error="File exceeds the 64 MB upload cap."), 413
+
+
+@app.errorhandler(404)
+def not_found(_):
+    return jsonify(error="That download has expired. Compress the file again."), 404
+
+
+if __name__ == "__main__":
+    threading.Timer(1.2, lambda: webbrowser.open("http://127.0.0.1:5000")).start()
+    app.run(host="127.0.0.1", port=5000, debug=False)
