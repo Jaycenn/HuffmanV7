@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.so
 *.dll
+*.stale
 !/afc_kernels.dll
 afc_app.sqlite3*
 afc_results/

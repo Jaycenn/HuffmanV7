@@ -1,0 +1,12 @@
+{
+  "degraded": true,
+  "files": 981,
+  "ladder_rungs_balanced": 2,
+  "ladder_rungs_maximum": 3,
+  "native": true,
+  "note": "Retained as the primary evidence for the defect reported in Appendix F, not as a result. The loaded Windows library predated afc_compress_v9 and did not export the per-call profile entry point, so presets.ladder_for() correctly fell back to each preset's default shape while the engine still reported the native backend. Compared against the repaired run over the 980 shared files: 708 Fast rows and 293 Maximum rows are larger here, and 5 Balanced rows differ -- the Balanced ladder's default shape wins on almost every file, which is why the corpus-level Balanced figure survived the defect nearly intact and the defect stayed hidden. This file also counts a 131,010,734-byte member that exceeds the 100 MB per-file ceiling, which is why its GovDocs1 total reads 981 files and 30.64% saved where the published corpus reads 980 files and 37.03%.",
+  "presets": ["fast", "balanced", "maximum"],
+  "profiles": false,
+  "reason": "native library loaded without the per-call profile entry point; every ladder collapsed to its default shape",
+  "superseded_by": ["benchmarks/silesia_repaired.csv", "benchmarks/thread000_external_corpus.csv"]
+}

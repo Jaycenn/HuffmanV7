@@ -738,14 +738,22 @@ def test_branding_and_about_evidence(app):
     check("the AFC 1.3 rows are labelled as the historical audit",
           "AFC 1.3 audit" in about and "not" in about)
 
-    # [v9] Silesia is now measured on the current engine as well. The two rows
-    # are the same twelve files, so the page may only claim an improvement if
-    # the committed measurement actually shows one.
-    ext_csv = os.path.join(ROOT, "benchmarks", "external_corpus.csv")
-    with open(ext_csv, newline="", encoding="utf-8") as handle:
-        ext_rows = [r for r in _csv.DictReader(handle)]
-    sil = [r for r in ext_rows
-           if r["corpus"] == "silesia" and r["preset"] == "balanced"]
+ # [v9] Silesia and GovDocs1 are each read from the run that was verified
+    # end to end on the repaired library. benchmarks/external_corpus.csv is
+    # deliberately NOT read here: that run predates the per-call profile entry
+    # point, so its Fast and Maximum rows understate the engine, and its
+    # GovDocs1 total includes a member above the size ceiling. It is retained
+    # under a name that says so.
+    import json as _json
+    sil_csv = os.path.join(ROOT, "benchmarks", "silesia_repaired.csv")
+    gov_csv = os.path.join(ROOT, "benchmarks",
+                           "thread000_external_corpus.csv")
+    with open(sil_csv, newline="", encoding="utf-8") as handle:
+        sil_rows = [r for r in _csv.DictReader(handle)]
+    with open(gov_csv, newline="", encoding="utf-8") as handle:
+        gov_rows = [r for r in _csv.DictReader(handle)]
+    ext_rows = sil_rows + gov_rows
+    sil = [r for r in sil_rows if r["preset"] == "balanced"]
     sil_original = sum(int(r["original_bytes"]) for r in sil)
     sil_now = sum(int(r["compressed_bytes"]) for r in sil)
     check("Silesia current-engine numbers trace to CSV",
@@ -753,10 +761,21 @@ def test_branding_and_about_evidence(app):
           and format(sil_original, ",") in about
           and format(sil_now, ",") in about
           and ("%.2f%%" % (100.0 * (1.0 - sil_now / sil_original))) in about
-          and "benchmarks/external_corpus.csv" in about, len(sil))
+          and "benchmarks/silesia_repaired.csv" in about, len(sil))
     check("every external-corpus row is verified lossless",
           all(r["byte_equal"] == "True" and r["sha256_equal"] == "True"
               for r in ext_rows) and len(ext_rows) >= 48, len(ext_rows))
+    # The run behind the published figures must have searched the full ladder.
+    # This is the assertion the degraded-library audit would have failed, and
+    # it is the reason the harness writes the sidecar at all.
+    with open(os.path.join(ROOT, "benchmarks",
+                           "silesia_repaired_backend.json"),
+              encoding="utf-8") as handle:
+        sil_backend = _json.load(handle)
+    check("the published Silesia run searched the full profile ladder",
+          sil_backend.get("profiles") is True
+          and sil_backend.get("degraded") is False,
+          sil_backend.get("reason"))
 
     with open(os.path.join(ROOT, "benchmarks",
                            "afc_1_3_silesia_native_summary.csv"),
@@ -772,8 +791,7 @@ def test_branding_and_about_evidence(app):
           sil_now < old_bytes
           and format(old_bytes - sil_now, ",") in about,
           "%s vs %s" % (format(old_bytes - sil_now, ","), sil_now))
-    gov = [r for r in ext_rows
-           if r["corpus"] == "govdocs1-thread000" and r["preset"] == "balanced"]
+    gov = [r for r in gov_rows if r["preset"] == "balanced"]
     gov_original = sum(int(r["original_bytes"]) for r in gov)
     gov_now = sum(int(r["compressed_bytes"]) for r in gov)
     check("GovDocs1 numbers trace to CSV",
@@ -782,6 +800,11 @@ def test_branding_and_about_evidence(app):
           and format(gov_now, ",") in about
           and ("%.2f%%" % (100.0 * (1.0 - gov_now / gov_original))) in about,
           len(gov))
+    # The corpus published as thread 000 must be thread 000 minus exactly the
+    # members the system itself would refuse -- not a convenient subset.
+    check("no file above the size ceiling is inside the published corpus",
+          all(int(r["original_bytes"]) <= 100 * 1024 * 1024 for r in gov_rows),
+          max(int(r["original_bytes"]) for r in gov_rows))
     # The per-format figures quoted next to the table must be the measured
     # ones: this is the page's own class-qualified claim about PDF and DOCX,
     # so it may not drift from the CSV it cites.
@@ -802,11 +825,17 @@ def test_branding_and_about_evidence(app):
     check("About reports the files that did not shrink",
           str(unshrunk) in about, unshrunk)
 
-    # A partial Canterbury re-run must never be presented as Canterbury.
+    # A partial Canterbury re-run must never be presented as Canterbury. The
+    # four-file subset lives in the retained degraded run, where it is named
+    # for what it is; no published corpus may call itself "canterbury" until
+    # all eleven canonical files are measured.
+    degraded_csv = os.path.join(ROOT, "benchmarks",
+                                "external_corpus_degraded_2026-08-20.csv")
     check("no partial Canterbury subset is published as the corpus",
           not any(r["corpus"] == "canterbury" for r in ext_rows)
           and "canterbury-text-subset" in
-              open(ext_csv, encoding="utf-8").read())
+              open(degraded_csv, encoding="utf-8").read())
+
 
     import presets as _presets
     spot = [("canterbury", "alice29.txt"), ("corpus", "data.json"),
@@ -984,11 +1013,11 @@ ADVERTISED_EVIDENCE = {
     "CSV": ("v9_repo_corpus.csv", "data.csv"),
     "JSON": ("v9_repo_corpus.csv", "data.json"),
     "SQL": ("v9_repo_corpus.csv", "universe.sql"),
-    "XML": ("external_corpus.csv", "xml"),
+    "XML": ("silesia_repaired.csv", "xml"),
     "HTML": ("v9_repo_corpus.csv", "cp.html"),
     "LOG": ("v9_repo_corpus.csv", "server.log"),
     "Source code": ("v9_repo_corpus.csv", "code_python.py.txt"),
-    "PDF": ("external_corpus.csv", "reymont"),
+    "PDF": ("silesia_repaired.csv", "reymont"),
 }
 
 
