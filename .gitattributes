@@ -1,0 +1,25 @@
+# Benchmark corpora are measurement data, not source text.
+#
+# Without this file Git normalises every "text" file to LF on commit and
+# converts it back to CRLF on a Windows checkout. For source that is harmless.
+# For a compression corpus it is not: the bytes ARE the experiment, and a file
+# that gains one byte per line on one platform is a different input there.
+#
+# This was not hypothetical. benchmarks/canterbury/alice29.txt is natively
+# CRLF; normalisation stored it as LF, so the repository held 148,481 bytes
+# where the Canterbury corpus defines 152,089. The other four files in that
+# directory are natively LF and were stored correctly, which is why the
+# discrepancy went unnoticed -- it affected exactly one file in five.
+#
+# Marking the corpus directories -text stops all conversion in both
+# directions: the bytes on disk are the bytes in the object database, on every
+# platform. Do not remove these lines without re-verifying every corpus file
+# against benchmarks/corpus_manifest.json.
+
+benchmarks/canterbury/**            -text
+benchmarks/canterbury_official/**   -text
+benchmarks/corpus/**                -text
+benchmarks/documents/**             -text
+benchmarks/govdocs1/**              -text
+benchmarks/large/**                 -text
+benchmarks/silesia/**               -text
