@@ -22,6 +22,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 MANIFEST_PATH = os.path.join(ROOT, "benchmarks", "corpus_manifest.json")
 
+# The pinning ceiling is the size the application accepts, so a corpus can never
+# contain a file the system under study would refuse.
+try:
+    import sys
+    sys.path.insert(0, ROOT)
+    from config import MAX_FILE_SIZE as MAX_PINNED_BYTES
+except Exception:                       # config is optional for this tool
+    MAX_PINNED_BYTES = 100 * 1024 * 1024
+
 
 def load_manifest():
     with open(MANIFEST_PATH, encoding="utf-8") as stream:
@@ -265,14 +274,96 @@ def download_govdocs1(spec):
         print("downloaded govdocs1/%s (%d files)" % (kind, len(wanted)))
 
 
+def pin_subset(manifest, corpus, subset, archive, max_bytes):
+    """Download every eligible member of an archive and pin it in the manifest.
+
+    The other download paths verify against hashes the manifest already holds.
+    A new subset has none, so this records them: it reads the archive's central
+    directory, fetches each member once, writes it, and accumulates the size and
+    SHA-256 the verifying path will check against later.
+
+    Selection follows the rule the manifest already states -- every member of the
+    archive except directories, empty entries, and anything larger than
+    config.MAX_FILE_SIZE, which the system does not accept. Nothing is chosen by
+    file type, so the subset is whatever the archive contains.
+    """
+    spec = manifest[corpus]
+    target = os.path.join(ROOT, spec["directory"], subset)
+    os.makedirs(target, exist_ok=True)
+
+    entries = _zip_central_directory(archive)
+    eligible, skipped = {}, []
+    for name, entry in sorted(entries.items()):
+        if not name or name.endswith("/") or entry["uncompressed"] <= 0:
+            continue
+        if entry["uncompressed"] > max_bytes:
+            skipped.append((name, entry["uncompressed"]))
+            continue
+        eligible[name] = entry
+
+    total = sum(e["uncompressed"] for e in eligible.values())
+    print("%s/%s: %d eligible members, %s bytes"
+          % (corpus, subset, len(eligible), format(total, ",")))
+    for name, size in skipped:
+        print("  excluded %s (%s bytes, over the %s byte ceiling)"
+              % (name, format(size, ","), format(max_bytes, ",")))
+
+    files = {}
+    done = 0
+    started = time.time()
+    for name, entry in sorted(eligible.items()):
+        path = os.path.join(target, name)
+        record = {"bytes": entry["uncompressed"]}
+        if os.path.isfile(path) and os.path.getsize(path) == record["bytes"]:
+            record["sha256"] = hashes(path)[1]          # already fetched
+        else:
+            data = _zip_member(archive, entry)
+            if len(data) != record["bytes"]:
+                raise ValueError("%s: got %d bytes, central directory says %d"
+                                 % (name, len(data), record["bytes"]))
+            record["sha256"] = hashlib.sha256(data).hexdigest()
+            with open(path + ".part", "wb") as stream:
+                stream.write(data)
+            os.replace(path + ".part", path)
+        files[name] = record
+        done += 1
+        if done % 25 == 0 or done == len(eligible):
+            print("  %d/%d  %.0fs elapsed"
+                  % (done, len(eligible), time.time() - started), flush=True)
+
+    spec.setdefault("subsets", {})[subset] = {
+        "archive": archive,
+        "count": len(files),
+        "bytes": total,
+        "files": files,
+    }
+    with open(MANIFEST_PATH, "w", encoding="utf-8") as stream:
+        json.dump(manifest, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+    print("pinned %d files in %s" % (len(files), MANIFEST_PATH))
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("verify", "download"))
+    parser.add_argument("action", choices=("verify", "download", "pin"))
     parser.add_argument("corpora", nargs="*",
                         choices=("canterbury", "silesia", "govdocs1"))
+    parser.add_argument("--subset", help="pin: name of the subset to record")
+    parser.add_argument("--archive", help="pin: URL of the archive to read")
+    parser.add_argument("--max-bytes", type=int, default=MAX_PINNED_BYTES,
+                        help="pin: skip members larger than this "
+                             "(default: config.MAX_FILE_SIZE)")
     args = parser.parse_args()
     names = args.corpora or ["canterbury", "silesia", "govdocs1"]
     manifest = load_manifest()
+
+    if args.action == "pin":
+        if len(names) != 1 or not args.subset or not args.archive:
+            parser.error("pin needs one corpus, --subset and --archive")
+        pin_subset(manifest, names[0], args.subset, args.archive,
+                   args.max_bytes)
+        return 0 if verify([names[0]]) else 1
+
     if args.action == "download":
         for name in names:
             if name == "canterbury":
