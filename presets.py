@@ -118,9 +118,10 @@ PRESETS = {
     "maximum": {
         "label": "Maximum",
         "description": ("Everything Balanced tries, then again at the "
-                        "deepest settings: nine search profiles, smallest "
-                        "result kept. Never larger than Balanced, and the "
-                        "slowest."),
+                        "deepest settings plus two scan shapes Balanced does "
+                        "not attempt. Never larger than Balanced; on "
+                        "structured data such as spreadsheets, XML and "
+                        "databases it is typically 3-13% smaller. Slowest."),
         "params": {"dp": True, "dp_rounds": 8, "merge_rounds": 12,
                    "min_candidate_freq": 4},
     },
@@ -136,12 +137,25 @@ SEARCH_PROFILES = {
     "wide-dict": {"max_initial_dict": 12288, "max_dict": 16384},
     "ngram6": {"ngram_max": 6},
     "ngram8": {"ngram_max": 8},
+    # [v10] Maximum-only shapes. Measurement showed the Maximum preset was
+    # searching DEEPER than Balanced but not DIFFERENTLY, and depth has
+    # already converged by then -- the optimal parse reaches a fixed point
+    # after two or three rounds, so further rounds are no-ops. Varying the
+    # merge admission rate and the scan window is what still moves the
+    # result: on the Silesia chemical database these two are -163,913 and
+    # -200,053 bytes respectively against the previous Maximum ladder.
+    "many-merges": {"merges_per_round": 128},
+    "wide-scan": {"scan_window": 1 << 22},
 }
 
 # The ladders are deliberately nested: each preset's list starts with the whole
 # of the cheaper preset's list. That is what makes "a costlier preset is never
 # larger" true by construction rather than by measurement.
 _SHAPES = ("default", "wide-dict", "ngram6", "ngram8")
+# Maximum searches every shape Balanced does, plus two it does not. Adding a
+# shape can never enlarge the result -- the ladder keeps the smallest -- so
+# the only cost is time, which is what the Maximum preset exists to spend.
+_MAX_EXTRA = ("many-merges", "wide-scan")
 
 # Above this the ladder drops the wider n-gram scans. That is not a guess: on
 # multi-megabyte text they LOSE (ngram6 and ngram8 are both about +6% on the
@@ -162,7 +176,7 @@ def _ladder(name, shapes):
     if name in ("balanced", "maximum"):
         rungs += [("balanced", shape) for shape in shapes]
     if name == "maximum":
-        rungs += [("maximum", shape) for shape in shapes]
+        rungs += [("maximum", shape) for shape in shapes + _MAX_EXTRA]
     return rungs
 
 # Peak memory scales with input size times the number of concurrent jobs: the

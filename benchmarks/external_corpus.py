@@ -121,7 +121,46 @@ def main():
             sys.stderr.write("  %s %s %s\n" % (corpus, path, preset))
         return 1
     sys.stderr.write("all round trips byte-exact and SHA-256 verified\n")
+    _summarize(args.out, presets_wanted)
     return 0
+
+
+def _summarize(path, presets_wanted):
+    """Report how often a preset wins, not only the corpus total.
+
+    A corpus total is dominated by whichever files are largest, so a preset
+    that helps substantially on many files can look inert in the aggregate.
+    Reporting the per-file win rate and the largest individual gains is the
+    honest way to describe what a preset actually does for a user, whose file
+    is one file rather than a corpus."""
+    import csv as _csv
+    with open(path, newline="", encoding="utf-8") as handle:
+        rows = list(_csv.DictReader(handle))
+    by = {}
+    for r in rows:
+        by.setdefault(r["preset"], {})[(r["corpus"], r["file"])] = \
+            (int(r["original_bytes"]), int(r["compressed_bytes"]))
+    order = [p for p in ("fast", "balanced", "maximum") if p in by]
+    out = sys.stderr
+    for lower, higher in zip(order, order[1:]):
+        a, b = by[lower], by[higher]
+        keys = [k for k in a if k in b]
+        wins = [(a[k][1] - b[k][1], k) for k in keys if b[k][1] < a[k][1]]
+        ties = sum(1 for k in keys if b[k][1] == a[k][1])
+        worse = sum(1 for k in keys if b[k][1] > a[k][1])
+        total = sum(a[k][1] for k in keys)
+        saved = sum(d for d, _ in wins)
+        out.write("\n%s vs %s\n" % (higher.upper(), lower))
+        out.write("  smaller on %d of %d files (%.1f%%), identical on %d, "
+                  "larger on %d\n" % (len(wins), len(keys),
+                                      100.0 * len(wins) / max(1, len(keys)),
+                                      ties, worse))
+        out.write("  bytes saved: %s (%.2f%% of %s output)\n"
+                  % (format(saved, ","), 100.0 * saved / max(1, total), lower))
+        for d, k in sorted(wins, reverse=True)[:5]:
+            pct = 100.0 * d / a[k][1]
+            out.write("    %-11s %-16s %10s bytes  %5.2f%%\n"
+                      % (k[0], k[1][:16], format(d, ","), pct))
 
 
 if __name__ == "__main__":

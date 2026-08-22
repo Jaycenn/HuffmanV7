@@ -866,7 +866,7 @@ PINNED_CONTAINERS = {
     ("code", "maximum"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473, 848),
     ("binary", "fast"): ("a0a19f3f609b9290471181001a02e5d2", 5436, 5436),
     ("binary", "balanced"): ("92529110a69d47ab931c5512af5356c8", 2962, 3344),
-    ("binary", "maximum"): ("33725610bbf986c00b2e60335f7e6835", 2364, 2801),
+    ("binary", "maximum"): ("d9ffd867fd3c012e032426dd2c0bf9f6", 2358, 2801),
     ("incompressible", "fast"): ("62e57bf89140815e79ea50d554bca7da", 3826, 3826),
     ("incompressible", "balanced"): ("b2625c816e67c00b8c207916ccfc9791", 2885, 3197),
     ("incompressible", "maximum"): ("b2625c816e67c00b8c207916ccfc9791", 2885, 3197),
