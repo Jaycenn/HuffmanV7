@@ -1,0 +1,15 @@
+corpus,file,orig_bytes,full_bytes,no-tier3_bytes,no-tier23_bytes,no-gate_bytes
+corpus,bytes256.bin,1024,278,278,1031,278
+corpus,code_python.py.txt,42377,17509,17651,19351,22031
+corpus,data.csv,184059,49122,49122,52062,50655
+corpus,data.json,152561,17505,19083,20924,23826
+corpus,prose_en.txt,67865,20998,21359,27036,27627
+corpus,random.bin,65536,65544,65544,65544,65544
+corpus,records.bin,131072,51526,49940,45947,49371
+corpus,server.log,427437,37506,37043,77077,53191
+corpus,universe.sql,4099,2049,2125,2321,2787
+canterbury,alice29.txt,152089,61692,62968,70774,73238
+canterbury,asyoulik.txt,129301,55323,55908,63085,65915
+canterbury,cp.html,25248,11200,11208,12080,15760
+canterbury,fields.c,11581,5380,5280,5770,7856
+canterbury,grammar.lsp,3815,1959,1879,1880,2988
