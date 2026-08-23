@@ -79,6 +79,66 @@ DATABASE_PATH = os.environ.get(
     "AFC_DB_PATH",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "afc_app.sqlite3"))
 
+
+# --------------------------------------------------------------------------
+# Supabase (deployed persistence).  See Appendix G: the logical model is the
+# same as the SQLite one; only the physical types differ.
+#
+# Credentials are read from the environment, and from a local .env file if one
+# exists.  .env is git-ignored and must never be committed -- the service-role
+# key bypasses row-level security.
+# --------------------------------------------------------------------------
+
+def _load_dotenv():
+    """Populate os.environ from .env without adding a hard dependency.
+
+    python-dotenv is used when installed; otherwise a minimal parser handles
+    the KEY=value lines this project needs.  Existing environment variables
+    always win, so a shell export overrides the file.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(path, override=False)
+        return
+    except ImportError:
+        pass
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8-sig") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                os.environ.setdefault(
+                    key.strip(), value.strip().strip('"').strip("'"))
+    except OSError:
+        pass
+
+
+_load_dotenv()
+
+# "sqlite" (default) or "supabase".  The test suite always runs on sqlite.
+DB_BACKEND = os.environ.get("AFC_DB_BACKEND", "sqlite").strip().lower()
+
+# "local" (default) or "supabase".
+STORAGE_BACKEND = os.environ.get("AFC_STORAGE_BACKEND", "local").strip().lower()
+
+PG_DSN = os.environ.get("AFC_PG_DSN", "")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_BUCKET = os.environ.get("SUPABASE_BUCKET", "artifacts")
+
+
+def using_postgres():
+    return DB_BACKEND in ("supabase", "postgres", "postgresql")
+
+
+def using_supabase_storage():
+    return STORAGE_BACKEND in ("supabase", "storage")
+
 # Installation-specific Flask signing key.  AFC_SECRET_KEY may supply the key
 # directly; otherwise app.py creates this private file once and reuses it so
 # sessions survive a normal restart without sharing a public default secret.
