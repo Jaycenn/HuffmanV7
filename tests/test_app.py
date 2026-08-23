@@ -825,13 +825,59 @@ def test_branding_and_about_evidence(app):
     check("About reports the files that did not shrink",
           str(unshrunk) in about, unshrunk)
 
-    # A partial Canterbury re-run must never be presented as Canterbury. The
-    # four-file subset lives in the retained degraded run, where it is named
-    # for what it is; no published corpus may call itself "canterbury" until
-    # all eleven canonical files are measured.
+    # [v10] Canterbury is measured on the current engine over all eleven
+    # canonical files. The rule that produced the earlier four-file subset is
+    # now enforced positively: a corpus published as "canterbury" must carry
+    # the whole corpus, because a text-only subset would flatter the average
+    # by dropping the binary members that pull it down.
+    cant_csv = os.path.join(ROOT, "benchmarks", "canterbury_full.csv")
+    with open(cant_csv, newline="", encoding="utf-8") as handle:
+        cant_rows = [r for r in _csv.DictReader(handle)]
+    with open(os.path.join(ROOT, "benchmarks", "corpus_manifest.json"),
+              encoding="utf-8") as handle:
+        canonical = set(_json.load(handle)["canterbury"]["files"])
+    cant = [r for r in cant_rows if r["preset"] == "balanced"]
+    check("the published Canterbury corpus is the whole corpus",
+          len(cant) == 11 and {r["file"] for r in cant} == canonical,
+          sorted(canonical - {r["file"] for r in cant}))
+    cant_original = sum(int(r["original_bytes"]) for r in cant)
+    cant_now = sum(int(r["compressed_bytes"]) for r in cant)
+    check("Canterbury current-engine numbers trace to CSV",
+          format(cant_original, ",") in about
+          and format(cant_now, ",") in about
+          and ("%.2f%%" % (100.0 * (1.0 - cant_now / cant_original))) in about
+          and "benchmarks/canterbury_full.csv" in about, cant_now)
+    check("every Canterbury row is verified lossless",
+          all(r["byte_equal"] == "True" and r["sha256_equal"] == "True"
+              for r in cant_rows) and len(cant_rows) == 33, len(cant_rows))
+    with open(os.path.join(ROOT, "benchmarks",
+                           "canterbury_full_backend.json"),
+              encoding="utf-8") as handle:
+        cant_backend = _json.load(handle)
+    check("the published Canterbury run searched the full profile ladder",
+          cant_backend.get("profiles") is True
+          and cant_backend.get("degraded") is False,
+          cant_backend.get("reason"))
+    with open(os.path.join(ROOT, "benchmarks",
+                           "afc_1_3_canterbury_native_summary.csv"),
+              newline="", encoding="utf-8") as handle:
+        old_cant = [r for r in _csv.DictReader(handle)
+                    if r["preset"] == "balanced"]
+    old_cant_original = sum(int(r["original_bytes"]) for r in old_cant)
+    old_cant_bytes = sum(int(r["compressed_bytes"]) for r in old_cant)
+    check("the two Canterbury rows really are the same corpus",
+          old_cant_original == cant_original,
+          "%d != %d" % (old_cant_original, cant_original))
+    check("the claimed Canterbury improvement is the measured one",
+          cant_now < old_cant_bytes
+          and format(old_cant_bytes - cant_now, ",") in about,
+          format(old_cant_bytes - cant_now, ","))
+
+    # The rule still holds for the superseded run: the four-file subset it
+    # contains is named for what it is and was never published as Canterbury.
     degraded_csv = os.path.join(ROOT, "benchmarks",
                                 "external_corpus_degraded_2026-08-20.csv")
-    check("no partial Canterbury subset is published as the corpus",
+    check("the superseded partial subset is still named as a subset",
           not any(r["corpus"] == "canterbury" for r in ext_rows)
           and "canterbury-text-subset" in
               open(degraded_csv, encoding="utf-8").read())
