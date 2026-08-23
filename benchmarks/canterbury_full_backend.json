@@ -1,0 +1,19 @@
+{
+  "degraded": false,
+  "elapsed_s": 3.7,
+  "files": 11,
+  "ladder_rungs_balanced": 6,
+  "ladder_rungs_maximum": 12,
+  "library": "C:\\Users\\Justin Errol Priniel\\Documents\\4th Year - 1st Sem\\CS Study\\System\\HuffmanV7\\afc_kernels.dll",
+  "native": true,
+  "platform": "Windows-11-10.0.26200-SP0",
+  "presets": [
+    "fast",
+    "balanced",
+    "maximum"
+  ],
+  "profiles": true,
+  "python": "3.12.10",
+  "reason": "native library loaded from C:\\Users\\Justin Errol Priniel\\Documents\\4th Year - 1st Sem\\CS Study\\System\\HuffmanV7\\afc_kernels.dll",
+  "tunable": true
+}
