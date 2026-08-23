@@ -11,20 +11,28 @@ This runs the same corpus under four builds and reports the difference:
     full        the complete system
     no-tier3    Tier 3 (whole-word structural tokens) disabled
     no-tier23   Tiers 2 and 3 disabled -- byte-level Huffman only
-    no-gate     the Bit Cost admission rule replaced by an unconditional
-                frequency threshold, i.e. every candidate at or above
-                min_candidate_freq is admitted regardless of whether it pays
-                for its own dictionary entry
+    no-gate     the Bit Cost Decision Engine replaced by an unconditional
+                frequency threshold.  _bit_cost_gain is patched module-wide,
+                so this disables the cost-based profitability decision at
+                all three sites that call it: candidate admission
+                (afc2.py:210), merge scoring during structural block growth
+                (afc2.py:336), and the final audit that drops unprofitable
+                entries (afc2.py:402).  It is not an admission-only ablation.
 
 Reading the result:
 
     Tier 3 earns    no-tier3  - full
     Tier 2 earns    no-tier23 - no-tier3
-    the gate earns  no-gate   - full
+    the Engine earns  no-gate - full
 
-A NEGATIVE figure for the gate would mean admitting everything produced smaller
-output, which would falsify the claim the gate exists to support.  That is the
-point of measuring it rather than asserting it.
+These are measured against different baselines and answer different
+counterfactuals, so they are reported independently and are never summed.
+Tiers 2 and 3 together (no-tier23 - full) is the complete difference between
+the full system and byte-level Huffman coding alone.
+
+A NEGATIVE figure for the Decision Engine would mean admitting everything
+produced smaller output, which would falsify the claim the Engine exists to
+support.  That is the point of measuring it rather than asserting it.
 
     python benchmarks/tier_ablation.py
     python benchmarks/tier_ablation.py --corpus text=benchmarks/canterbury \
@@ -37,6 +45,13 @@ builds in Python would compare two different implementations.  Python is slower
 but it is the same code for all four columns, which is what makes the
 difference attributable.  Sizes are identical to the native path -- the test
 suite asserts that -- so only the wall clock differs.
+
+CONFIGURATION.  All four builds call afc2.compress_bytes with the engine's
+default EngineOptions.  They do NOT run a preset search ladder, so the "full"
+column is the default-options build and is NOT the Balanced-preset figure
+reported for the same files elsewhere in the study.  That is deliberate: the
+four columns must differ only in the ablated component.  Quote the differences
+between columns, not the "full" total, as a preset result.
 
 Every configuration round-trips and is SHA-256 verified before it is counted.
 """
@@ -79,10 +94,14 @@ def _no_ngrams(data, min_freq, options=None):
 
 
 def _always_admit(pat, freq, lit_bits, sym_bits):
-    """Gate disabled: admit every candidate the frequency floor produced.
+    """Decision Engine disabled: every cost test returns a constant gain.
 
-    _select_candidates keeps a candidate when the returned gain is > 0, so a
-    constant positive value makes admission depend on min_candidate_freq alone.
+    This replaces afc2._bit_cost_gain module-wide, so all three call sites see
+    it.  _select_candidates keeps a candidate when the gain is > 0, so
+    admission depends on min_candidate_freq alone; merge scoring during
+    structural block growth loses its cost ranking; and the final audit, which
+    drops an entry when the gain is <= 0, can no longer drop anything.  The
+    build therefore disables the Decision Engine entirely, not admission alone.
     """
     return 1
 
@@ -92,7 +111,7 @@ CONFIGS = [
     ("no-tier3", "Tier 3 disabled", {"_tier3_words": _no_words}),
     ("no-tier23", "Tiers 2 and 3 disabled",
      {"_tier3_words": _no_words, "_tier2_ngrams": _no_ngrams}),
-    ("no-gate", "Bit Cost rule replaced by a frequency threshold",
+    ("no-gate", "Bit Cost Decision Engine replaced by a frequency threshold",
      {"_bit_cost_gain": _always_admit}),
 ]
 
@@ -130,7 +149,8 @@ def main():
 
     total_files = sum(len(f) for _n, f in jobs)
     print("tier and gate ablation")
-    print("  backend      pure Python (identical sizes to the native path)")
+    print("  backend      pure Python, engine default options "
+          "(no preset ladder)")
     print("  files        %d, %d bytes to %d bytes"
           % (total_files, args.min_bytes, args.max_bytes))
     print("  builds       %s" % ", ".join(n for n, _d, _p in CONFIGS))
@@ -186,14 +206,15 @@ def main():
           % (format(-t3, ","), t3p))
     print("  Tier 2 (n-grams)          %+12s   %6.2f%%" % (format(-t2, ","), t2p))
     print("  Tiers 2 and 3 together    %+12s   %6.2f%%" % (format(-both, ","), bothp))
-    print("  Bit Cost admission rule   %+12s   %6.2f%%" % (format(-gate, ","), gatep))
+    print("  Bit Cost Decision Engine  %+12s   %6.2f%%" % (format(-gate, ","), gatep))
     print()
     if gate > 0:
-        print("  The gate pays for itself: admitting every candidate above the")
-        print("  frequency floor produced %s more bytes." % format(gate, ","))
+        print("  The Decision Engine pays for itself: admitting every candidate")
+        print("  above the frequency floor produced %s more bytes."
+              % format(gate, ","))
     else:
-        print("  NOTE: the gate did NOT pay for itself on this corpus "
-              "(%s bytes)." % format(gate, ","))
+        print("  NOTE: the Decision Engine did NOT pay for itself on this "
+              "corpus (%s bytes)." % format(gate, ","))
         print("  That is a real result and belongs in the write-up as one.")
     print()
     print("  %d files, %d configurations, all byte-exact and SHA-256 verified"
