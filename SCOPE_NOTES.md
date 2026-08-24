@@ -69,46 +69,60 @@ silently-lossy archive; `afcpak.unpack()` re-checks each member's stored digest
 on extraction. The raw-storage fallback in the engine is untouched, so
 incompressible input still cannot inflate beyond the container header.
 
-## 4. Why a local SQLite file still counts as "local, non-cloud"
+## 4. Where persistence lives, and what the Delimitations say about it
 
-The thesis Delimitations exclude cloud storage and remote services. A local
-SQLite database does not cross that line, for reasons the team can state
-plainly to an adviser:
+This section used to argue that a local SQLite file satisfied a "local,
+non-cloud" delimitation. That is no longer the study's position and the
+manuscript no longer claims it.
 
-1. **It is a file on the same machine**, sitting next to `app.py`
-   (`afc_app.sqlite3`). It is not a server, not a service, and not a network
-   endpoint. SQLite is an embedded library — there is no database process to
-   connect to, no port, no credentials.
-2. **No data leaves the computer.** The app binds to `127.0.0.1`, has no
-   outbound calls, no telemetry, no analytics beacons, and (since Part 1) not
-   even a CDN request — Tailwind is compiled to `static/css/tailwind.css` and
-   served locally, so the dashboard works with the network cable unplugged.
-3. **The data stays inspectable and removable on the same machine.** Account
-   metadata lives in `afc_app.sqlite3`; compressed results live in the private
-   `RESULT_STORAGE_DIR`. There is no remote copy to also delete.
-4. **The alternative is worse for the study.** Keeping accounts, Files history,
-   reports, and completed compressed results in memory would make them vanish
-   between sessions; writing them to a cloud service is what the delimitation
-   actually excludes.
+**The deployed system persists to Supabase.** Account credentials, processing
+history, the audit log and completed compressed results are held in managed
+PostgreSQL and object storage. The Delimitations say so in those words, the
+Instruments section names the service, and the Ethical Consideration discloses
+it to participants as a third-party processor before consent is given. An
+uploaded file is transmitted to the application server in order to be
+processed, and the paper states that plainly rather than describing the system
+as local-only.
 
-In short: the delimitation rules out *cloud* persistence, not *persistence*.
-A single-file embedded database is the most local persistence available.
+**SQLite remains the development store.** Appendix C says so, and the code
+keeps both: `AFC_DB_BACKEND` selects `sqlite` or `supabase`,
+`AFC_STORAGE_BACKEND` selects `local` or `supabase`, and both default to the
+local option. The 541-check automated suite always runs against SQLite, so it
+needs no network and no credentials. Appendix G documents the type mapping;
+the logical model is identical and only the physical types differ.
 
-**Only produced compressed files are persisted.** Completed `.afc` and
-`.afcpak` results are written beneath `config.RESULT_STORAGE_DIR`, which is
-outside `static/`, using opaque server-generated identifiers. The database
-links each blob to its owner and processing-history row. Uploaded originals,
-decompressed originals, and extracted members remain in the owner-bound
-in-memory `app.RESULTS` cache and disappear when the process stops.
+**The engine itself still makes no network call.** This is the distinction
+worth keeping from the old text. Compression and decompression happen entirely
+inside the application server process — the multi-tier scan, the Bit Cost
+Decision Engine and the container writers have no database or network
+dependency and cannot reach Supabase. What moved to a hosted service is the
+persistence layer around the engine, not the engine.
+
+**Only produced compressed output is persisted, on either backend.** Completed
+`.afc` and `.afcpak` results are stored under opaque server-generated
+identifiers: a file outside `static/` when the local backend is selected, an
+object in the private bucket when Supabase is. Uploaded originals, decompressed
+originals and extracted members are never written to either — they live in the
+owner-bound in-memory `app.RESULTS` cache and disappear when the process stops.
+That property is unchanged by the move, and it is the stronger one to state.
+
+**What the move costs, stated rather than glossed.** There is now a remote copy
+to delete as well as a local one, and account details and stored results sit on
+infrastructure the researchers do not operate. The Ethical Consideration tells
+participants this rather than leaving them to infer it.
 
 Access is authenticated and owner-scoped; administrators may also retrieve a
 stored result. A different user receives 404 so the row's existence is not
 disclosed. SHA-256 and byte length are checked again before every durable
-download. `RESULT_RETENTION_DAYS=0` keeps results until owner deletion; a
-positive value enables age cleanup. `MAX_STORED_BYTES_PER_USER` defaults to
-2 GB and refuses a new result instead of evicting an older one. The Files page
-provides Download and Delete controls, and deleting an account removes its
-stored blobs before the database row is removed.
+download, on both backends — the verification is the same code either way, and
+a stored object that does not match its recorded digest and length is refused.
+Row-level security is enabled on all six PostgreSQL tables with no policies, so
+the only route to the data is through the application and the auto-generated
+REST API reaches nothing. `RESULT_RETENTION_DAYS=0` keeps results until owner
+deletion; a positive value enables age cleanup. `MAX_STORED_BYTES_PER_USER`
+defaults to 2 GB and refuses a new result instead of evicting an older one. The
+Files page provides Download and Delete controls, and deleting an account
+removes its stored blobs before the database row is removed.
 
 ## 5. Password hashing is not file encryption
 

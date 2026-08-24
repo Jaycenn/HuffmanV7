@@ -1,7 +1,16 @@
--- schema.sql — AFC web app, Part 1.
+-- schema.sql — AFC web app, SQLite development store.
 --
--- Local SQLite only.  See SCOPE_NOTES.md for why a local SQLite file still
--- satisfies the thesis "local / non-cloud" delimitation.
+-- This is the LOCAL development and test schema.  The deployed system uses
+-- Supabase managed PostgreSQL; schema_pg.sql is its equivalent, and Appendix G
+-- documents the mapping between them.  The logical model is identical in both
+-- and only the physical types differ.  AFC_DB_BACKEND selects which one the
+-- application uses; it defaults to sqlite, and the automated test suite always
+-- runs against this file so that it needs no network and no credentials.
+--
+-- NOTE: this file is not the whole SQLite schema.  db.py adds eight further
+-- compression_history columns at startup through its _MIGRATIONS list, so a
+-- database created from this file alone is eight columns short until db.py
+-- has opened it once.
 --
 -- Apply with:  python -c "import db; db.init_db()"
 -- or reset with:  python -c "import db; db.reset_db()"   (DESTRUCTIVE)

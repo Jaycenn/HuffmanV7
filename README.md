@@ -65,7 +65,11 @@ python app.py                     # opens http://127.0.0.1:5000
 ```
 
 The SQLite database (`afc_app.sqlite3`) is created automatically next to
-`app.py` on first run, along with the seeded admin.
+`app.py` on first run, along with the seeded admin. That is the default and is
+what the test suite uses. To run against Supabase instead, copy `.env.example`
+to `.env`, fill it in, and set `AFC_DB_BACKEND=supabase` and
+`AFC_STORAGE_BACKEND=supabase` — both together, or metadata and files end up in
+different places.
 
 ### Default admin credentials
 
@@ -279,7 +283,7 @@ old AFC1/AFC2 decoding.
 The 1.3 interface defaults to a brighter high-contrast canvas, clearer cards,
 larger upload targets and visible keyboard focus. Dark mode remains available
 from the sidebar. The preference lives in `localStorage` only and is never sent
-to the server, consistent with the local/non-cloud delimitation.
+to the server.
 
 
 ## File size limits
@@ -310,12 +314,28 @@ python tools/size_policy_bench.py --quick # size/memory smoke test
 
 ## Privacy
 
-Everything is local: the app binds to `127.0.0.1` and makes no outbound
-requests. Account/history metadata stays in SQLite. Only produced compressed
-`.afc` and `.afcpak` artifacts are persisted under the private
-`RESULT_STORAGE_DIR`, with opaque disk names, owner checks, a configured quota,
-and SHA-256 verification before every download. Uploaded originals,
-decompressed originals, and extracted archive members stay in memory only.
+**The compression engine makes no network call.** Compression and
+decompression happen entirely inside the application server process; the
+multi-tier scan, the Bit Cost Decision Engine and the container writers have no
+database or network dependency.
+
+**Persistence depends on the configured backend.** By default — and always for
+the test suite — account and history metadata live in local SQLite and produced
+artifacts under the private `RESULT_STORAGE_DIR`. The deployed system sets
+`AFC_DB_BACKEND=supabase` and `AFC_STORAGE_BACKEND=supabase`, which puts the
+same data in Supabase managed PostgreSQL and a private object-storage bucket.
+The thesis Delimitations and Ethical Consideration state this and disclose
+Supabase to participants as a third-party processor; see `SCOPE_NOTES.md` §4.
+
+**Only produced compressed output is ever persisted**, on either backend, under
+opaque server-generated identifiers, with owner checks, a configured quota, and
+SHA-256 and byte-length verification before every download — the same
+verification code either way. Uploaded originals, decompressed originals and
+extracted archive members are never written to either backend: they stay in
+memory and disappear when the process stops.
+
+On PostgreSQL, row-level security is enabled on all six tables with no
+policies, so the only route to the data is through this application.
 
 ---
 
@@ -357,7 +377,9 @@ afc2.NATIVE   # True when the C++ core is active
 | `AFC_WebApp.html` | standalone browser app (WASM core if present, JS otherwise) |
 | `app.py` | Flask app factory + page/API routes (map at top of file) |
 | `config.py` | all tunables incl. size policy — the only place limits live |
-| `db.py`, `schema.sql` | local SQLite: users, history, durable-artifact ownership, audit, login attempts, and the session epoch that invalidates cookies after a destructive reset |
+| `db.py`, `schema.sql` | data access, and the SQLite development schema: users, history, durable-artifact ownership, audit, login attempts, and the session epoch that invalidates cookies after a destructive reset |
+| `db_pg.py`, `schema_pg.sql` | PostgreSQL backend and its schema, selected by `AFC_DB_BACKEND`; Appendix G documents the type mapping |
+| `artifact_store.py`, `storage_supabase.py` | durable result storage, on local disk or in a private Supabase bucket, selected by `AFC_STORAGE_BACKEND` |
 | `auth.py`, `admin.py` | auth blueprint (login/roles) and admin blueprint |
 | `afcpak.py` | `.afcpak` archive container (manifest + AFC payloads, no DEFLATE) |
 | `templates/`, `static/` | responsive dashboard; `compress.html`/`decompress.html` are the two separate workflow pages, with `compress.js`/`decompress.js` driving them and `queue.js` the multi-file panes |
