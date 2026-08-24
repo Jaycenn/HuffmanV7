@@ -532,6 +532,46 @@ def set_artifact_integrity(history_id, status):
     conn.commit()
 
 
+def all_stored_artifacts(connection=None):
+    """Every artifact row, for the startup reconciliation sweep.
+
+    Takes an explicit connection because the sweep runs during create_app(),
+    outside any request context, where get_db() has no flask.g to cache on.
+    """
+    conn = connection or get_db()
+    return conn.execute(
+        "SELECT history_id, storage_key, user_id FROM stored_artifacts"
+        " ORDER BY history_id").fetchall()
+
+
+def expired_artifacts(days, connection=None):
+    """Artifacts older than the retention window.
+
+    SQLite does relative dates with datetime('now', '-N days'); PostgreSQL
+    uses an interval.  The comparison is otherwise identical.
+    """
+    conn = connection or get_db()
+    days = int(days)
+    if config.using_postgres():
+        return conn.execute(
+            "SELECT history_id, storage_key, user_id FROM stored_artifacts"
+            " WHERE created_at < now() - make_interval(days => ?)",
+            (days,)).fetchall()
+    return conn.execute(
+        "SELECT history_id, storage_key, user_id FROM stored_artifacts"
+        " WHERE created_at < datetime('now', ?)",
+        ("-%d days" % days,)).fetchall()
+
+
+def mark_artifact_missing(history_id, connection=None):
+    """Record that a durable file backing this row is no longer present."""
+    conn = connection or get_db()
+    conn.execute(
+        "UPDATE stored_artifacts SET integrity_status = 'missing',"
+        " last_verified_at = CURRENT_TIMESTAMP WHERE history_id = ?",
+        (history_id,))
+
+
 def list_user_artifacts(user_id):
     return get_db().execute(
         "SELECT * FROM stored_artifacts WHERE user_id = ? ORDER BY id",

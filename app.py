@@ -179,13 +179,9 @@ def _prune_expired_artifacts():
     days = config.RESULT_RETENTION_DAYS
     if days <= 0:
         return
-    conn = db.connect(config.DATABASE_PATH)
+    conn = db.connect()
     try:
-        rows = conn.execute(
-            "SELECT a.history_id, a.storage_key, a.user_id "
-            "FROM stored_artifacts a "
-            "WHERE created_at < datetime('now', ?)",
-            ("-%d days" % days,)).fetchall()
+        rows = db.expired_artifacts(days, connection=conn)
         for row in rows:
             try:
                 artifact_store.delete(row["storage_key"])
@@ -206,16 +202,11 @@ def _reconcile_artifact_store():
     remaining copy of user data.
     """
     artifact_store.remove_stale_temporary_files()
-    conn = db.connect(config.DATABASE_PATH)
+    conn = db.connect()
     try:
-        rows = conn.execute(
-            "SELECT history_id, storage_key FROM stored_artifacts").fetchall()
-        for row in rows:
+        for row in db.all_stored_artifacts(connection=conn):
             if not artifact_store.exists(row["storage_key"]):
-                conn.execute(
-                    "UPDATE stored_artifacts SET integrity_status = 'missing',"
-                    " last_verified_at = datetime('now') WHERE history_id = ?",
-                    (row["history_id"],))
+                db.mark_artifact_missing(row["history_id"], connection=conn)
         conn.commit()
     finally:
         conn.close()
@@ -1329,7 +1320,9 @@ def create_app(db_path=None, testing=False, storage_dir=None):
         # touching the real application store.
         config.RESULT_STORAGE_DIR = db_path + ".results"
 
-    db.init_db(config.DATABASE_PATH)
+    # An explicit path pins db.connect() to SQLite, which is what the test
+    # suite needs.  The deployed PostgreSQL backend must not be given one.
+    db.init_db(None if config.using_postgres() else config.DATABASE_PATH)
     artifact_store.ensure_dir()
     _reconcile_artifact_store()
     _prune_expired_artifacts()
