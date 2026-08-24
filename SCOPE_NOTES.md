@@ -130,7 +130,10 @@ The thesis excludes encryption of compressed output. Part 1 does not encrypt
 any file data — there is no cipher anywhere in the file path.
 
 Account passwords are a separate concern and *are* hashed, with
-`werkzeug.security.generate_password_hash` (PBKDF2-SHA256). That is credential
+`werkzeug.security.generate_password_hash`, whose current default is scrypt.
+The algorithm and its parameters are recorded in the stored string, so
+`check_password_hash` verifies an older pbkdf2 hash and a newer scrypt one
+alike. That is credential
 storage hygiene, not a compression feature, and it does not make the output
 "password-protected": an `.afc` or `.afcpak` produced by this app can be
 decompressed by the CLI or the browser engine with no credential at all. These

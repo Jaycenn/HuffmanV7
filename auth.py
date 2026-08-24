@@ -22,8 +22,10 @@ FOR PART 2 / A COLD READER
     the credential documented in the README cannot survive first use.
 
 PASSWORD HASHING IS NOT FILE ENCRYPTION.  Account passwords are hashed with
-werkzeug PBKDF2.  No file data is ever encrypted — the thesis Delimitations
-exclude encryption of compressed output.  See SCOPE_NOTES.md.
+werkzeug's generate_password_hash, whose current default is scrypt; the
+algorithm is recorded in the stored string, so check_password_hash verifies
+older pbkdf2 hashes too.  No file data is ever encrypted — the thesis
+Delimitations exclude encryption of compressed output.  See SCOPE_NOTES.md.
 """
 import functools
 import hmac

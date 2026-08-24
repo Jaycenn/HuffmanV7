@@ -20,7 +20,10 @@ PRAGMA foreign_keys = ON;
 -- ---------------------------------------------------------------------------
 -- users
 -- ---------------------------------------------------------------------------
--- password_hash: werkzeug.security.generate_password_hash (PBKDF2-SHA256).
+-- password_hash: werkzeug.security.generate_password_hash, whose current
+--   default is scrypt.  The algorithm and its parameters are recorded in the
+--   stored string itself, so check_password_hash verifies an older pbkdf2
+--   hash and a newer scrypt one alike and the column needs no migration.
 --   Plaintext passwords are never stored or logged.
 --   NOTE: this is ACCOUNT password hashing only.  It is NOT file encryption —
 --   the thesis Delimitations exclude encrypting compressed output, and nothing
