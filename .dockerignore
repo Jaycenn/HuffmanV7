@@ -1,0 +1,44 @@
+# The image serves the application; it does not run the experiments.
+# benchmarks/ alone is ~15 MB of corpora and result CSVs that nothing at
+# runtime reads -- verified by grep: no module outside benchmarks/ and tools/
+# refers to that directory except in comments.
+benchmarks/
+tests/
+
+.git/
+.gitignore
+__pycache__/
+**/__pycache__/
+*.pyc
+.venv/
+
+# Never let a local .env into an image: it carries the service role key, which
+# bypasses row-level security.  Secrets come from the Space's own settings.
+.env
+.env.local
+.afc_secret
+
+# Local development artefacts.
+afc_app.sqlite3*
+afc_results/
+node_modules/
+package-lock.json
+
+# Built here by the RUN step above; a host-built copy would be the wrong
+# architecture.
+*.so
+*.stale
+
+# The committed Windows build.  On Linux the loader tries it first, fails with
+# "invalid ELF header", and falls through to the .so -- harmless, but it puts a
+# spurious failure line in the diagnostics the Settings page shows.
+*.dll
+
+# Documentation and changelogs are not needed at runtime.  README.md is kept:
+# Spaces reads its YAML frontmatter to configure the Space.
+CHANGES*.md
+DEAD_WEIGHT_PROPOSAL.md
+NATIVE_WINDOWS_X64.md
+SCOPE_NOTES.md
+SIZE_POLICY.md
+DEPLOYMENT.md

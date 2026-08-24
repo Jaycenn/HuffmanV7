@@ -1,3 +1,14 @@
+---
+title: ByteSize
+emoji: 🗜️
+colorFrom: gray
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: Adaptive file compression using multi-level frequency analysis
+---
+
 # ByteSize — Adaptive File Compression (AFC)
 
 **This archive is the complete project: compression engine + web application
@@ -90,6 +101,21 @@ end up in different places. Apply `schema_pg.sql` once in the Supabase SQL
 editor before first run, then check the result with `python supabase_check.py`,
 which verifies every table, column count, index and row-level-security setting
 against what the application expects.
+
+### Deploying a hosted instance
+
+`DEPLOYMENT.md` covers putting the app on a public HTTPS address. The target is
+a Hugging Face Space on the Docker SDK; the YAML block at the top of this README
+is what configures it. The `Dockerfile` compiles the native core into the image
+and refuses the build unless `tools/verify_native.py` confirms the full ladder
+is reachable — the pure-Python fallback is ~12x slower with byte-identical
+output and nothing on screen says so. It runs gunicorn with **exactly one
+worker**, which is not a performance choice: finished results live in a
+per-process dictionary (`app.py:112`), so a second worker would 404 downloads at
+random. `Procfile` and `build.sh` keep a Procfile-host path open as well.
+
+`DEPLOYMENT.md` also carries the measured timing and memory envelope, and the
+reason the per-file cap is set by the host gateway's timeout rather than by RAM.
 
 ### Default admin credentials
 
@@ -322,9 +348,14 @@ the UI.
 | `MAX_FILE_SIZE` | 100 MB | `AFC_MAX_FILE_SIZE` |
 | `MAX_BATCH_SIZE` | 500 MB | `AFC_MAX_BATCH_SIZE` |
 
-Defaults match the ceiling the thesis Appendix C documents as tested. **Read
-`SIZE_POLICY.md` before raising them** — it has measured 150 MB and 250 MB
-results, the memory profile, and the exact sentence to update in the paper.
+Defaults match the ceiling the thesis Appendix C documents as tested. The hosted
+instance lowers `AFC_MAX_FILE_SIZE` to 25 MB — not for memory, but because the
+upload and the compression share one request and a 100 MB file takes 63.5 s of
+compression alone, past where the host gateway returns 504. `DEPLOYMENT.md` has
+the measured table and the sentence that needs adding to Scope and
+Delimitations. **Read `SIZE_POLICY.md` before raising them** — it has measured
+150 MB and 250 MB results, the memory profile, and the exact sentence to update
+in the paper.
 Note the requested 1 MB minimum was deliberately not adopted: it would reject
 every file in the thesis corpus.
 
@@ -421,6 +452,10 @@ afc2.NATIVE   # True when the C++ core is active
 | `CHANGES_v4_engine.md` | engine changelog, mapped to thesis terminology |
 | `SCOPE_NOTES.md` | constraint compliance + what Part 2 inherits |
 | `SIZE_POLICY.md` | measured size/memory limits and the Appendix C sentence |
+| `DEPLOYMENT.md` | hosting the app: the single-worker requirement, the measured memory envelope, and the per-file cap a given instance can carry |
+| `Dockerfile`, `.dockerignore` | the hosted image: native core compiled in and verified, gunicorn with one worker |
+| `requirements.txt`, `build.sh`, `Procfile`, `.python-version` | Procfile-host path, so the deployment is not locked to one provider |
+| `tools/verify_native.py` | fails a build whose native core did not load or whose preset ladder is short |
 
 ---
 
