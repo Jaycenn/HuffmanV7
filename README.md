@@ -65,7 +65,47 @@ python app.py                     # opens http://127.0.0.1:5000
 ```
 
 The SQLite database (`afc_app.sqlite3`) is created automatically next to
-`app.py` on first run, along with the seeded admin.
+`app.py` on first run, along with the seeded admin. That is the default, and it
+is what the automated test suite always uses, so the suite needs no network and
+no credentials.
+
+### Running against Supabase
+
+`pip install "psycopg[binary]" supabase python-dotenv`, then create a `.env`
+file next to `app.py`. It is git-ignored and must stay that way — the service
+role key bypasses row-level security.
+
+| Variable | What it is |
+|---|---|
+| `AFC_DB_BACKEND` | `sqlite` (default) or `supabase` |
+| `AFC_STORAGE_BACKEND` | `local` (default) or `supabase` |
+| `AFC_PG_DSN` | PostgreSQL connection URI. Take the **session pooler** string from the project's Connect panel; its username is `postgres.<project-ref>`, not `postgres`, and the direct host is IPv6-only on some projects |
+| `SUPABASE_URL` | project URL, from Project Settings |
+| `SUPABASE_SERVICE_ROLE_KEY` | the secret key, never the publishable one |
+| `SUPABASE_BUCKET` | private bucket holding compressed results. Case-sensitive |
+| `AFC_ADMIN_PASSWORD` | password for the seeded admin on a *fresh* database. Without it, the public default below is used |
+
+Set `AFC_DB_BACKEND` and `AFC_STORAGE_BACKEND` together, or metadata and files
+end up in different places. Apply `schema_pg.sql` once in the Supabase SQL
+editor before first run, then check the result with `python supabase_check.py`,
+which verifies every table, column count, index and row-level-security setting
+against what the application expects.
+
+### Deploying a hosted instance
+
+The primary hosted target is Azure Container Apps under Azure for Students.
+`.github/workflows/publish-azure-image.yml` builds the verified Linux image and
+publishes it to GitHub Container Registry without requiring a paid Azure
+Container Registry. `azure.env.example` inventories the non-secret settings and
+the secrets that must be configured in Azure. Supabase continues to provide
+PostgreSQL and private result storage. The deployment retains the
+thesis-documented limits of 100 MiB per file and 500 MiB per batch.
+
+The `Dockerfile` compiles the native core into the target image and refuses the
+build unless `tools/verify_native.py` confirms the full ladder is reachable. It
+runs gunicorn with **exactly one worker and one thread** because finished
+downloads live in a per-process dictionary (`app.py:112`) and compression is
+intentionally serialized to bound memory usage.
 
 ### Default admin credentials
 
@@ -202,9 +242,14 @@ adjustable with `?depth=` on `/api/tree/<token>` (4–12, default 9).
 
 | Preset | Effect | Profiles searched | Backend |
 |---|---|---|---|
-| **Fast** | fewer candidates, no optimal parsing, fewer growth rounds | 1 | **C++ native** |
-| **Balanced** *(default)* | engine defaults plus three reshaped scans | 5 | **C++ native** |
-| **Maximum** | everything Balanced tries, again at the deepest settings | 9 | **C++ native** |
+| **Fast** | fewer candidates, no optimal parsing, fewer growth rounds | 2 | **C++ native** |
+| **Balanced** *(default)* | everything Fast tries, then the same four shapes at engine-default depth | 6 | **C++ native** |
+| **Maximum** | everything Balanced tries, again at the deepest settings, plus two more shapes | 12 | **C++ native** |
+
+Profile counts are for input up to 8 MB. Above that the ladder drops the wider
+n-gram scans — measured, not assumed; see the note below — leaving 1, 3 and 7.
+`presets.ladder_for(name, nbytes)` reports the exact ladder for any size, and
+each corpus run records the counts it used in its `*_backend.json` sidecar.
 
 > **[v9] A preset is a search, and a costlier preset is never larger.** Until
 > v9 a preset could only search *deeper*, because the rest of the engine's
@@ -279,7 +324,7 @@ old AFC1/AFC2 decoding.
 The 1.3 interface defaults to a brighter high-contrast canvas, clearer cards,
 larger upload targets and visible keyboard focus. Dark mode remains available
 from the sidebar. The preference lives in `localStorage` only and is never sent
-to the server, consistent with the local/non-cloud delimitation.
+to the server.
 
 
 ## File size limits
@@ -293,9 +338,14 @@ the UI.
 | `MAX_FILE_SIZE` | 100 MB | `AFC_MAX_FILE_SIZE` |
 | `MAX_BATCH_SIZE` | 500 MB | `AFC_MAX_BATCH_SIZE` |
 
-Defaults match the ceiling the thesis Appendix C documents as tested. **Read
-`SIZE_POLICY.md` before raising them** — it has measured 150 MB and 250 MB
-results, the memory profile, and the exact sentence to update in the paper.
+Defaults match the ceiling the thesis Appendix C documents as tested. The hosted
+instance lowers `AFC_MAX_FILE_SIZE` to 25 MB — not for memory, but because the
+upload and the compression share one request and a 100 MB file takes 63.5 s of
+compression alone, past where the host gateway returns 504. `DEPLOYMENT.md` has
+the measured table and the sentence that needs adding to Scope and
+Delimitations. **Read `SIZE_POLICY.md` before raising them** — it has measured
+150 MB and 250 MB results, the memory profile, and the exact sentence to update
+in the paper.
 Note the requested 1 MB minimum was deliberately not adopted: it would reject
 every file in the thesis corpus.
 
@@ -310,12 +360,28 @@ python tools/size_policy_bench.py --quick # size/memory smoke test
 
 ## Privacy
 
-Everything is local: the app binds to `127.0.0.1` and makes no outbound
-requests. Account/history metadata stays in SQLite. Only produced compressed
-`.afc` and `.afcpak` artifacts are persisted under the private
-`RESULT_STORAGE_DIR`, with opaque disk names, owner checks, a configured quota,
-and SHA-256 verification before every download. Uploaded originals,
-decompressed originals, and extracted archive members stay in memory only.
+**The compression engine makes no network call.** Compression and
+decompression happen entirely inside the application server process; the
+multi-tier scan, the Bit Cost Decision Engine and the container writers have no
+database or network dependency.
+
+**Persistence depends on the configured backend.** By default — and always for
+the test suite — account and history metadata live in local SQLite and produced
+artifacts under the private `RESULT_STORAGE_DIR`. The deployed system sets
+`AFC_DB_BACKEND=supabase` and `AFC_STORAGE_BACKEND=supabase`, which puts the
+same data in Supabase managed PostgreSQL and a private object-storage bucket.
+The thesis Delimitations and Ethical Consideration state this and disclose
+Supabase to participants as a third-party processor; see `SCOPE_NOTES.md` §4.
+
+**Only produced compressed output is ever persisted**, on either backend, under
+opaque server-generated identifiers, with owner checks, a configured quota, and
+SHA-256 and byte-length verification before every download — the same
+verification code either way. Uploaded originals, decompressed originals and
+extracted archive members are never written to either backend: they stay in
+memory and disappear when the process stops.
+
+On PostgreSQL, row-level security is enabled on all six tables with no
+policies, so the only route to the data is through this application.
 
 ---
 
@@ -357,14 +423,16 @@ afc2.NATIVE   # True when the C++ core is active
 | `AFC_WebApp.html` | standalone browser app (WASM core if present, JS otherwise) |
 | `app.py` | Flask app factory + page/API routes (map at top of file) |
 | `config.py` | all tunables incl. size policy — the only place limits live |
-| `db.py`, `schema.sql` | local SQLite: users, history, durable-artifact ownership, audit, login attempts, and the session epoch that invalidates cookies after a destructive reset |
+| `db.py`, `schema.sql` | data access, and the SQLite development schema: users, history, durable-artifact ownership, audit, login attempts, and the session epoch that invalidates cookies after a destructive reset |
+| `db_pg.py`, `schema_pg.sql` | PostgreSQL backend and its schema, selected by `AFC_DB_BACKEND`; Appendix G documents the type mapping |
+| `artifact_store.py`, `storage_supabase.py` | durable result storage, on local disk or in a private Supabase bucket, selected by `AFC_STORAGE_BACKEND` |
 | `auth.py`, `admin.py` | auth blueprint (login/roles) and admin blueprint |
 | `afcpak.py` | `.afcpak` archive container (manifest + AFC payloads, no DEFLATE) |
 | `templates/`, `static/` | responsive dashboard; `compress.html`/`decompress.html` are the two separate workflow pages, with `compress.js`/`decompress.js` driving them and `queue.js` the multi-file panes |
 | `filetypes.py` | content-based type detection; recovers the original extension on decompress. Compresses nothing |
 | `analysis.py` | read-only entropy / container / tree / attribution analysis |
 | `presets.py` | Fast / Balanced / Maximum tunable presets |
-| `tests/test_app.py` | 366-check end-to-end suite (native presets, AFC1-AFC6, web, integrity and document paths) |
+| `tests/test_app.py` | 541-check end-to-end suite (native presets, AFC1-AFC6, web, integrity and document paths) |
 | `tools/native_doctor.py` | [v7] diagnoses why the native core is or is not loaded |
 | `containers.py` | PDF/OOXML inventory, exact tiling, AFC3/AFC4/AFC6 routing and whole-file size guards |
 | `deflate_tokens.py` | Reversible parser/serializer for existing DOCX member tokens; makes XML available to Hybrid-Huffman without adding a compressor |
@@ -374,6 +442,10 @@ afc2.NATIVE   # True when the C++ core is active
 | `CHANGES_v4_engine.md` | engine changelog, mapped to thesis terminology |
 | `SCOPE_NOTES.md` | constraint compliance + what Part 2 inherits |
 | `SIZE_POLICY.md` | measured size/memory limits and the Appendix C sentence |
+| `DEPLOYMENT.md` | hosting the app: the single-worker requirement, the measured memory envelope, and the per-file cap a given instance can carry |
+| `Dockerfile`, `.dockerignore` | the hosted image: native core compiled in and verified, gunicorn with one worker |
+| `requirements.txt`, `build.sh`, `Procfile`, `.python-version` | Procfile-host path, so the deployment is not locked to one provider |
+| `tools/verify_native.py` | fails a build whose native core did not load or whose preset ladder is short |
 
 ---
 

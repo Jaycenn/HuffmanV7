@@ -128,3 +128,19 @@ Both presets are smaller **and** faster than before.
   seven-file corpus at every preset, and carries the pre-v9 size alongside, so
   the engine can never silently regress past the version the corpus was first
   measured on.
+* `benchmarks/govdocs1_tier_ablation.csv` covers 602 files drawn from the
+  GovDocs1 thread 000 directory. The `--max-bytes` passed to
+  `benchmarks/tier_ablation.py` was not recorded when the run was made and
+  cannot be recovered from the repository, but it can be bounded from the
+  selection itself. The 602 rows are exactly the thread 000 files satisfying
+  `256 <= size <= cap`: the largest included file is 130,944 bytes, the
+  smallest excluded one is 132,672 bytes, and a cap of 132,672 would admit
+  603 files rather than 602. The cap therefore lies in [130,944, 132,672).
+  The only power of two in that interval is 131,072 (128 KiB), which is the
+  probable invocation, but that is an inference from the file selection and
+  not a recovered record. `--min-bytes` was left at its 256 default: the
+  smallest included file is 291 bytes and the largest thread 000 file below
+  it is 237. The usage example in the harness docstring,
+  `--max-bytes 400000`, is illustrative only and is not a record of either
+  ablation's invocation; the committed `benchmarks/tier_ablation.csv`
+  contains a 424,437-byte file.

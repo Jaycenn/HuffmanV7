@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.so
 *.dll
+*.stale
 !/afc_kernels.dll
 afc_app.sqlite3*
 afc_results/
@@ -11,3 +12,6 @@ node_modules/
 package-lock.json
 benchmarks/canterbury_official/
 benchmarks/silesia/
+benchmarks/govdocs1/
+.env
+.env.local

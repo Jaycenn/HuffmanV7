@@ -33,13 +33,36 @@ except ImportError:                                    # tests may import bare
 
 def connect(path=None):
     """Open a new connection with sane defaults.  Callers outside a request
-    (tests, CLI) should use this and close it themselves."""
+    (tests, CLI) should use this and close it themselves.
+
+    An explicit path always means SQLite: the test suite and reset_db() pass
+    one, and they must keep working on the local file regardless of which
+    backend the deployed app is configured for.
+    """
+    if path is None and config.using_postgres():
+        import db_pg
+        return db_pg.connect()
     conn = sqlite3.connect(path or config.DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     # WAL keeps readers from blocking the writer; harmless for a local file.
     conn.execute("PRAGMA journal_mode = WAL")
     return conn
+
+
+def begin_exclusive(conn, user_id=None):
+    """Start a write transaction that other writers cannot interleave with.
+
+    SQLite takes its single writer lock with BEGIN IMMEDIATE.  PostgreSQL is
+    MVCC and has no such lock, so the caller's intent -- one reservation per
+    user at a time -- is expressed with a per-user transaction-scoped advisory
+    lock, released automatically at COMMIT or ROLLBACK.
+    """
+    if config.using_postgres():
+        if user_id is not None:
+            conn.execute("SELECT pg_advisory_xact_lock(?)", (int(user_id),))
+        return
+    conn.execute("BEGIN IMMEDIATE")
 
 
 def get_db():
@@ -65,6 +88,20 @@ def close_db(_exc=None):
 
 def init_db(path=None, seed_admin=True):
     """Create tables if missing and seed the default admin.  Idempotent."""
+    if path is None and config.using_postgres():
+        # schema_pg.sql is applied once, out of band (Supabase SQL editor or
+        # psql).  The application never issues DDL against the hosted database.
+        conn = connect()
+        try:
+            conn.execute(
+                "INSERT INTO app_meta (key, value) VALUES ('session_epoch', ?)"
+                " ON CONFLICT DO NOTHING", (uuid.uuid4().hex,))
+            conn.commit()
+            if seed_admin:
+                _seed_admin(conn)
+        finally:
+            conn.close()
+        return
     here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, "schema.sql"), encoding="utf-8") as f:
         ddl = f.read()
@@ -136,8 +173,8 @@ def _migrate(conn):
         );
     """)
     conn.execute(
-        "INSERT OR IGNORE INTO app_meta (key, value) VALUES"
-        " ('session_epoch', ?)", (uuid.uuid4().hex,))
+        "INSERT INTO app_meta (key, value) VALUES"
+        " ('session_epoch', ?) ON CONFLICT DO NOTHING", (uuid.uuid4().hex,))
     # Backfill pre-parent archive members narrowly: real member rows had no
     # durable artifact of their own.  Normal batch outputs do, so a caller-
     # supplied batch-id collision is not adopted by the archive summary.
@@ -206,7 +243,7 @@ def _seed_admin(conn):
         return
     conn.execute(
         "INSERT INTO users (username, email, password_hash, role,"
-        " must_change_password) VALUES (?, ?, ?, 'admin', 1)",
+        " must_change_password) VALUES (?, ?, ?, 'admin', TRUE)",
         (config.DEFAULT_ADMIN_USERNAME, config.DEFAULT_ADMIN_EMAIL,
          generate_password_hash(config.DEFAULT_ADMIN_PASSWORD)))
     conn.commit()
@@ -243,24 +280,26 @@ def create_user(username, email, password, role="user",
     conn = get_db()
     cur = conn.execute(
         "INSERT INTO users (username, email, password_hash, role,"
-        " must_change_password) VALUES (?, ?, ?, ?, ?)",
+        " must_change_password) VALUES (?, ?, ?, ?, ?) RETURNING id",
         (username, email, generate_password_hash(password), role,
-         int(must_change_password)))
+         bool(must_change_password)))
+    new_id = cur.fetchone()["id"]
     conn.commit()
-    return cur.lastrowid
+    return new_id
 
 
 def set_password(user_id, password):
     from werkzeug.security import generate_password_hash
     conn = get_db()
-    conn.execute("UPDATE users SET password_hash = ?, must_change_password = 0"
+    conn.execute("UPDATE users SET password_hash = ?,"
+                 " must_change_password = FALSE"
                  " WHERE id = ?", (generate_password_hash(password), user_id))
     conn.commit()
 
 
 def touch_last_login(user_id):
     conn = get_db()
-    conn.execute("UPDATE users SET last_login_at = datetime('now')"
+    conn.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP"
                  " WHERE id = ?", (user_id,))
     conn.commit()
 
@@ -268,7 +307,7 @@ def touch_last_login(user_id):
 def set_user_active(user_id, active):
     conn = get_db()
     conn.execute("UPDATE users SET is_active = ? WHERE id = ?",
-                 (1 if active else 0, user_id))
+                 (bool(active), user_id))
     conn.commit()
 
 
@@ -320,14 +359,16 @@ def add_history(user_id, filename, original_bytes, compressed_bytes,
         " container_format, lossless_verified, duration_ms, batch_id,"
         " gzip_bytes, huffman_bytes, entropy_bits, block_share_pct, preset,"
         " sha256_original, sha256_container, detected_type, parent_history_id)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        " RETURNING id",
         (user_id, filename, operation, orig, comp, ratio, saved, engine,
-         container_format, 1 if lossless_verified else 0, float(duration_ms),
+         container_format, bool(lossless_verified), float(duration_ms),
          batch_id, int(gzip_bytes), int(huffman_bytes), float(entropy_bits),
          float(block_share_pct), preset, sha256_original or "",
          sha256_container or "", detected_type or "", parent_history_id))
+    new_id = cur.fetchone()["id"]
     conn.commit()
-    return cur.lastrowid
+    return new_id
 
 
 def find_by_container_sha(user_id, digest):
@@ -375,7 +416,7 @@ def history_stats(user_id):
                COALESCE(SUM(original_bytes), 0)    AS total_original,
                COALESCE(SUM(compressed_bytes), 0)  AS total_compressed,
                COALESCE(AVG(ratio), 0)             AS avg_ratio,
-               COALESCE(SUM(lossless_verified), 0) AS lossless_count
+               COUNT(*) FILTER (WHERE lossless_verified) AS lossless_count
         FROM compression_history h
         WHERE h.user_id = ? AND h.operation = 'compress'
           AND h.parent_history_id IS NULL
@@ -433,7 +474,7 @@ def storage_reservation(user_id, new_bytes, limit):
     """
     conn = connect()
     try:
-        conn.execute("BEGIN IMMEDIATE")
+        begin_exclusive(conn, user_id)
         row = conn.execute(
             "SELECT COALESCE(SUM(byte_size), 0) AS n FROM stored_artifacts"
             " WHERE user_id = ?", (user_id,)).fetchone()
@@ -455,12 +496,13 @@ def add_stored_artifact(history_id, user_id, storage_key, download_name,
     cur = conn.execute(
         "INSERT INTO stored_artifacts (history_id, user_id, storage_key,"
         " download_name, mimetype, byte_size, sha256, last_verified_at)"
-        " VALUES (?,?,?,?,?,?,?,datetime('now'))",
+        " VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP) RETURNING id",
         (history_id, user_id, storage_key, download_name, mimetype,
          int(byte_size), sha256))
+    new_id = cur.fetchone()["id"]
     if connection is None:
         conn.commit()
-    return cur.lastrowid
+    return new_id
 
 
 def stored_bytes_for_user(user_id):
@@ -485,9 +527,49 @@ def set_artifact_integrity(history_id, status):
     conn = get_db()
     conn.execute(
         "UPDATE stored_artifacts SET integrity_status = ?,"
-        " last_verified_at = datetime('now') WHERE history_id = ?",
+        " last_verified_at = CURRENT_TIMESTAMP WHERE history_id = ?",
         (status, history_id))
     conn.commit()
+
+
+def all_stored_artifacts(connection=None):
+    """Every artifact row, for the startup reconciliation sweep.
+
+    Takes an explicit connection because the sweep runs during create_app(),
+    outside any request context, where get_db() has no flask.g to cache on.
+    """
+    conn = connection or get_db()
+    return conn.execute(
+        "SELECT history_id, storage_key, user_id FROM stored_artifacts"
+        " ORDER BY history_id").fetchall()
+
+
+def expired_artifacts(days, connection=None):
+    """Artifacts older than the retention window.
+
+    SQLite does relative dates with datetime('now', '-N days'); PostgreSQL
+    uses an interval.  The comparison is otherwise identical.
+    """
+    conn = connection or get_db()
+    days = int(days)
+    if config.using_postgres():
+        return conn.execute(
+            "SELECT history_id, storage_key, user_id FROM stored_artifacts"
+            " WHERE created_at < now() - make_interval(days => ?)",
+            (days,)).fetchall()
+    return conn.execute(
+        "SELECT history_id, storage_key, user_id FROM stored_artifacts"
+        " WHERE created_at < datetime('now', ?)",
+        ("-%d days" % days,)).fetchall()
+
+
+def mark_artifact_missing(history_id, connection=None):
+    """Record that a durable file backing this row is no longer present."""
+    conn = connection or get_db()
+    conn.execute(
+        "UPDATE stored_artifacts SET integrity_status = 'missing',"
+        " last_verified_at = CURRENT_TIMESTAMP WHERE history_id = ?",
+        (history_id,))
 
 
 def list_user_artifacts(user_id):
@@ -501,7 +583,7 @@ def user_deletion_lock(user_id):
     """Serialize artifact enumeration and account deletion with new stores."""
     conn = connect()
     try:
-        conn.execute("BEGIN IMMEDIATE")
+        begin_exclusive(conn, user_id)
         artifacts = conn.execute(
             "SELECT * FROM stored_artifacts WHERE user_id = ? ORDER BY id",
             (user_id,)).fetchall()
@@ -548,8 +630,15 @@ def list_audit(limit=200):
 
 def record_login_failure(username, ip_address=""):
     conn = get_db()
-    conn.execute("INSERT INTO login_attempts (username, ip_address, created_at)"
-                 " VALUES (?,?,?)", (username, ip_address or "", time.time()))
+    if config.using_postgres():
+        # created_at is TIMESTAMPTZ with DEFAULT now(); let the server stamp it
+        # so the window is measured against database time, not app-server time.
+        conn.execute("INSERT INTO login_attempts (username, ip_address)"
+                     " VALUES (?,?)", (username, ip_address or ""))
+    else:
+        conn.execute(
+            "INSERT INTO login_attempts (username, ip_address, created_at)"
+            " VALUES (?,?,?)", (username, ip_address or "", time.time()))
     conn.commit()
 
 
@@ -564,13 +653,26 @@ def login_attempts_in_window(username, ip_address=""):
     """Count failures inside the window, pruning expired rows as we go so the
     table cannot grow without bound (no scheduled cleanup job needed)."""
     conn = get_db()
-    cutoff = time.time() - config.LOGIN_WINDOW_SECONDS
-    conn.execute("DELETE FROM login_attempts WHERE created_at < ?", (cutoff,))
-    conn.commit()
-    row = conn.execute(
-        "SELECT COUNT(*) AS n FROM login_attempts WHERE username = ?"
-        " AND ip_address = ? AND created_at >= ?",
-        (username, ip_address or "", cutoff)).fetchone()
+    window = config.LOGIN_WINDOW_SECONDS
+    if config.using_postgres():
+        conn.execute("DELETE FROM login_attempts"
+                     " WHERE created_at < now() - make_interval(secs => ?)",
+                     (window,))
+        conn.commit()
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM login_attempts WHERE username = ?"
+            " AND ip_address = ?"
+            " AND created_at >= now() - make_interval(secs => ?)",
+            (username, ip_address or "", window)).fetchone()
+    else:
+        cutoff = time.time() - window
+        conn.execute("DELETE FROM login_attempts WHERE created_at < ?",
+                     (cutoff,))
+        conn.commit()
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM login_attempts WHERE username = ?"
+            " AND ip_address = ? AND created_at >= ?",
+            (username, ip_address or "", cutoff)).fetchone()
     return row["n"]
 
 
@@ -605,7 +707,7 @@ def analytics_stats(user_id=None):
                COALESCE(SUM(original_bytes), 0)    AS total_original,
                COALESCE(SUM(compressed_bytes), 0)  AS total_compressed,
                COALESCE(AVG(ratio), 0)             AS avg_ratio,
-               COALESCE(SUM(lossless_verified), 0) AS lossless_count,
+               COUNT(*) FILTER (WHERE lossless_verified) AS lossless_count,
                COALESCE(SUM(duration_ms), 0)       AS total_ms,
                COALESCE(AVG(entropy_bits), 0)      AS avg_entropy,
                COALESCE(SUM(gzip_bytes), 0)        AS total_gzip,

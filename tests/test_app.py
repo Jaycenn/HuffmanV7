@@ -51,6 +51,12 @@ def make_app():
     fd, path = tempfile.mkstemp(suffix=".sqlite3")
     os.close(fd)
     os.remove(path)
+    # A developer may legitimately keep production Supabase settings in the
+    # ignored .env. Tests must never inherit those backends: doing so would
+    # mutate the deployed database/object store and invalidate local-storage
+    # assertions. Pin both backends before app.py creates its module-level app.
+    config.DB_BACKEND = "sqlite"
+    config.STORAGE_BACKEND = "local"
     config.DATABASE_PATH = path
     # Isolate durable files before importing app: app.py creates its default
     # application at import time, so setting only the DB here could otherwise
@@ -682,8 +688,12 @@ def test_branding_and_about_evidence(app):
                   and config.ENGINE_VERSION.encode() not in body)
     for path in workspace_paths:
         body = signed_in.get(path).data
-        check("workspace carries the ByteSize B mark: %s" % path,
-              b'class="brand-mark" aria-hidden="true">B<' in body)
+        # [v10] The brand mark became an image when the ByteSize logo
+        # replaced the letterform. The check still asserts that every
+        # workspace page carries the mark -- matched on the element and its
+        # source rather than on the glyph it used to contain.
+        check("workspace carries the ByteSize brand mark: %s" % path,
+              b'class="brand-mark"' in body and b'img/logo.png' in body)
 
     standalone = open(os.path.join(ROOT, "AFC_WebApp.html"),
                       encoding="utf-8").read()
@@ -734,14 +744,22 @@ def test_branding_and_about_evidence(app):
     check("the AFC 1.3 rows are labelled as the historical audit",
           "AFC 1.3 audit" in about and "not" in about)
 
-    # [v9] Silesia is now measured on the current engine as well. The two rows
-    # are the same twelve files, so the page may only claim an improvement if
-    # the committed measurement actually shows one.
-    ext_csv = os.path.join(ROOT, "benchmarks", "external_corpus.csv")
-    with open(ext_csv, newline="", encoding="utf-8") as handle:
-        ext_rows = [r for r in _csv.DictReader(handle)]
-    sil = [r for r in ext_rows
-           if r["corpus"] == "silesia" and r["preset"] == "balanced"]
+ # [v9] Silesia and GovDocs1 are each read from the run that was verified
+    # end to end on the repaired library. benchmarks/external_corpus.csv is
+    # deliberately NOT read here: that run predates the per-call profile entry
+    # point, so its Fast and Maximum rows understate the engine, and its
+    # GovDocs1 total includes a member above the size ceiling. It is retained
+    # under a name that says so.
+    import json as _json
+    sil_csv = os.path.join(ROOT, "benchmarks", "silesia_repaired.csv")
+    gov_csv = os.path.join(ROOT, "benchmarks",
+                           "thread000_external_corpus.csv")
+    with open(sil_csv, newline="", encoding="utf-8") as handle:
+        sil_rows = [r for r in _csv.DictReader(handle)]
+    with open(gov_csv, newline="", encoding="utf-8") as handle:
+        gov_rows = [r for r in _csv.DictReader(handle)]
+    ext_rows = sil_rows + gov_rows
+    sil = [r for r in sil_rows if r["preset"] == "balanced"]
     sil_original = sum(int(r["original_bytes"]) for r in sil)
     sil_now = sum(int(r["compressed_bytes"]) for r in sil)
     check("Silesia current-engine numbers trace to CSV",
@@ -749,10 +767,21 @@ def test_branding_and_about_evidence(app):
           and format(sil_original, ",") in about
           and format(sil_now, ",") in about
           and ("%.2f%%" % (100.0 * (1.0 - sil_now / sil_original))) in about
-          and "benchmarks/external_corpus.csv" in about, len(sil))
+          and "benchmarks/silesia_repaired.csv" in about, len(sil))
     check("every external-corpus row is verified lossless",
           all(r["byte_equal"] == "True" and r["sha256_equal"] == "True"
               for r in ext_rows) and len(ext_rows) >= 48, len(ext_rows))
+    # The run behind the published figures must have searched the full ladder.
+    # This is the assertion the degraded-library audit would have failed, and
+    # it is the reason the harness writes the sidecar at all.
+    with open(os.path.join(ROOT, "benchmarks",
+                           "silesia_repaired_backend.json"),
+              encoding="utf-8") as handle:
+        sil_backend = _json.load(handle)
+    check("the published Silesia run searched the full profile ladder",
+          sil_backend.get("profiles") is True
+          and sil_backend.get("degraded") is False,
+          sil_backend.get("reason"))
 
     with open(os.path.join(ROOT, "benchmarks",
                            "afc_1_3_silesia_native_summary.csv"),
@@ -768,8 +797,7 @@ def test_branding_and_about_evidence(app):
           sil_now < old_bytes
           and format(old_bytes - sil_now, ",") in about,
           "%s vs %s" % (format(old_bytes - sil_now, ","), sil_now))
-    gov = [r for r in ext_rows
-           if r["corpus"] == "govdocs1-thread000" and r["preset"] == "balanced"]
+    gov = [r for r in gov_rows if r["preset"] == "balanced"]
     gov_original = sum(int(r["original_bytes"]) for r in gov)
     gov_now = sum(int(r["compressed_bytes"]) for r in gov)
     check("GovDocs1 numbers trace to CSV",
@@ -778,6 +806,11 @@ def test_branding_and_about_evidence(app):
           and format(gov_now, ",") in about
           and ("%.2f%%" % (100.0 * (1.0 - gov_now / gov_original))) in about,
           len(gov))
+    # The corpus published as thread 000 must be thread 000 minus exactly the
+    # members the system itself would refuse -- not a convenient subset.
+    check("no file above the size ceiling is inside the published corpus",
+          all(int(r["original_bytes"]) <= 100 * 1024 * 1024 for r in gov_rows),
+          max(int(r["original_bytes"]) for r in gov_rows))
     # The per-format figures quoted next to the table must be the measured
     # ones: this is the page's own class-qualified claim about PDF and DOCX,
     # so it may not drift from the CSV it cites.
@@ -798,11 +831,63 @@ def test_branding_and_about_evidence(app):
     check("About reports the files that did not shrink",
           str(unshrunk) in about, unshrunk)
 
-    # A partial Canterbury re-run must never be presented as Canterbury.
-    check("no partial Canterbury subset is published as the corpus",
+    # [v10] Canterbury is measured on the current engine over all eleven
+    # canonical files. The rule that produced the earlier four-file subset is
+    # now enforced positively: a corpus published as "canterbury" must carry
+    # the whole corpus, because a text-only subset would flatter the average
+    # by dropping the binary members that pull it down.
+    cant_csv = os.path.join(ROOT, "benchmarks", "canterbury_full.csv")
+    with open(cant_csv, newline="", encoding="utf-8") as handle:
+        cant_rows = [r for r in _csv.DictReader(handle)]
+    with open(os.path.join(ROOT, "benchmarks", "corpus_manifest.json"),
+              encoding="utf-8") as handle:
+        canonical = set(_json.load(handle)["canterbury"]["files"])
+    cant = [r for r in cant_rows if r["preset"] == "balanced"]
+    check("the published Canterbury corpus is the whole corpus",
+          len(cant) == 11 and {r["file"] for r in cant} == canonical,
+          sorted(canonical - {r["file"] for r in cant}))
+    cant_original = sum(int(r["original_bytes"]) for r in cant)
+    cant_now = sum(int(r["compressed_bytes"]) for r in cant)
+    check("Canterbury current-engine numbers trace to CSV",
+          format(cant_original, ",") in about
+          and format(cant_now, ",") in about
+          and ("%.2f%%" % (100.0 * (1.0 - cant_now / cant_original))) in about
+          and "benchmarks/canterbury_full.csv" in about, cant_now)
+    check("every Canterbury row is verified lossless",
+          all(r["byte_equal"] == "True" and r["sha256_equal"] == "True"
+              for r in cant_rows) and len(cant_rows) == 33, len(cant_rows))
+    with open(os.path.join(ROOT, "benchmarks",
+                           "canterbury_full_backend.json"),
+              encoding="utf-8") as handle:
+        cant_backend = _json.load(handle)
+    check("the published Canterbury run searched the full profile ladder",
+          cant_backend.get("profiles") is True
+          and cant_backend.get("degraded") is False,
+          cant_backend.get("reason"))
+    with open(os.path.join(ROOT, "benchmarks",
+                           "afc_1_3_canterbury_native_summary.csv"),
+              newline="", encoding="utf-8") as handle:
+        old_cant = [r for r in _csv.DictReader(handle)
+                    if r["preset"] == "balanced"]
+    old_cant_original = sum(int(r["original_bytes"]) for r in old_cant)
+    old_cant_bytes = sum(int(r["compressed_bytes"]) for r in old_cant)
+    check("the two Canterbury rows really are the same corpus",
+          old_cant_original == cant_original,
+          "%d != %d" % (old_cant_original, cant_original))
+    check("the claimed Canterbury improvement is the measured one",
+          cant_now < old_cant_bytes
+          and format(old_cant_bytes - cant_now, ",") in about,
+          format(old_cant_bytes - cant_now, ","))
+
+    # The rule still holds for the superseded run: the four-file subset it
+    # contains is named for what it is and was never published as Canterbury.
+    degraded_csv = os.path.join(ROOT, "benchmarks",
+                                "external_corpus_degraded_2026-08-20.csv")
+    check("the superseded partial subset is still named as a subset",
           not any(r["corpus"] == "canterbury" for r in ext_rows)
           and "canterbury-text-subset" in
-              open(ext_csv, encoding="utf-8").read())
+              open(degraded_csv, encoding="utf-8").read())
+
 
     import presets as _presets
     spot = [("canterbury", "alice29.txt"), ("corpus", "data.json"),
@@ -852,25 +937,33 @@ def _pin_corpus():
 
 PINNED_CONTAINERS = {
     # (name, preset): (sha256[:32], bytes now, bytes under the V7 engine)
+    #
+    # [v10] Re-pinned after two deliberate changes: the Fast ladder gained an
+    # ngram8 rung and the Maximum ladder gained the many-merges and wide-scan
+    # shapes. Eleven rows moved and every one of them got SMALLER; the V7
+    # column is untouched, so the one-way ratchet still holds on every row.
+    # Regenerated with a profile-capable native library -- the previously
+    # shipped Windows build did not export afc_compress_v9, which silently
+    # collapsed every ladder to its default shape.
     ("prose", "fast"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486, 486),
     ("prose", "balanced"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486, 865),
     ("prose", "maximum"): ("df5cf1d71b1f51c501cf8d74e9cdc558", 486, 865),
-    ("csvish", "fast"): ("dc67eace6449ca2dc449f5cf142689a5", 2503, 2503),
-    ("csvish", "balanced"): ("91e1a9ffade15428c92f2ebf5c2ce069", 2335, 2335),
-    ("csvish", "maximum"): ("d746c723d1a19f2f5d6e7907e43a1e97", 2291, 2335),
-    ("jsonish", "fast"): ("4189e69d98a2382747def080987c9a90", 1246, 1246),
-    ("jsonish", "balanced"): ("9c44277dc5092815e69773d507db6d7f", 1178, 1461),
-    ("jsonish", "maximum"): ("9c44277dc5092815e69773d507db6d7f", 1178, 1461),
+    ("csvish", "fast"): ("d98ebeb68d2929e0e373ca2ee958953b", 2254, 2503),
+    ("csvish", "balanced"): ("d98ebeb68d2929e0e373ca2ee958953b", 2254, 2335),
+    ("csvish", "maximum"): ("d98ebeb68d2929e0e373ca2ee958953b", 2254, 2335),
+    ("jsonish", "fast"): ("f9246f33e04335398e60aa0c556e64a5", 969, 1246),
+    ("jsonish", "balanced"): ("f9246f33e04335398e60aa0c556e64a5", 969, 1461),
+    ("jsonish", "maximum"): ("f9246f33e04335398e60aa0c556e64a5", 969, 1461),
     ("code", "fast"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473, 473),
     ("code", "balanced"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473, 848),
     ("code", "maximum"): ("bd1ca4616ebf14ad5bb8867fbb1e3dcb", 473, 848),
-    ("binary", "fast"): ("a0a19f3f609b9290471181001a02e5d2", 5436, 5436),
+    ("binary", "fast"): ("20e0e75c78bfdffd164b8f82c6eae9d5", 4516, 5436),
     ("binary", "balanced"): ("92529110a69d47ab931c5512af5356c8", 2962, 3344),
     ("binary", "maximum"): ("d9ffd867fd3c012e032426dd2c0bf9f6", 2358, 2801),
-    ("incompressible", "fast"): ("62e57bf89140815e79ea50d554bca7da", 3826, 3826),
+    ("incompressible", "fast"): ("d1f026095e89c55f777594d8cec2a062", 3818, 3826),
     ("incompressible", "balanced"): ("b2625c816e67c00b8c207916ccfc9791", 2885, 3197),
     ("incompressible", "maximum"): ("b2625c816e67c00b8c207916ccfc9791", 2885, 3197),
-    ("repetitive", "fast"): ("f06c7f8ddba83f685adedfb7865f50d9", 96, 96),
+    ("repetitive", "fast"): ("02d410ddcfa57980e42eb8c18b25e2c7", 68, 96),
     ("repetitive", "balanced"): ("528e09942cc001850704d032eae34449", 58, 109),
     ("repetitive", "maximum"): ("528e09942cc001850704d032eae34449", 58, 109),
 }
@@ -972,11 +1065,11 @@ ADVERTISED_EVIDENCE = {
     "CSV": ("v9_repo_corpus.csv", "data.csv"),
     "JSON": ("v9_repo_corpus.csv", "data.json"),
     "SQL": ("v9_repo_corpus.csv", "universe.sql"),
-    "XML": ("external_corpus.csv", "xml"),
+    "XML": ("silesia_repaired.csv", "xml"),
     "HTML": ("v9_repo_corpus.csv", "cp.html"),
     "LOG": ("v9_repo_corpus.csv", "server.log"),
     "Source code": ("v9_repo_corpus.csv", "code_python.py.txt"),
-    "PDF": ("external_corpus.csv", "reymont"),
+    "PDF": ("silesia_repaired.csv", "reymont"),
 }
 
 

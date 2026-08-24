@@ -80,15 +80,10 @@ code { padding: .08rem .3rem; border-radius: 4px; color: var(--accent-dark); bac
 }
 .brand { display: inline-flex; align-items: center; gap: .72rem; color: var(--ink); }
 .brand-mark {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 17px;
-  font-weight: 800;
+  display: block;
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
 }
 .brand strong { display: block; font-size: 16px; line-height: 1.05; letter-spacing: -.02em; }
 .brand small { display: block; margin-top: .25rem; color: var(--muted); font-size: 10px; letter-spacing: .02em; }
@@ -240,7 +235,7 @@ code { padding: .08rem .3rem; border-radius: 4px; color: var(--accent-dark); bac
 .quiet-button:hover { border-color: #aebcb2; background: #f5f7f4; }
 .app-main { min-width: 0; max-width: 1560px; padding: 34px clamp(20px, 3vw, 48px) 48px; }
 .app-mobilebar { position: sticky; top: 0; z-index: 30; display: flex; min-height: 60px; align-items: center; gap: .8rem; padding: 0 16px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.96); }
-.brand-compact { font-size: 15px; font-weight: 800; }.brand-compact .brand-mark { width: 29px; height: 29px; font-size: 13px; }
+.brand-compact { font-size: 15px; font-weight: 800; }.brand-compact .brand-mark { width: 36px; height: 36px; }
 .nav-toggle { width: 36px; height: 36px; border: 0; background: transparent; cursor: pointer; font-size: 19px; }
 .nav-scrim { position: fixed; inset: 0; z-index: 35; background: rgba(23,32,29,.42); }
 .app-bottomnav { position: fixed; inset: auto 0 0; z-index: 30; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); background: rgba(255,255,255,.97); }
@@ -343,7 +338,7 @@ tbody tr:hover { background: #f8faf7; }
 .dark .error-panel { border-color:#713c42 !important; background:#352125 !important; }
 .dark .warning-panel { border-color:#6b5931 !important; background:#362e1e !important; color:#f1d394 !important; }
 .dark .button-primary, .dark .bg-maroon.text-white,
-.dark button.bg-maroon, .dark a.bg-maroon, .dark .brand-mark {
+.dark button.bg-maroon, .dark a.bg-maroon {
   color: #0b211b !important;
 }
 .dark tbody tr:hover, .dark .table-shell tbody tr:hover { background: #252c28; }

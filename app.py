@@ -56,7 +56,7 @@ ANALYSIS AND COMPATIBILITY API
 ------------------------------
   GET  /compare                   -> side-by-side diff of two history entries
   GET  /api/history/search        -> filtered/sorted/paginated history
-  POST /api/entropy               -> pre-compression compressibility estimate
+  POST /api/entropy               -> order-0 Shannon entropy of the input
   POST /api/preview               -> text head / hex view before compressing
   GET  /api/tree/<token>          -> hybrid Huffman tree of a produced file
   GET  /api/presets               -> Fast/Balanced/Maximum descriptions
@@ -84,6 +84,7 @@ from datetime import timedelta
 
 from flask import (Blueprint, Flask, abort, flash, g, jsonify, redirect,
                    render_template, request, send_file, session, url_for)
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import afc          # engine: baseline control + decoder   (READ ONLY)
 import afc2 as engine  # engine: adaptive pipeline          (READ ONLY)
@@ -179,13 +180,9 @@ def _prune_expired_artifacts():
     days = config.RESULT_RETENTION_DAYS
     if days <= 0:
         return
-    conn = db.connect(config.DATABASE_PATH)
+    conn = db.connect()
     try:
-        rows = conn.execute(
-            "SELECT a.history_id, a.storage_key, a.user_id "
-            "FROM stored_artifacts a "
-            "WHERE created_at < datetime('now', ?)",
-            ("-%d days" % days,)).fetchall()
+        rows = db.expired_artifacts(days, connection=conn)
         for row in rows:
             try:
                 artifact_store.delete(row["storage_key"])
@@ -206,16 +203,11 @@ def _reconcile_artifact_store():
     remaining copy of user data.
     """
     artifact_store.remove_stale_temporary_files()
-    conn = db.connect(config.DATABASE_PATH)
+    conn = db.connect()
     try:
-        rows = conn.execute(
-            "SELECT history_id, storage_key FROM stored_artifacts").fetchall()
-        for row in rows:
+        for row in db.all_stored_artifacts(connection=conn):
             if not artifact_store.exists(row["storage_key"]):
-                conn.execute(
-                    "UPDATE stored_artifacts SET integrity_status = 'missing',"
-                    " last_verified_at = datetime('now') WHERE history_id = ?",
-                    (row["history_id"],))
+                db.mark_artifact_missing(row["history_id"], connection=conn)
         conn.commit()
     finally:
         conn.close()
@@ -1023,11 +1015,14 @@ def api_history_search():
 @main.post("/api/entropy")
 @auth.login_required
 def api_entropy():
-    """Feature 6 — pre-compression compressibility estimate.
+    """Feature 6 — order-0 Shannon entropy of the input.
 
     Shannon entropy over the Tier-1 byte histogram, computed by reading the
-    uploaded bytes. Read-only: no engine state is touched and nothing is
-    stored. Called the moment a file is selected, before any compression."""
+    uploaded bytes. This is a measured bound rather than a prediction: no
+    model is fitted and no inference is performed, so the same file always
+    yields the same figure. Read-only: no engine state is touched and nothing
+    is stored. Called the moment a file is selected, before any
+    compression."""
     f = request.files.get("file")
     if f is None or not f.filename:
         return jsonify(error="No file supplied."), 400
@@ -1302,14 +1297,31 @@ def report_pdf():
 # ---------------------------------------------------------------------------
 
 def create_app(db_path=None, testing=False, storage_dir=None):
+    if testing:
+        # Defense in depth for every test caller, including callers outside
+        # tests/test_app.py. A production .env must never redirect a testing
+        # application to Supabase.
+        config.DB_BACKEND = "sqlite"
+        config.STORAGE_BACKEND = "local"
     app = Flask(__name__)
+    if config.TRUST_PROXY and not testing:
+        # Caddy is the sole public ingress in the Oracle deployment. Trust one
+        # hop so rate limiting and HTTPS-aware URL handling see the real client.
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
     app.config["MAX_CONTENT_LENGTH"] = config.MAX_CONTENT_LENGTH
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(
         minutes=config.SESSION_LIFETIME_MINUTES)
     app.config["TESTING"] = testing
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = config.SECURE_COOKIES and not testing
     app.config["CSRF_PROTECT"] = not testing
+    # Pick up template and static edits without a restart. The server runs
+    # with debug off, which otherwise caches compiled templates for the
+    # life of the process; both checks are cheap next to a local request.
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
     app.secret_key = ("afc-test-secret-not-for-production-0001"
                       if testing else _installation_secret())
     if db_path:
@@ -1321,7 +1333,9 @@ def create_app(db_path=None, testing=False, storage_dir=None):
         # touching the real application store.
         config.RESULT_STORAGE_DIR = db_path + ".results"
 
-    db.init_db(config.DATABASE_PATH)
+    # An explicit path pins db.connect() to SQLite, which is what the test
+    # suite needs.  The deployed PostgreSQL backend must not be given one.
+    db.init_db(None if config.using_postgres() else config.DATABASE_PATH)
     artifact_store.ensure_dir()
     _reconcile_artifact_store()
     _prune_expired_artifacts()

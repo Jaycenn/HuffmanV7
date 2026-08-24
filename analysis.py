@@ -52,10 +52,12 @@ def entropy_report(data: bytes, sample_limit: int = 4 << 20) -> dict:
     builds; we recompute it here rather than reaching into the engine.
 
     Returns the entropy in bits/byte, the floor that a pure order-0 Huffman
-    coder could reach, and a qualitative band.  It is an ESTIMATE and is
-    labelled as such in the UI: AFC routinely beats the order-0 bound because
-    its dictionary of structural blocks captures multi-byte regularity that a
-    per-byte entropy figure cannot see.
+    coder could reach, and a qualitative band.  This is a MEASURED BOUND
+    rather than a prediction: it is computed deterministically from the file's
+    own byte histogram and involves no model, no training and no inference.
+    AFC routinely beats the order-0 bound, because its dictionary of
+    structural blocks captures multi-byte regularity that a per-byte entropy
+    figure cannot see -- which is precisely why the bound is worth showing.
     """
     n = len(data)
     if n == 0:

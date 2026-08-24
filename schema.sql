@@ -1,7 +1,16 @@
--- schema.sql — AFC web app, Part 1.
+-- schema.sql — AFC web app, SQLite development store.
 --
--- Local SQLite only.  See SCOPE_NOTES.md for why a local SQLite file still
--- satisfies the thesis "local / non-cloud" delimitation.
+-- This is the LOCAL development and test schema.  The deployed system uses
+-- Supabase managed PostgreSQL; schema_pg.sql is its equivalent, and Appendix G
+-- documents the mapping between them.  The logical model is identical in both
+-- and only the physical types differ.  AFC_DB_BACKEND selects which one the
+-- application uses; it defaults to sqlite, and the automated test suite always
+-- runs against this file so that it needs no network and no credentials.
+--
+-- NOTE: this file is not the whole SQLite schema.  db.py adds eight further
+-- compression_history columns at startup through its _MIGRATIONS list, so a
+-- database created from this file alone is eight columns short until db.py
+-- has opened it once.
 --
 -- Apply with:  python -c "import db; db.init_db()"
 -- or reset with:  python -c "import db; db.reset_db()"   (DESTRUCTIVE)
@@ -11,7 +20,10 @@ PRAGMA foreign_keys = ON;
 -- ---------------------------------------------------------------------------
 -- users
 -- ---------------------------------------------------------------------------
--- password_hash: werkzeug.security.generate_password_hash (PBKDF2-SHA256).
+-- password_hash: werkzeug.security.generate_password_hash, whose current
+--   default is scrypt.  The algorithm and its parameters are recorded in the
+--   stored string itself, so check_password_hash verifies an older pbkdf2
+--   hash and a newer scrypt one alike and the column needs no migration.
 --   Plaintext passwords are never stored or logged.
 --   NOTE: this is ACCOUNT password hashing only.  It is NOT file encryption —
 --   the thesis Delimitations exclude encrypting compressed output, and nothing
