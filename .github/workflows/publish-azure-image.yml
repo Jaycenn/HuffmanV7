@@ -3,6 +3,7 @@ name: Publish Azure container image
 on:
   push:
     branches:
+      - main
       - Aegyog-edits
   workflow_dispatch:
 
