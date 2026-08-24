@@ -339,7 +339,7 @@ the UI.
 | `MAX_BATCH_SIZE` | 500 MB | `AFC_MAX_BATCH_SIZE` |
 
 Defaults match the ceiling the thesis Appendix C documents as tested. The hosted
-instance lowers `AFC_MAX_FILE_SIZE` to 25 MB — not for memory, but because the
+instance lowers `AFC_MAX_FILE_SIZE` to 100 MB — not for memory, but because the
 upload and the compression share one request and a 100 MB file takes 63.5 s of
 compression alone, past where the host gateway returns 504. `DEPLOYMENT.md` has
 the measured table and the sentence that needs adding to Scope and
