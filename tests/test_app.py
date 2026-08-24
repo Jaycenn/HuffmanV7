@@ -51,6 +51,12 @@ def make_app():
     fd, path = tempfile.mkstemp(suffix=".sqlite3")
     os.close(fd)
     os.remove(path)
+    # A developer may legitimately keep production Supabase settings in the
+    # ignored .env. Tests must never inherit those backends: doing so would
+    # mutate the deployed database/object store and invalidate local-storage
+    # assertions. Pin both backends before app.py creates its module-level app.
+    config.DB_BACKEND = "sqlite"
+    config.STORAGE_BACKEND = "local"
     config.DATABASE_PATH = path
     # Isolate durable files before importing app: app.py creates its default
     # application at import time, so setting only the DB here could otherwise
