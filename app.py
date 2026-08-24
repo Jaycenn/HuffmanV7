@@ -1297,6 +1297,12 @@ def report_pdf():
 # ---------------------------------------------------------------------------
 
 def create_app(db_path=None, testing=False, storage_dir=None):
+    if testing:
+        # Defense in depth for every test caller, including callers outside
+        # tests/test_app.py. A production .env must never redirect a testing
+        # application to Supabase.
+        config.DB_BACKEND = "sqlite"
+        config.STORAGE_BACKEND = "local"
     app = Flask(__name__)
     if config.TRUST_PROXY and not testing:
         # Caddy is the sole public ingress in the Oracle deployment. Trust one
