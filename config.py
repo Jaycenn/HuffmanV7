@@ -173,6 +173,16 @@ LOGIN_WINDOW_SECONDS = int(os.environ.get("AFC_LOGIN_WINDOW_SECONDS", 300))
 # Idle session expiry.
 SESSION_LIFETIME_MINUTES = int(os.environ.get("AFC_SESSION_MINUTES", 60))
 
+# Production reverse-proxy settings. Keep both disabled for direct local HTTP
+# development. The Oracle deployment enables them because Caddy is the only
+# public path to Flask and terminates HTTPS on the application's behalf.
+TRUST_PROXY = os.environ.get("AFC_TRUST_PROXY", "0").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+SECURE_COOKIES = os.environ.get("AFC_SECURE_COOKIES", "0").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+
 MIN_PASSWORD_LENGTH = 8
 
 # --------------------------------------------------------------------------

@@ -1,4 +1,5 @@
-# Image for the hosted demonstration instance (Hugging Face Spaces, Docker SDK).
+# Image for the hosted demonstration instance. The primary deployment target is
+# an Oracle Cloud Ampere VM, but the image remains portable across Linux hosts.
 #
 # Three things this file exists to guarantee, in order of how badly each one
 # hurts if it is wrong:
@@ -24,8 +25,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends g++ \
  && rm -rf /var/lib/apt/lists/*
 
-# Spaces runs containers as UID 1000.  Creating that user here means the
-# application files are owned by the account that will actually run them.
+# Run as an unprivileged UID rather than root.
 RUN useradd -m -u 1000 user
 USER user
 ENV HOME=/home/user \
@@ -46,11 +46,8 @@ COPY --chown=user:user . ./
 RUN g++ -O3 -std=c++17 -shared -fPIC -pthread afc_native.cpp -o afc_kernels.so \
  && python tools/verify_native.py
 
-# 7860 is what a Space routes to, via app_port in README.md.  Railway and most
-# other hosts instead inject $PORT and expect the process to bind whatever they
-# chose, so honour it when present and fall back to 7860 when it is not.  On a
-# Space, do NOT define a PORT variable -- it would override app_port and the
-# router would knock on a door nothing is listening at.
+# Oracle Compose routes Caddy to port 7860. Other hosts may inject $PORT, so
+# honour it when present and otherwise use 7860.
 EXPOSE 7860
 
 # Shell form, because ${PORT} has to be expanded.  `exec` hands PID 1 to

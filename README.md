@@ -1,14 +1,3 @@
----
-title: ByteSize
-emoji: 🗜️
-colorFrom: gray
-colorTo: blue
-sdk: docker
-app_port: 7860
-pinned: false
-short_description: Adaptive file compression using multi-level frequency analysis
----
-
 # ByteSize — Adaptive File Compression (AFC)
 
 **This archive is the complete project: compression engine + web application
@@ -104,18 +93,19 @@ against what the application expects.
 
 ### Deploying a hosted instance
 
-`DEPLOYMENT.md` covers putting the app on a public HTTPS address. The target is
-a Hugging Face Space on the Docker SDK; the YAML block at the top of this README
-is what configures it. The `Dockerfile` compiles the native core into the image
-and refuses the build unless `tools/verify_native.py` confirms the full ladder
-is reachable — the pure-Python fallback is ~12x slower with byte-identical
-output and nothing on screen says so. It runs gunicorn with **exactly one
-worker**, which is not a performance choice: finished results live in a
-per-process dictionary (`app.py:112`), so a second worker would 404 downloads at
-random. `Procfile` and `build.sh` keep a Procfile-host path open as well.
+The primary hosted target is Azure Container Apps under Azure for Students.
+`.github/workflows/publish-azure-image.yml` builds the verified Linux image and
+publishes it to GitHub Container Registry without requiring a paid Azure
+Container Registry. `azure.env.example` inventories the non-secret settings and
+the secrets that must be configured in Azure. Supabase continues to provide
+PostgreSQL and private result storage. The deployment retains the
+thesis-documented limits of 100 MiB per file and 500 MiB per batch.
 
-`DEPLOYMENT.md` also carries the measured timing and memory envelope, and the
-reason the per-file cap is set by the host gateway's timeout rather than by RAM.
+The `Dockerfile` compiles the native core into the target image and refuses the
+build unless `tools/verify_native.py` confirms the full ladder is reachable. It
+runs gunicorn with **exactly one worker and one thread** because finished
+downloads live in a per-process dictionary (`app.py:112`) and compression is
+intentionally serialized to bound memory usage.
 
 ### Default admin credentials
 

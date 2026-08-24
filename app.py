@@ -84,6 +84,7 @@ from datetime import timedelta
 
 from flask import (Blueprint, Flask, abort, flash, g, jsonify, redirect,
                    render_template, request, send_file, session, url_for)
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import afc          # engine: baseline control + decoder   (READ ONLY)
 import afc2 as engine  # engine: adaptive pipeline          (READ ONLY)
@@ -1297,12 +1298,18 @@ def report_pdf():
 
 def create_app(db_path=None, testing=False, storage_dir=None):
     app = Flask(__name__)
+    if config.TRUST_PROXY and not testing:
+        # Caddy is the sole public ingress in the Oracle deployment. Trust one
+        # hop so rate limiting and HTTPS-aware URL handling see the real client.
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
     app.config["MAX_CONTENT_LENGTH"] = config.MAX_CONTENT_LENGTH
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(
         minutes=config.SESSION_LIFETIME_MINUTES)
     app.config["TESTING"] = testing
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = config.SECURE_COOKIES and not testing
     app.config["CSRF_PROTECT"] = not testing
     # Pick up template and static edits without a restart. The server runs
     # with debug off, which otherwise caches compiled templates for the
