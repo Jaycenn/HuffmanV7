@@ -226,9 +226,14 @@ adjustable with `?depth=` on `/api/tree/<token>` (4–12, default 9).
 
 | Preset | Effect | Profiles searched | Backend |
 |---|---|---|---|
-| **Fast** | fewer candidates, no optimal parsing, fewer growth rounds | 1 | **C++ native** |
-| **Balanced** *(default)* | engine defaults plus three reshaped scans | 5 | **C++ native** |
-| **Maximum** | everything Balanced tries, again at the deepest settings | 9 | **C++ native** |
+| **Fast** | fewer candidates, no optimal parsing, fewer growth rounds | 2 | **C++ native** |
+| **Balanced** *(default)* | everything Fast tries, then the same four shapes at engine-default depth | 6 | **C++ native** |
+| **Maximum** | everything Balanced tries, again at the deepest settings, plus two more shapes | 12 | **C++ native** |
+
+Profile counts are for input up to 8 MB. Above that the ladder drops the wider
+n-gram scans — measured, not assumed; see the note below — leaving 1, 3 and 7.
+`presets.ladder_for(name, nbytes)` reports the exact ladder for any size, and
+each corpus run records the counts it used in its `*_backend.json` sidecar.
 
 > **[v9] A preset is a search, and a costlier preset is never larger.** Until
 > v9 a preset could only search *deeper*, because the rest of the engine's
@@ -406,7 +411,7 @@ afc2.NATIVE   # True when the C++ core is active
 | `filetypes.py` | content-based type detection; recovers the original extension on decompress. Compresses nothing |
 | `analysis.py` | read-only entropy / container / tree / attribution analysis |
 | `presets.py` | Fast / Balanced / Maximum tunable presets |
-| `tests/test_app.py` | 366-check end-to-end suite (native presets, AFC1-AFC6, web, integrity and document paths) |
+| `tests/test_app.py` | 541-check end-to-end suite (native presets, AFC1-AFC6, web, integrity and document paths) |
 | `tools/native_doctor.py` | [v7] diagnoses why the native core is or is not loaded |
 | `containers.py` | PDF/OOXML inventory, exact tiling, AFC3/AFC4/AFC6 routing and whole-file size guards |
 | `deflate_tokens.py` | Reversible parser/serializer for existing DOCX member tokens; makes XML available to Hybrid-Huffman without adding a compressor |
