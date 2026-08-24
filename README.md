@@ -65,11 +65,31 @@ python app.py                     # opens http://127.0.0.1:5000
 ```
 
 The SQLite database (`afc_app.sqlite3`) is created automatically next to
-`app.py` on first run, along with the seeded admin. That is the default and is
-what the test suite uses. To run against Supabase instead, copy `.env.example`
-to `.env`, fill it in, and set `AFC_DB_BACKEND=supabase` and
-`AFC_STORAGE_BACKEND=supabase` — both together, or metadata and files end up in
-different places.
+`app.py` on first run, along with the seeded admin. That is the default, and it
+is what the automated test suite always uses, so the suite needs no network and
+no credentials.
+
+### Running against Supabase
+
+`pip install "psycopg[binary]" supabase python-dotenv`, then create a `.env`
+file next to `app.py`. It is git-ignored and must stay that way — the service
+role key bypasses row-level security.
+
+| Variable | What it is |
+|---|---|
+| `AFC_DB_BACKEND` | `sqlite` (default) or `supabase` |
+| `AFC_STORAGE_BACKEND` | `local` (default) or `supabase` |
+| `AFC_PG_DSN` | PostgreSQL connection URI. Take the **session pooler** string from the project's Connect panel; its username is `postgres.<project-ref>`, not `postgres`, and the direct host is IPv6-only on some projects |
+| `SUPABASE_URL` | project URL, from Project Settings |
+| `SUPABASE_SERVICE_ROLE_KEY` | the secret key, never the publishable one |
+| `SUPABASE_BUCKET` | private bucket holding compressed results. Case-sensitive |
+| `AFC_ADMIN_PASSWORD` | password for the seeded admin on a *fresh* database. Without it, the public default below is used |
+
+Set `AFC_DB_BACKEND` and `AFC_STORAGE_BACKEND` together, or metadata and files
+end up in different places. Apply `schema_pg.sql` once in the Supabase SQL
+editor before first run, then check the result with `python supabase_check.py`,
+which verifies every table, column count, index and row-level-security setting
+against what the application expects.
 
 ### Default admin credentials
 
