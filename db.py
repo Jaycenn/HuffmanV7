@@ -513,7 +513,7 @@ def stored_bytes_for_user(user_id):
 
 
 def get_stored_artifact(history_id):
-    """Resolve by history id; the route performs owner/admin authorization."""
+    """Resolve by history id; the route performs owner-only authorization."""
     return get_db().execute("""
         SELECT a.*, h.filename, h.container_format, h.sha256_container,
                h.batch_id

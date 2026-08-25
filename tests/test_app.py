@@ -1181,8 +1181,8 @@ def test_persistent_artifact_access(app, appmod):
                         follow_redirects=False).status_code in (301, 302))
     admin_client = restarted.test_client()
     login(admin_client, config.DEFAULT_ADMIN_USERNAME, "admin-new-password")
-    check("administrator may retrieve a stored artifact",
-          admin_client.get("/files/%d/download" % row_id).status_code == 200)
+    check("administrator receives 404 for another user's stored artifact",
+          admin_client.get("/files/%d/download" % row_id).status_code == 404)
 
     with open(disk_path, "ab") as handle:
         handle.write(b"tampered")
