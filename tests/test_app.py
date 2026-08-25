@@ -1480,6 +1480,80 @@ def test_installation_secret_and_storage_safety(appmod):
         except ValueError:
             rejected = True
         check("artifact storage beneath static is rejected", rejected)
+
+        # Supabase Free limits one object to 50 MB while ByteSize deliberately
+        # accepts 100 MiB files.  Exercise the transparent chunk layer with a
+        # tiny threshold so this remains a fast, credential-free unit test.
+        import storage_supabase
+
+        class FakeBucket:
+            def __init__(self):
+                self.objects = {}
+                self.fail_name = None
+
+            def upload(self, name, blob, _options):
+                if name == self.fail_name:
+                    raise OSError("simulated remote upload failure")
+                self.objects[name] = bytes(blob)
+
+            def download(self, name):
+                if name not in self.objects:
+                    raise FileNotFoundError(name)
+                return self.objects[name]
+
+            def exists(self, name):
+                return name in self.objects
+
+            def remove(self, names):
+                removed = []
+                for name in names:
+                    if name in self.objects:
+                        removed.append(self.objects.pop(name))
+                return removed
+
+            def list(self, _prefix, options):
+                names = sorted(self.objects)
+                start = options.get("offset", 0)
+                end = start + options.get("limit", 100)
+                return [{"name": name} for name in names[start:end]]
+
+        fake = FakeBucket()
+        real_bucket = storage_supabase._bucket
+        real_chunk = storage_supabase._CHUNK_BYTES
+        storage_supabase._bucket = lambda: fake
+        storage_supabase._CHUNK_BYTES = 8
+        key = "a" * 32
+        large = b"transparent chunked result"
+        try:
+            storage_supabase.put(key, large)
+            check("Supabase large artifacts use a published manifest",
+                  key in fake.objects
+                  and sum(name.startswith(key + ".part.")
+                          for name in fake.objects) == 4)
+            check("Supabase chunked artifacts reassemble byte-exact",
+                  storage_supabase.get(key) == large)
+            check("Supabase listing exposes one logical artifact, not parts",
+                  storage_supabase.list_keys(re.compile(r"^[0-9a-f]{32}$"))
+                  == [key])
+            check("Supabase deletion removes a manifest and all parts",
+                  storage_supabase.delete(key) and not fake.objects)
+
+            storage_supabase.put(key, b"legacy")
+            check("Supabase legacy single-object artifacts remain compatible",
+                  storage_supabase.get(key) == b"legacy")
+            storage_supabase.delete(key)
+
+            fake.fail_name = storage_supabase._part_key(key, 1)
+            try:
+                storage_supabase.put(key, large)
+                rolled_back = False
+            except OSError:
+                rolled_back = not fake.objects
+            check("failed Supabase chunk upload rolls back partial objects",
+                  rolled_back)
+        finally:
+            storage_supabase._bucket = real_bucket
+            storage_supabase._CHUNK_BYTES = real_chunk
     finally:
         config.DATABASE_PATH = old_db
         config.RESULT_STORAGE_DIR = old_store
@@ -1635,9 +1709,23 @@ def test_account_deletion_removes_artifacts(app):
     response = admin_client.post("/admin/users/%d/delete" % target_id)
     with app.app_context():
         gone = db.get_user_by_id(target_id) is None
+        identifying_audit = db.get_db().execute(
+            "SELECT COUNT(*) AS n FROM audit_log"
+            " WHERE username = ? OR instr(detail, ?) > 0",
+            ("eraseme", "eraseme")).fetchone()["n"]
+        anonymized_register = db.get_db().execute(
+            "SELECT username, ip_address FROM audit_log"
+            " WHERE event = 'register' AND user_id IS NULL"
+            " ORDER BY id DESC LIMIT 1").fetchone()
     check("deleting an account removes its artifact files",
           response.status_code in (301, 302) and gone
           and not os.path.exists(disk_path))
+    check("account deletion removes username from retained audit events",
+          identifying_audit == 0, identifying_audit)
+    check("account deletion removes IP from the former user's audit events",
+          anonymized_register is not None
+          and anonymized_register["username"] == ""
+          and anonymized_register["ip_address"] == "")
 
 
 

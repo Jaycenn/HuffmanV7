@@ -1,5 +1,5 @@
 # Image for the hosted demonstration instance. The primary deployment target is
-# an Oracle Cloud Ampere VM, but the image remains portable across Linux hosts.
+# Azure Container Apps, but the image remains portable across Linux hosts.
 #
 # Three things this file exists to guarantee, in order of how badly each one
 # hurts if it is wrong:
@@ -11,7 +11,7 @@
 #      says so.  A participant would rate that on the questionnaire as "the
 #      compressor is slow".
 #   2. Exactly one gunicorn worker with one thread.  Finished results live in a
-#      per-process dict (app.py:112) and decompressed originals exist ONLY
+#      per-process dict (app.py:113) and decompressed originals exist ONLY
 #      there, so a second worker 404s downloads at random.  The single sync
 #      worker is also the only thing enforcing MAX_CONCURRENT_JOBS == 1.
 #   3. A worker timeout long enough for a real compression.  The work happens
@@ -46,8 +46,8 @@ COPY --chown=user:user . ./
 RUN g++ -O3 -std=c++17 -shared -fPIC -pthread afc_native.cpp -o afc_kernels.so \
  && python tools/verify_native.py
 
-# Oracle Compose routes Caddy to port 7860. Other hosts may inject $PORT, so
-# honour it when present and otherwise use 7860.
+# Azure ingress targets port 7860. Other hosts may inject $PORT, so honour it
+# when present and otherwise use 7860.
 EXPOSE 7860
 
 # Shell form, because ${PORT} has to be expanded.  `exec` hands PID 1 to

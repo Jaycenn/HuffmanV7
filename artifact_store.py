@@ -149,8 +149,8 @@ def list_keys():
 def remove_stale_temporary_files(min_age_seconds=3600):
     """Remove incomplete atomic-write files left by a terminated process."""
     if config.using_supabase_storage():
-        # An upload is a single request: it either produced a complete object
-        # or none at all, so there are no partial writes to sweep.
+        # The remote backend publishes a chunk manifest only after every part
+        # succeeds and rolls uploaded parts back when a request fails.
         return 0
     root = ensure_dir()
     removed = 0

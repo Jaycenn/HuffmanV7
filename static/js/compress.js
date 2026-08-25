@@ -163,8 +163,9 @@
         if (j.error) return;
         $("sEntVal").textContent = j.entropy_bits_per_byte.toFixed(3);
         $("sEntBar").style.width = (100 * j.entropy_bits_per_byte / 8).toFixed(1) + "%";
-        // Not a prediction: this is the measured order-0 bound for this file.
-        $("sEntBand").innerHTML = "Byte-level coding limit ≈ <strong>"
+        // Not a prediction: this is a measured bound for the displayed prefix
+        // sample, which keeps remote preflight inspection quick.
+        $("sEntBand").innerHTML = "Prefix-sample byte-level limit ≈ <strong>"
           + j.order0_ratio.toFixed(2) + "×</strong> — " + esc(j.band)
           + " redundancy";
         show($("sPre"), true);

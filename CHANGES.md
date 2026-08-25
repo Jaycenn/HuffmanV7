@@ -149,8 +149,9 @@ rendered it any more. It is in git history if you need the original markup.
 
 ### Accounts, roles, audit
 
-* SQLite `users` table; passwords hashed with werkzeug PBKDF2-SHA256, never
-  stored or logged in plaintext (asserted by a test).
+* SQLite `users` table; passwords use Werkzeug's recorded password-hash format
+  (currently scrypt, with legacy PBKDF2 verification), never stored or logged
+  in plaintext (asserted by a test).
 * Session login via Flask's signed cookie session. No Flask-Login dependency —
   one small auditable module instead.
 * **Seeded admin** (`admin` / `afc-admin`, see README) ships with
