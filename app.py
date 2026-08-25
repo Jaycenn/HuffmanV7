@@ -1181,9 +1181,7 @@ def download(token):
 
 def _authorized_artifact(row_id):
     item = db.get_stored_artifact(row_id)
-    if item is None:
-        abort(404)
-    if item["user_id"] != g.user["id"] and g.user["role"] != "admin":
+    if item is None or item["user_id"] != g.user["id"]:
         abort(404)
     return item
 
@@ -1191,7 +1189,7 @@ def _authorized_artifact(row_id):
 @main.get("/files/<int:row_id>/download")
 @auth.login_required
 def download_stored(row_id):
-    """Owner/admin re-download with a fresh SHA-256 check on every request."""
+    """Owner-only re-download with a fresh SHA-256 check on every request."""
     item = _authorized_artifact(row_id)
     try:
         blob = artifact_store.read_verified(
