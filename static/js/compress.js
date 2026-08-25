@@ -128,7 +128,11 @@
   // ---- pre-compression estimate, preview and detected type ----------------
   function inspect(file) {
     var fd = new FormData();
-    fd.append("file", file);
+    // Detection needs only the file signature/head. Sending the complete
+    // upload here made remote deployments transfer a large file once for
+    // preview, again for entropy, and then a third time for compression.
+    // Preserve the original filename while bounding this advisory request.
+    fd.append("file", file.slice(0, 64 * 1024), file.name);
     fetch("/api/preview", { method: "POST", body: fd })
       .then(function (r) { return r.json(); })
       .then(function (j) {
@@ -149,7 +153,10 @@
       .catch(function () { $("sPickType").textContent = ""; });
 
     var fd2 = new FormData();
-    fd2.append("file", file);
+    // A deterministic prefix sample is sufficient for the advisory entropy
+    // estimate. The full file is still uploaded and verified when Compress
+    // File is clicked; this changes no compression or losslessness behavior.
+    fd2.append("file", file.slice(0, 256 * 1024), file.name);
     fetch("/api/entropy", { method: "POST", body: fd2 })
       .then(function (r) { return r.json(); })
       .then(function (j) {

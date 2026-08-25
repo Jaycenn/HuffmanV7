@@ -338,12 +338,15 @@ the UI.
 | `MAX_FILE_SIZE` | 100 MB | `AFC_MAX_FILE_SIZE` |
 | `MAX_BATCH_SIZE` | 500 MB | `AFC_MAX_BATCH_SIZE` |
 
-Defaults match the ceiling the thesis Appendix C documents as tested. The hosted
-instance lowers `AFC_MAX_FILE_SIZE` to 25 MB — not for memory, but because the
-upload and the compression share one request and a 100 MB file takes 63.5 s of
-compression alone, past where the host gateway returns 504. `DEPLOYMENT.md` has
-the measured table and the sentence that needs adding to Scope and
-Delimitations. **Read `SIZE_POLICY.md` before raising them** — it has measured
+Defaults match the ceiling the thesis Appendix C documents as tested, and the
+hosted instance runs them unchanged: `azure.env.example` sets
+`AFC_MAX_FILE_SIZE=104857600` and `AFC_MAX_BATCH_SIZE=524288000`, so the
+manuscript and the deployment agree and no delimitation sentence is needed. What
+does constrain a large upload is the platform's 240-second ingress timeout,
+which the upload and the compression share — a 100 MB file needs 63.5 s of
+compression on 2 vCPU before any upload time is counted. `DEPLOYMENT.md` §3.3
+has the arithmetic and the connection speeds at which it stops fitting.
+**Read `SIZE_POLICY.md` before raising them** — it has measured
 150 MB and 250 MB results, the memory profile, and the exact sentence to update
 in the paper.
 Note the requested 1 MB minimum was deliberately not adopted: it would reject
@@ -442,7 +445,7 @@ afc2.NATIVE   # True when the C++ core is active
 | `CHANGES_v4_engine.md` | engine changelog, mapped to thesis terminology |
 | `SCOPE_NOTES.md` | constraint compliance + what Part 2 inherits |
 | `SIZE_POLICY.md` | measured size/memory limits and the Appendix C sentence |
-| `DEPLOYMENT.md` | hosting the app: the single-worker requirement, the measured memory envelope, and the per-file cap a given instance can carry |
+| `DEPLOYMENT.md` | deploying to Azure Container Apps: the one-replica requirement, the measured timing and memory envelope, the scale-to-zero cost argument, and what the 240-second ingress timeout means for large uploads |
 | `Dockerfile`, `.dockerignore` | the hosted image: native core compiled in and verified, gunicorn with one worker |
 | `requirements.txt`, `build.sh`, `Procfile`, `.python-version` | Procfile-host path, so the deployment is not locked to one provider |
 | `tools/verify_native.py` | fails a build whose native core did not load or whose preset ladder is short |
