@@ -429,7 +429,9 @@
   // ---- Feature 6 + 11: entropy estimate + preview on selection ------------
   function inspect(file) {
     var fd = new FormData();
-    fd.append("file", file);
+    // Entropy is advisory, so send a bounded deterministic prefix rather
+    // than uploading the complete file before the real compression request.
+    fd.append("file", file.slice(0, 256 * 1024), file.name);
     fetch("/api/entropy", { method: "POST", body: fd })
       .then(function (r) { return r.json(); })
       .then(function (j) {
@@ -461,7 +463,8 @@
       .catch(function () { /* estimate is advisory; never block the queue */ });
 
     var fd2 = new FormData();
-    fd2.append("file", file);
+    // Type detection and preview need only the signature/head bytes.
+    fd2.append("file", file.slice(0, 64 * 1024), file.name);
     fetch("/api/preview", { method: "POST", body: fd2 })
       .then(function (r) { return r.json(); })
       .then(function (j) {
