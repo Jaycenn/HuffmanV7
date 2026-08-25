@@ -11,7 +11,7 @@
         <a class="button button-primary" href="{{ url_for('auth.login') }}">Sign in to compress</a>
         <a class="button button-secondary" href="#method">See how it works</a>
       </div>
-      <p class="privacy-line"><span aria-hidden="true">●</span> Local processing · SHA-256 verified · No lossy conversion</p>
+      <p class="privacy-line"><span aria-hidden="true">●</span> Server-side processing · SHA-256 verified · No lossy conversion</p>
     </div>
 
     <div class="product-preview" aria-label="Preview of the signed-in compression workspace">
@@ -69,13 +69,13 @@
   </section>
 
   <section class="landing-cta">
-    <div><p class="eyebrow">Ready when you are</p><h2>Compress locally. Restore exactly.</h2></div>
+    <div><p class="eyebrow">Ready when you are</p><h2>Compress securely. Restore exactly.</h2></div>
     <a class="button button-primary" href="{{ url_for('auth.register') }}">Create an account</a>
   </section>
 </main>
 <footer class="public-footer">
   <span>ByteSize</span>
-  <span>Static canonical Hybrid Huffman · Local and lossless ·
+  <span>Static canonical Hybrid Huffman · Server-side and lossless ·
     <a href="{{ url_for('main.about_page') }}">About the method</a></span>
 </footer>
 {% endblock %}

@@ -22,7 +22,7 @@ the conditions that produced it are quoted with it.
 `app.py` keeps finished results in a per-process dictionary:
 
 ```python
-# app.py:112
+# app.py:113
 RESULTS = {}
 MAX_KEEP = 60
 ```
@@ -36,7 +36,7 @@ originals exist *only* there — they are deliberately never written to disk.
 * **On Container Apps this extends to replicas.**  Every replica is a separate
   container with its own empty `RESULTS`.  Deploy with `--max-replicas 1`, or
   the same bug arrives from the platform instead of from gunicorn.
-* **One worker with one thread is also the concurrency gate.**  `app.py:617`
+* **One worker with one thread is also the concurrency gate.**  `app.py:614`
   records that the batch queue is driven by the client, one request per file,
   because the DP parse peaks near 19x the input size and running files
   concurrently multiplies peak RSS instead of saving wall-clock time.  Nothing
@@ -44,7 +44,7 @@ originals exist *only* there — they are deliberately never written to disk.
 
 **What a restart actually costs.**  A replica that scales to zero and comes back
 has an empty `RESULTS`.  That is survivable because `/files/<id>/download`
-(`app.py:1190`) serves compressed artifacts straight from Supabase Storage with a
+(`app.py:1193`) serves compressed artifacts straight from Supabase Storage with a
 fresh SHA-256 check, independent of `RESULTS`.  A participant whose download
 token has expired re-downloads from the Files page.  Only an un-downloaded
 *decompressed* original is unrecoverable, and decompressing again regenerates it.
@@ -52,7 +52,7 @@ token has expired re-downloads from the Files page.  Only an un-downloaded
 ### 1.2 Two timeouts, and the tighter one belongs to the platform
 
 Compression happens synchronously inside the HTTP request (`_process_one`,
-`app.py:429`), and it includes a full decompress-and-compare round trip before
+`app.py:430`), and it includes a full decompress-and-compare round trip before
 the result is saved.  Gunicorn's default worker timeout is 30 seconds, which
 would kill the worker part-way through anything large; the `Dockerfile` sets
 `--timeout 600`.
@@ -77,7 +77,9 @@ A short ladder is not a slower build — it is a *different experiment*, because
 `presets.ladder_for()` decides which profile wins.
 
 **This is now verified in CI, not just claimed.**  `.github/workflows/publish-azure-image.yml`
-builds the image on every push to `main` and `Aegyog-edits`.  Because
+builds the image on every push to `main` and `Aegyog-edits`. `main` updates the
+`:azure` deployment tag; the development branch updates `:aegyog-edits`, and
+both publish an immutable commit-SHA tag. Because
 `verify_native.py` runs inside a `RUN` layer, a green build is proof that the
 native core loaded and that all three ladders were reachable inside the image.
 
@@ -87,7 +89,7 @@ By default `app.py` persists a generated key to `.afc_secret` beside the source.
 A container filesystem is ephemeral, so that file is regenerated on every
 restart, which silently invalidates every session — participants would be logged
 out mid-task by an ordinary scale event.  Set `AFC_SECRET_KEY` as a Container
-Apps secret and the file is never touched (`app.py:215`).
+Apps secret and the file is never touched (`app.py:218`).
 
 ### 1.5 Proxy trust has to be explicit
 
@@ -95,7 +97,7 @@ Container Apps terminates HTTPS and forwards to the container over plain HTTP,
 one hop.  Two settings, both defaulting off so local development is unaffected:
 
 * `AFC_TRUST_PROXY=1` installs `ProxyFix(x_for=1, x_proto=1, x_host=1, x_port=1)`
-  (`app.py:1301`), so `request.remote_addr` and generated URLs reflect the real
+  (`app.py:1310`), so `request.remote_addr` and generated URLs reflect the real
   client rather than the ingress.
 * `AFC_SECURE_COOKIES=1` sets `SESSION_COOKIE_SECURE`, so the session cookie is
   only ever sent over HTTPS.
@@ -115,7 +117,7 @@ deploy — see 5.5.
 | `Dockerfile` | The image: g++ at build time, native core compiled in and verified, gunicorn with one worker binding `${PORT:-7860}`. |
 | `.dockerignore` | Keeps `benchmarks/` (~15 MB of corpora nothing at runtime reads), `tests/`, and any local `.env` out of the image. |
 | `tools/verify_native.py` | Fails a build whose native core did not load or whose ladder is short.  Used by the `Dockerfile` and by `build.sh`. |
-| `.github/workflows/publish-azure-image.yml` | Builds and publishes `ghcr.io/jaycenn/huffmanv7:azure` and a `:<sha>` tag on every push to `main` or `Aegyog-edits`. |
+| `.github/workflows/publish-azure-image.yml` | Publishes a `:<sha>` tag for both tracked branches, `:azure` from `main`, and `:aegyog-edits` from the development branch. |
 | `azure.env.example` | Inventory of the non-secret settings, plus the names of the four that must be Container Apps secrets. |
 | `requirements.txt` | Pinned runtime dependencies.  Five packages plus gunicorn; the engine itself imports nothing outside the standard library. |
 | `Procfile`, `build.sh`, `.python-version` | A Procfile-host path, kept so the deployment is not locked to one provider. |
@@ -292,8 +294,8 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 ```
 az login
-az group create --name bytesize-rg --location southeastasia
-az containerapp env create --name bytesize-env --resource-group bytesize-rg --location southeastasia
+az group create --name bytesize-rg --location eastasia
+az containerapp env create --name bytesize-env --resource-group bytesize-rg --location eastasia
 ```
 
 Then create the app itself, with the secrets first and the environment variables
@@ -322,7 +324,9 @@ az containerapp create \
       AFC_TRUST_PROXY=1 \
       AFC_SECURE_COOKIES=1 \
       AFC_MAX_FILE_SIZE=104857600 \
-      AFC_MAX_BATCH_SIZE=524288000
+      AFC_MAX_BATCH_SIZE=524288000 \
+      AFC_MAX_STORED_BYTES_PER_USER=157286400 \
+      AFC_RESULT_RETENTION_DAYS=0
 ```
 
 Each flag that is not obvious earns its place:
@@ -395,6 +399,11 @@ State these in the manuscript rather than discovering them during a session.
 * **Registration is open to anyone with the URL.**  The platform does not gate
   access; the application's own login does, but anyone can register.  Record
   each participant's username as you go so the analysis can filter cleanly.
+* **Supabase Free's 50 MB per-object ceiling is handled internally.** Large AFC
+  results are stored as a manifest plus 40 MiB private parts and reassembled
+  before the existing SHA-256/length verification. A 100 MiB incompressible
+  input therefore does not fail merely because its AFC result remains near
+  100 MiB.
 * **The per-user storage quota still applies**
   (`AFC_MAX_STORED_BYTES_PER_USER`) and is now counted against Supabase Storage
   rather than a local directory.
@@ -411,7 +420,7 @@ State these in the manuscript rather than discovering them during a session.
 | App served by gunicorn 26.2.0, single worker | `/` 200, `/login` 200, unknown route 404 |
 | `${PORT:-7860}` with `PORT` unset and `PORT=8080` | binds 7860 and 8080 respectively, `/login` 200 on both |
 | Register, compress, download, decompress, download over HTTP | restored file byte-identical to the original |
-| `python tests/test_app.py` on Linux / Python 3.11 | **541 passed, 0 failed** — the same count as the Windows run |
+| `python tests/test_app.py` on Linux / Python 3.11 | Re-run after every release; the current count is recorded in Appendix I |
 
 **Not yet verified, and only a real deploy can settle them:** whether
 `ProxyFix(x_for=1)` resolves the true client address behind Container Apps

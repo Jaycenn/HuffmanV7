@@ -44,18 +44,19 @@ The entropy stage is static canonical Huffman only. There is no arithmetic /
 range / ANS coding, no LZ77/78/W/SS or any offset-based back-reference, no
 BWT/MTF, no PPM or context mixing, and no ML model.
 
-Three implementations ship here and produce **byte-identical output**:
-pure Python (reference), C++ (`afc_native.cpp`, loaded via ctypes or compiled
-to WebAssembly), and JavaScript (`afc_engine.js`, for the standalone browser
-app).
+Three implementations ship here. Python is the reference, and C++ produces
+byte-identical output across every preset and outer-container route. JavaScript
+implements the shared default AFC1/AFC2 core and is byte-identical under those
+equivalent options; it also cross-decodes those core containers. The preset
+search ladder and AFC3-AFC6 wrappers remain Python/C++ application paths.
 
 ---
 
 # Web application (Part 1) — accounts, queue, batch, archives, reports
 
-The Flask dashboard is now a multi-user local web app. **The compression
-engine is unchanged** — see `SCOPE_NOTES.md`. Engine-level docs continue
-below this section.
+The Flask dashboard is a multi-user web app that can run locally or in Azure
+Container Apps. **The compression engine is unchanged** — see
+`SCOPE_NOTES.md`. Engine-level docs continue below this section.
 
 ## Setup
 
@@ -104,7 +105,7 @@ thesis-documented limits of 100 MiB per file and 500 MiB per batch.
 The `Dockerfile` compiles the native core into the target image and refuses the
 build unless `tools/verify_native.py` confirms the full ladder is reachable. It
 runs gunicorn with **exactly one worker and one thread** because finished
-downloads live in a per-process dictionary (`app.py:112`) and compression is
+downloads live in a per-process dictionary (`app.py:113`) and compression is
 intentionally serialized to bound memory usage.
 
 ### Default admin credentials
@@ -126,8 +127,9 @@ python -c "import db; db.reset_db()"     # DESTRUCTIVE: users, history, stored A
 ```
 
 Use the command rather than deleting SQLite by hand: it also removes opaque
-compressed results from the configured private result directory. There is no
-remote copy — see `SCOPE_NOTES.md` §4.
+compressed results from the configured private backend. With local storage it
+removes files from `RESULT_STORAGE_DIR`; with Supabase it removes the matching
+private bucket objects. See `SCOPE_NOTES.md` §4.
 
 ### Rebuilding the stylesheet
 
@@ -169,12 +171,13 @@ Each page refuses the other's input rather than silently switching operation: a
 `.afc` dropped on Compress, or a normal file dropped on Decompress, gets a
 message and a link to the correct page.
 
-**Restoring the original filename.** An AFC container stores
-`magic | mode | original_length | payload` and no filename, so the extension is
-recovered by sniffing the restored bytes (`filetypes.py`). That is why
-`MyDocument.afc` comes back as `MyDocument.pdf`. Packaged formats — PDF, DOCX,
-XLSX, PPTX, ODF — are handled whole and automatically; you never extract PDF
-page streams or DOCX package parts yourself.
+**Restoring the original filename.** Current downloads use the AFC5
+self-verifying envelope, which stores a sanitized original basename together
+with payload lengths and SHA-256 digests. Bare legacy AFC1-AFC4/AFC6 containers
+do not carry a filename; for those, `filetypes.py` recovers a useful extension
+by sniffing the restored bytes. Packaged formats — PDF, DOCX, XLSX, PPTX, ODF
+— are handled whole and automatically; you never extract PDF page streams or
+DOCX package parts yourself.
 
 > **This split is UI/UX only.** Both pages call the same
 > `afc2.compress_bytes` / `afc2.decompress_bytes` entry points the combined
@@ -246,8 +249,9 @@ adjustable with `?depth=` on `/api/tree/<token>` (4–12, default 9).
 | **Balanced** *(default)* | everything Fast tries, then the same four shapes at engine-default depth | 6 | **C++ native** |
 | **Maximum** | everything Balanced tries, again at the deepest settings, plus two more shapes | 12 | **C++ native** |
 
-Profile counts are for input up to 8 MB. Above that the ladder drops the wider
-n-gram scans — measured, not assumed; see the note below — leaving 1, 3 and 7.
+Profile counts are for input below 8 MiB. At 8 MiB and above, the ladder drops
+the wider n-gram scans — measured, not assumed; see the note below — leaving
+1, 3 and 7.
 `presets.ladder_for(name, nbytes)` reports the exact ladder for any size, and
 each corpus run records the counts it used in its `*_backend.json` sidecar.
 
@@ -373,15 +377,30 @@ the test suite — account and history metadata live in local SQLite and produce
 artifacts under the private `RESULT_STORAGE_DIR`. The deployed system sets
 `AFC_DB_BACKEND=supabase` and `AFC_STORAGE_BACKEND=supabase`, which puts the
 same data in Supabase managed PostgreSQL and a private object-storage bucket.
-The thesis Delimitations and Ethical Consideration state this and disclose
-Supabase to participants as a third-party processor; see `SCOPE_NOTES.md` §4.
+The Flask process runs in Azure Container Apps, so participant uploads reach
+Microsoft's hosted application process before completed results are persisted
+to Supabase. The thesis discloses both providers; see `SCOPE_NOTES.md` §4.
 
 **Only produced compressed output is ever persisted**, on either backend, under
 opaque server-generated identifiers, with owner checks, a configured quota, and
 SHA-256 and byte-length verification before every download — the same
 verification code either way. Uploaded originals, decompressed originals and
-extracted archive members are never written to either backend: they stay in
-memory and disappear when the process stops.
+extracted archive members are never written to either backend: they stay in an
+owner-bound, 60-entry memory cache until downloaded, evicted, or the process
+stops.
+
+Supabase Free permits at most 50 MB per storage object while ByteSize accepts
+100 MiB input files. The remote backend therefore stores a large logical AFC
+artifact as a small manifest plus 40 MiB internal parts, publishes the manifest
+only after every part succeeds, rolls back a failed upload, and transparently
+reassembles and verifies the result on download. Database rows and user-facing
+downloads still represent one artifact.
+
+Processing history includes the submitted filename and metrics. Security logs
+include username, event, and client IP while an account exists. Deleting an
+account removes its artifacts and history, deletes its login-attempt rows, and
+anonymizes its retained security events by blanking username/IP and identifying
+admin-target text.
 
 On PostgreSQL, row-level security is enabled on all six tables with no
 policies, so the only route to the data is through this application.
@@ -422,7 +441,7 @@ afc2.NATIVE   # True when the C++ core is active
 | `afc2.py` | v4 adaptive engine: multi-tier scan, Bit Cost Decision Engine, block growth, audit, DP optimal parse, CLI |
 | `afc_native.cpp` | C++ core — full pipeline both directions, plus the legacy v3 kernels |
 | `afc_native.py` | ctypes bridge; auto-loads or auto-builds the library |
-| `afc_engine.js` | JavaScript engine, byte-compatible with the above |
+| `afc_engine.js` | JavaScript implementation of the default AFC1/AFC2 core, byte-compatible with Python/C++ under equivalent options |
 | `AFC_WebApp.html` | standalone browser app (WASM core if present, JS otherwise) |
 | `app.py` | Flask app factory + page/API routes (map at top of file) |
 | `config.py` | all tunables incl. size policy — the only place limits live |
@@ -435,7 +454,7 @@ afc2.NATIVE   # True when the C++ core is active
 | `filetypes.py` | content-based type detection; recovers the original extension on decompress. Compresses nothing |
 | `analysis.py` | read-only entropy / container / tree / attribution analysis |
 | `presets.py` | Fast / Balanced / Maximum tunable presets |
-| `tests/test_app.py` | 541-check end-to-end suite (native presets, AFC1-AFC6, web, integrity and document paths) |
+| `tests/test_app.py` | 549-check end-to-end suite (native presets, AFC1-AFC6, web, storage, integrity and document paths) |
 | `tools/native_doctor.py` | [v7] diagnoses why the native core is or is not loaded |
 | `containers.py` | PDF/OOXML inventory, exact tiling, AFC3/AFC4/AFC6 routing and whole-file size guards |
 | `deflate_tokens.py` | Reversible parser/serializer for existing DOCX member tokens; makes XML available to Hybrid-Huffman without adding a compressor |

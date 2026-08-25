@@ -32,8 +32,17 @@
 
   <section class="settings-card settings-wide">
     <p class="eyebrow">Privacy</p>
-    <h2>Local processing and storage</h2>
-    <p>Accounts and processing history stay in the local SQLite database. ByteSize stores only completed compressed AFC files in private local storage so you can download them later. Uploaded originals and decompressed output are never persisted, and file contents are not sent to an external service.</p>
+    <h2>Private processing and storage</h2>
+    {% if cfg.using_postgres() and cfg.using_supabase_storage() %}
+    <p>Files are uploaded to the ByteSize application server for processing. Account data and processing history are stored in Supabase PostgreSQL, and completed compressed AFC files are kept in private Supabase object storage so you can download them later. Uploaded originals and decompressed output are never written to persistent storage.</p>
+    {% elif cfg.using_postgres() %}
+    <p>Files are processed by this ByteSize server. Account data and processing history are stored in Supabase PostgreSQL, while completed compressed AFC files use this installation's private local result store. Uploaded originals and decompressed output are never written to persistent storage.</p>
+    {% elif cfg.using_supabase_storage() %}
+    <p>Files are processed by this ByteSize server. Account data and processing history use local SQLite, while completed compressed AFC files are kept in private Supabase object storage. Uploaded originals and decompressed output are never written to persistent storage.</p>
+    {% else %}
+    <p>Accounts and processing history stay in this installation's local SQLite database. ByteSize stores only completed compressed AFC files in private local storage so you can download them later. Uploaded originals and decompressed output are never written to persistent storage.</p>
+    {% endif %}
+    <p>Processing history includes submitted filenames. Security events include username and client IP while an account exists; deleting the account removes its history and anonymizes the retained event record.</p>
     <dl>
       <div><dt>Stored-file quota</dt><dd>{{ human(cfg.MAX_STORED_BYTES_PER_USER) }}</dd></div>
       <div><dt>Retention</dt><dd>{{ 'Until owner deletion' if cfg.RESULT_RETENTION_DAYS == 0 else cfg.RESULT_RETENTION_DAYS ~ ' days' }}</dd></div>

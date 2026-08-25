@@ -4,7 +4,7 @@
 <div class="rule2 pt-4">
   <p class="eyebrow">Stored results</p>
   <h1 class="font-display text-2xl">Files</h1>
-  <p class="text-dim text-sm mt-1">Re-download or delete your compressed AFC files. Uploaded originals and restored files are never stored.</p>
+  <p class="text-dim text-sm mt-1">Re-download or delete your compressed AFC files. Uploaded originals and restored files are not written to persistent storage.</p>
   <p class="font-data text-[11px] text-dim mt-2">
     Storage limit: {{ human(cfg.MAX_STORED_BYTES_PER_USER) }} per account ·
     Retention: {{ 'until you delete it' if cfg.RESULT_RETENTION_DAYS == 0 else cfg.RESULT_RETENTION_DAYS ~ ' days' }}

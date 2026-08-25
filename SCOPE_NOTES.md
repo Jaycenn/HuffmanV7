@@ -75,19 +75,17 @@ This section used to argue that a local SQLite file satisfied a "local,
 non-cloud" delimitation. That is no longer the study's position and the
 manuscript no longer claims it.
 
-**The deployed system persists to Supabase.** Account credentials, processing
-history, the audit log and completed compressed results are held in managed
-PostgreSQL and object storage. The Delimitations say so in those words, the
-Instruments section names the service, and the Ethical Consideration discloses
-it to participants as a third-party processor before consent is given. An
-uploaded file is transmitted to the application server in order to be
-processed, and the paper states that plainly rather than describing the system
-as local-only.
+**The deployed system runs in Azure and persists to Supabase.** Participant
+uploads are processed by the Flask application in Azure Container Apps.
+Account credentials, processing history, the audit log and completed compressed
+results are held in Supabase managed PostgreSQL and object storage. The
+Delimitations and Ethical Consideration disclose both providers before consent
+is given rather than describing the system as local-only.
 
 **SQLite remains the development store.** Appendix C says so, and the code
 keeps both: `AFC_DB_BACKEND` selects `sqlite` or `supabase`,
 `AFC_STORAGE_BACKEND` selects `local` or `supabase`, and both default to the
-local option. The 541-check automated suite always runs against SQLite, so it
+local option. The 549-check automated suite always runs against SQLite, so it
 needs no network and no credentials. Appendix G documents the type mapping;
 the logical model is identical and only the physical types differ.
 
@@ -100,10 +98,12 @@ persistence layer around the engine, not the engine.
 
 **Only produced compressed output is persisted, on either backend.** Completed
 `.afc` and `.afcpak` results are stored under opaque server-generated
-identifiers: a file outside `static/` when the local backend is selected, an
-object in the private bucket when Supabase is. Uploaded originals, decompressed
-originals and extracted members are never written to either — they live in the
-owner-bound in-memory `app.RESULTS` cache and disappear when the process stops.
+identifiers: a file outside `static/` when the local backend is selected, one
+logical object in the private bucket when Supabase is. Large logical objects
+are transparently split into 40 MiB internal parts to remain under the Free
+plan's per-object cap. Uploaded originals, decompressed originals and extracted
+members are never written to either backend — they live in the owner-bound,
+60-entry `app.RESULTS` cache until downloaded, evicted, or the process stops.
 That property is unchanged by the move, and it is the stronger one to state.
 
 **What the move costs, stated rather than glossed.** There is now a remote copy
@@ -120,9 +120,12 @@ Row-level security is enabled on all six PostgreSQL tables with no policies, so
 the only route to the data is through the application and the auto-generated
 REST API reaches nothing. `RESULT_RETENTION_DAYS=0` keeps results until owner
 deletion; a positive value enables age cleanup. `MAX_STORED_BYTES_PER_USER`
-defaults to 2 GB and refuses a new result instead of evicting an older one. The
+defaults to 2 GiB; the Azure configuration currently sets 150 MiB and refuses
+a new result instead of evicting an older one. The
 Files page provides Download and Delete controls, and deleting an account
-removes its stored blobs before the database row is removed.
+removes its stored blobs before the database row is removed. Security event
+types and timestamps remain, but the deleted account's username, IP address,
+login-attempt rows, and identifying admin-target text are removed.
 
 ## 5. Password hashing is not file encryption
 

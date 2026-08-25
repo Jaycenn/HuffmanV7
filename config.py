@@ -174,8 +174,8 @@ LOGIN_WINDOW_SECONDS = int(os.environ.get("AFC_LOGIN_WINDOW_SECONDS", 300))
 SESSION_LIFETIME_MINUTES = int(os.environ.get("AFC_SESSION_MINUTES", 60))
 
 # Production reverse-proxy settings. Keep both disabled for direct local HTTP
-# development. The Oracle deployment enables them because Caddy is the only
-# public path to Flask and terminates HTTPS on the application's behalf.
+# development. The Azure deployment enables them because Container Apps
+# ingress is the public path to Flask and terminates HTTPS on its behalf.
 TRUST_PROXY = os.environ.get("AFC_TRUST_PROXY", "0").strip().lower() in {
     "1", "true", "yes", "on"
 }
@@ -186,7 +186,7 @@ SECURE_COOKIES = os.environ.get("AFC_SECURE_COOKIES", "0").strip().lower() in {
 MIN_PASSWORD_LENGTH = 8
 
 # --------------------------------------------------------------------------
-# Part 2 — analytics / reference measurements
+# Part 2 — analysis and reference measurements
 # --------------------------------------------------------------------------
 
 # The dashboard charts AFC against gzip and the engine's own single-tier

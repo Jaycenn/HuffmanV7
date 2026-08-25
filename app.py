@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-app.py — ByteSize, the local AFC Flask application.
+app.py — ByteSize AFC Flask application (local or hosted).
 
 MAP OF THE APPLICATION (read this first if you are picking it up cold)
 ----------------------------------------------------------------------
   config.py    every tunable, incl. the file-size policy constants
-  db.py        SQLite access layer (users, compression_history, audit_log)
+  db.py        SQLite/PostgreSQL data layer (users, history, audit, artifacts)
   auth.py      blueprint: /login /logout /register /change-password
   admin.py     blueprint: /admin/users /admin/audit  (role-gated, 403)
   afcpak.py    .afcpak multi-file archive (manifest + AFC payloads, no DEFLATE)
@@ -1017,10 +1017,10 @@ def api_history_search():
 def api_entropy():
     """Feature 6 — order-0 Shannon entropy of the input.
 
-    Shannon entropy over the Tier-1 byte histogram, computed by reading the
-    uploaded bytes. This is a measured bound rather than a prediction: no
-    model is fitted and no inference is performed, so the same file always
-    yields the same figure. Read-only: no engine state is touched and nothing
+    Shannon entropy over a bounded Tier-1 prefix histogram. This is a measured
+    sample bound rather than a prediction: no model is fitted and no inference
+    is performed, so the same prefix always yields the same figure. Read-only:
+    no engine state is touched and nothing
     is stored. Called the moment a file is selected, before any
     compression."""
     f = request.files.get("file")
@@ -1305,8 +1305,8 @@ def create_app(db_path=None, testing=False, storage_dir=None):
         config.STORAGE_BACKEND = "local"
     app = Flask(__name__)
     if config.TRUST_PROXY and not testing:
-        # Caddy is the sole public ingress in the Oracle deployment. Trust one
-        # hop so rate limiting and HTTPS-aware URL handling see the real client.
+        # Azure Container Apps ingress is the sole public proxy in production.
+        # Trust one hop so rate limiting and HTTPS-aware URLs see the client.
         app.wsgi_app = ProxyFix(
             app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
     app.config["MAX_CONTENT_LENGTH"] = config.MAX_CONTENT_LENGTH

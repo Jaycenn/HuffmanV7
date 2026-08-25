@@ -3,15 +3,15 @@
 db.py — SQLite access layer for the AFC web app.
 
 Design notes for whoever picks this up (Part 2):
-  * Plain sqlite3 + hand-written SQL.  No ORM on purpose: the schema is five
-    tables, the app ships to a student laptop, and an ORM would be a new heavy
-    dependency for no benefit.
+  * Plain sqlite3 + hand-written SQL.  No ORM on purpose: the logical schema is
+    small, the same query layer also targets PostgreSQL, and an ORM would add a
+    heavy dependency without improving the compression study.
   * Connections are per-request, stored on flask.g, closed by teardown.
   * Every query returns sqlite3.Row, so callers use row["column"].
   * Writes go through helpers here, never raw SQL in a route — if Part 2 adds
     analytics, add a query function here and call it from the blueprint.
-  * The DB file lives next to the app (config.DATABASE_PATH). It is LOCAL.
-    See SCOPE_NOTES.md for the non-cloud justification.
+  * SQLite lives at config.DATABASE_PATH for development/tests. The hosted
+    instance selects PostgreSQL through AFC_DB_BACKEND; see SCOPE_NOTES.md.
 """
 import os
 import sqlite3
@@ -597,8 +597,25 @@ def user_deletion_lock(user_id):
 
 
 def delete_user(user_id, connection=None):
-    """Delete an account and its cascaded history/artifact metadata."""
+    """Delete an account, its files, and identifying security-log fields.
+
+    Audit event types and timestamps remain useful for security review, but a
+    withdrawal/account-deletion request must not leave the former username or
+    IP address behind.  Admin target details are scrubbed too.
+    """
     conn = connection or get_db()
+    target = conn.execute(
+        "SELECT username FROM users WHERE id = ?", (user_id,)).fetchone()
+    if target is None:
+        return 0
+    username = target["username"]
+    marker = "target=" + username
+    conn.execute(
+        "UPDATE audit_log SET username = '', ip_address = '',"
+        " detail = replace(detail, ?, 'target=[deleted]')"
+        " WHERE user_id = ? OR username = ? OR instr(detail, ?) > 0",
+        (marker, user_id, username, marker))
+    conn.execute("DELETE FROM login_attempts WHERE username = ?", (username,))
     cur = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
     if connection is None:
         conn.commit()

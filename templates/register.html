@@ -3,9 +3,14 @@
 {% block auth_content %}
 <div class="auth-shell">
   <section class="auth-intro">
-    <p class="eyebrow">Local by design</p>
-    <h1>Create a private workspace on this machine.</h1>
-    <p>Your account and processing history stay in the local database. Uploaded file contents are not sent to an external service.</p>
+    <p class="eyebrow">Private by design</p>
+    <h1>Create your ByteSize workspace.</h1>
+    {% if cfg.using_postgres() %}
+    <p>Your account and processing history are stored in Supabase. Files are uploaded to the ByteSize application server for processing; only completed compressed results are persisted.</p>
+    {% else %}
+    <p>Your account and processing history stay in this installation's local database. Only completed compressed results are persisted.</p>
+    {% endif %}
+    <p>Your email, submitted filenames, and security events are part of the account record. Security events include username and client IP while the account exists; account deletion anonymizes the retained event record.</p>
     <a href="{{ url_for('main.landing') }}">← Back to ByteSize</a>
   </section>
   <form method="post" class="auth-card">

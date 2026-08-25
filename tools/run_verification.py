@@ -4,8 +4,9 @@
 1. SHA-256 round trips: every corpus file x {adaptive, baseline} x
    {auto, afc1, afc2}, on the native engine AND the pure-Python engine.
 2. Byte-identity: native container == pure-Python container for every combo.
-3. Cross-decoding: every container decoded by the Python decoder, the native
-   decoder, and (when node is available) the JavaScript engine.
+3. JavaScript parity and cross-decoding: the shared AFC1/AFC2 profile produces
+   the same bytes, and every container is decoded by the Python decoder, the
+   native decoder, and (when node is available) the JavaScript engine.
 4. Edge cases: empty file, 1 byte, single repeated byte, all 256 byte values,
    input larger than the 1 MB scan window, and compressing an .afc container
    as ordinary data.
@@ -119,6 +120,33 @@ def main():
         list_path = os.path.abspath(os.path.join(tmp, "list.txt"))
         open(list_path, "w").write(
             "\n".join(f"{a}\t{b}" for a, b in manifest))
+
+        encode_path = os.path.abspath(os.path.join(tmp, "encode.txt"))
+        open(encode_path, "w").write("\n".join(
+            "%s\t%s\t%s\t%d\t%s" % (
+                os.path.abspath(p), "true" if adaptive else "false", fmt,
+                len(blob), hashlib.sha256(blob).hexdigest())
+            for (p, adaptive, fmt), blob in sorted(blobs.items())))
+        js_encode = (
+            "const fs=require('fs'),crypto=require('crypto');"
+            "const AFC=require('./afc_engine.js');let bad=0;"
+            "for(const line of fs.readFileSync(" + json.dumps(encode_path) +
+            ",'utf8').trim().split(/\\r?\\n/)){"
+            "const [src,a,fmt,n,h]=line.split('\\t');"
+            "const out=AFC.compressBytes(new Uint8Array(fs.readFileSync(src)),"
+            "a==='true',fmt);"
+            "const got=crypto.createHash('sha256').update(out).digest('hex');"
+            "if(out.length!==Number(n)||got!==h)bad++;}"
+            "console.log('jsencodebad='+bad);process.exit(bad?1:0);")
+        encoded = subprocess.run(
+            [node, "-e", js_encode], capture_output=True, text=True)
+        if encoded.returncode != 0:
+            detail = (encoded.stderr or encoded.stdout).strip()
+            if detail:
+                print("   JavaScript encode-parity detail:", detail[-1000:])
+        check("JavaScript/Python shared AFC1/AFC2 profile byte-identical",
+              encoded.returncode == 0)
+
         js = (
             "const fs=require('fs');const AFC=require('./afc_engine.js');"
             "let bad=0;"

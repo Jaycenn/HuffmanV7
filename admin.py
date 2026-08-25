@@ -6,8 +6,8 @@ Scope is deliberately small for Part 1: a user list and the audit log.  Both
 are gated with @auth.role_required("admin"), which returns a real 403 for a
 logged-in non-admin (not a redirect) — this is asserted in the test suite.
 
-Part 2 can add analytics here; keep new admin routes on this blueprint and
-keep the role_required decorator on every one of them.
+Keep any new admin routes on this blueprint and keep the role_required
+decorator on every one of them.
 """
 from flask import Blueprint, g, redirect, render_template, request, url_for
 
@@ -73,9 +73,8 @@ def delete_user(user_id):
             "error.html", code=500,
             message="Account deletion stopped because a stored file could "
                     "not be removed: %s" % exc), 500
-    username = target["username"]
     db.audit("admin_delete_user", user_id=g.user["id"],
-             username=g.user["username"], detail="target=%s" % username,
+             username=g.user["username"], detail="target=[deleted]",
              ip_address=auth.client_ip())
     return redirect(url_for("admin.users"))
 

@@ -24,8 +24,9 @@ FOR PART 2 / A COLD READER
 PASSWORD HASHING IS NOT FILE ENCRYPTION.  Account passwords are hashed with
 werkzeug's generate_password_hash, whose current default is scrypt; the
 algorithm is recorded in the stored string, so check_password_hash verifies
-older pbkdf2 hashes too.  No file data is ever encrypted — the thesis
-Delimitations exclude encryption of compressed output.  See SCOPE_NOTES.md.
+older pbkdf2 hashes too.  The AFC container format does not add file-level
+encryption.  Hosted deployments still use HTTPS/TLS in transit.  See
+SCOPE_NOTES.md.
 """
 import functools
 import hmac

@@ -85,7 +85,7 @@ releases the GIL for a native call) with the worker count bounded by input
 size, so a large file does not multiply peak memory;
 `AFC_PROFILE_MEMORY_BUDGET` overrides the bound.
 
-Above 8 MB the ladder also drops the wider n-gram scans, which is measured
+At 8 MiB and above the ladder also drops the wider n-gram scans, which is measured
 rather than assumed: on multi-megabyte text `ngram6` and `ngram8` both come out
 about +6% while the wider dictionary is the entire win, so the trimmed ladder
 produces the same bytes for roughly half the work — 10 MB at Balanced goes from

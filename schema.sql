@@ -117,7 +117,8 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_user_created
 -- ---------------------------------------------------------------------------
 -- Security-relevant events: login, login_failed, logout, password_change,
 -- admin_view_users, admin_toggle_active, rate_limited.
--- user_id is NULL when the event has no valid user (e.g. bad username).
+-- user_id is NULL when the event has no valid user (e.g. bad username). When
+-- an account is deleted, its retained event rows are stripped of username/IP.
 CREATE TABLE IF NOT EXISTS audit_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER REFERENCES users (id) ON DELETE SET NULL,
