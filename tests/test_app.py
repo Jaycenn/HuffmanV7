@@ -16,6 +16,7 @@ Covers, per the brief's proof requirements:
   * history/report: rows attributed to the right user, CSV/PDF export render
   * user isolation: one user cannot see another's history
 """
+import zipfile
 import ast
 import hashlib
 import re
@@ -1145,13 +1146,23 @@ def test_persistent_artifact_access(app, appmod):
         stored = db.get_stored_artifact(row_id)
         disk_path = os.path.join(config.RESULT_STORAGE_DIR,
                                  stored["storage_key"])
-    check("compressed artifact exists outside static storage",
-          os.path.isfile(disk_path)
-          and os.path.commonpath([os.path.abspath(disk_path),
-                                  os.path.abspath(config.RESULT_STORAGE_DIR)])
-              == os.path.abspath(config.RESULT_STORAGE_DIR)
-          and "static" not in os.path.relpath(
-              disk_path, ROOT).replace("\\", "/").split("/"))
+    disk_parts = {
+        part.lower()
+        for part in os.path.abspath(disk_path)
+        .replace("\\", "/")
+        .split("/")
+        if part
+    }
+
+    check(
+        "compressed artifact exists outside static storage",
+        os.path.isfile(disk_path)
+        and os.path.commonpath([
+            os.path.abspath(disk_path),
+            os.path.abspath(config.RESULT_STORAGE_DIR),
+        ]) == os.path.abspath(config.RESULT_STORAGE_DIR)
+        and "static" not in disk_parts,
+    )
 
     # Memory is deliberately insufficient: the durable route must still work.
     appmod.RESULTS.clear()
@@ -2661,29 +2672,42 @@ def test_afc4_docx_exact_and_versioned(app):
         check("automatic mode selects the measured smaller AFC4 candidate",
               auto == forced, (auto[:4], len(auto), len(forced)))
 
-    # End-to-end web flow: the user uploaded a normal .docx, not extracted XML.
+    # study scope.
     c = app.test_client()
     login(c, "alice", "correct-horse")
-    result = c.post("/api/compress", data={
-        "file": (io.BytesIO(data), "normal.docx")}).get_json()
-    check("web app wraps the winning AFC4 DOCX payload in AFC5",
-          result.get("container") == "AFC5"
-          and result.get("payload_container") == "AFC4", result)
-    blob = c.get("/download/" + result["token"]).data
-    decoded = c.post("/api/decompress", data={
-        "file": (io.BytesIO(blob), "normal.docx.afc")}).get_json()
-    check("web AFC5/AFC4 decompression reports verified integrity",
-          decoded.get("integrity_ok") is True, decoded.get("integrity_note"))
-    check("web AFC4 mode reports automatic DOCX XML handling",
-          "DOCX XML" in (decoded.get("container_mode") or ""),
-          decoded.get("container_mode"))
-    check("web AFC5 SHA-256 matches its embedded source digest",
-          decoded.get("sha256_status") == "match"
-          and "inside AFC5" in decoded.get("sha256_note", ""),
-          decoded.get("sha256_note"))
-    check("AFC5 restores the embedded original filename",
-          decoded.get("restored_name") == "normal.docx",
-          decoded.get("restored_name"))
+
+    response = c.post(
+        "/api/compress",
+        data={
+            "file": (io.BytesIO(data), "normal.docx"),
+        },
+    )
+
+    result = response.get_json()
+
+    check(
+        "web compression rejects an out-of-scope DOCX upload",
+        response.status_code == 400
+        and result.get("out_of_scope") is True,
+        result,
+    )
+
+    decoded_response = c.post(
+        "/api/decompress",
+        data={
+            "file": (io.BytesIO(forced), "legacy.docx.afc"),
+        },
+    )
+
+    decoded = decoded_response.get_json()
+
+    check(
+        "legacy AFC4 DOCX containers remain decodable",
+        decoded_response.status_code == 200
+        and decoded.get("integrity_ok") is True
+        and decoded.get("restored_name") == "legacy.docx",
+        decoded,
+    )
 
 
 def test_afc5_self_verifying_envelope():
@@ -2915,19 +2939,71 @@ def test_afc3_reporting_is_whole_file(app):
     check("the explainer quotes the whole-file saving for AFC3", ok_pct)
 
     # And the end-to-end API must report integrity VERIFIED, not FAILED.
+    # Use an in-scope PDF for the web API test. DOCX is retained only in
+    # direct engine tests for backward-compatible AFC4 decoding.
+    pdf_docs = [
+        path for path in docs
+        if path.lower().endswith(".pdf")
+    ]
+
+    if not pdf_docs:
+        return
+
+    pdf_path = pdf_docs[0]
+
     c = app.test_client()
     login(c, "alice", "correct-horse")
-    data = open(docs[0], "rb").read()
-    j = c.post("/api/compress", data={
-        "file": (io.BytesIO(data), os.path.basename(docs[0]))}).get_json()
-    blob = c.get("/download/" + j["token"]).data
-    d = c.post("/api/decompress", data={
-        "file": (io.BytesIO(blob), "doc.afc")}).get_json()
-    check("Decompress page reports integrity VERIFIED for AFC3",
-          d.get("integrity_ok") is True, d.get("integrity_note"))
-    check("Decompress page names the component-aware mode",
-          "component-aware" in (d.get("container_mode") or ""),
-          d.get("container_mode"))
+
+    data = open(pdf_path, "rb").read()
+
+    response = c.post(
+        "/api/compress",
+        data={
+            "file": (
+                io.BytesIO(data),
+                os.path.basename(pdf_path),
+            ),
+        },
+    )
+
+    result = response.get_json()
+
+    if not check(
+        "Compress API accepts the in-scope PDF reporting fixture",
+        response.status_code == 200
+        and result.get("token"),
+        result,
+    ):
+        return
+
+    blob = c.get("/download/" + result["token"]).data
+
+    decompress_response = c.post(
+        "/api/decompress",
+        data={
+            "file": (
+                io.BytesIO(blob),
+                "doc.pdf.afc",
+            ),
+        },
+    )
+
+    decompressed = decompress_response.get_json()
+
+    check(
+        "Decompress page reports integrity VERIFIED for component-aware PDF",
+        decompress_response.status_code == 200
+        and decompressed.get("integrity_ok") is True,
+        decompressed.get("integrity_note"),
+    )
+
+    check(
+        "Decompress page names the component-aware mode",
+        "component-aware" in (
+            decompressed.get("container_mode") or ""
+        ),
+        decompressed.get("container_mode"),
+    )
 
 
 def test_native_backend_diagnostics(app):
@@ -3085,6 +3161,81 @@ def test_generic_files_unaffected():
             print("   generic path changed for %s" % os.path.basename(path))
     check("generic files produce byte-identical output to V6", ok)
 
+def test_docx_scope_cannot_be_bypassed_by_renaming(app, appmod):
+    """All new-compression routes reject Word OOXML, even when renamed."""
+    package = io.BytesIO()
+
+    with zipfile.ZipFile(package, "w", zipfile.ZIP_STORED) as archive:
+        archive.writestr("[Content_Types].xml", b"<Types/>")
+        archive.writestr(
+            "word/document.xml",
+            b"<document><p>scope</p></document>",
+        )
+
+    data = package.getvalue()
+
+    check(
+        "scope helper leaves PDF in scope",
+        appmod.compression_scope_error(
+            "report.pdf",
+            b"%PDF-1.7\n",
+        ) is None,
+    )
+
+    check(
+        "scope helper rejects DOCX by filename",
+        appmod.compression_scope_error(
+            "report.docx",
+            b"PK\x03\x04",
+        ) is not None,
+    )
+
+    check(
+        "scope helper detects renamed Word OOXML content",
+        appmod.compression_scope_error(
+            "report.bin",
+            data,
+        ) is not None,
+    )
+
+    client = app.test_client()
+    login(client, "alice", "correct-horse")
+
+    batch_response = client.post(
+        "/api/batch",
+        data={
+            "file": (io.BytesIO(data), "renamed.bin"),
+        },
+    )
+
+    batch_result = batch_response.get_json()
+
+    check(
+        "batch route rejects a renamed DOCX package",
+        batch_response.status_code == 400
+        and batch_result.get("out_of_scope") is True,
+        batch_result,
+    )
+
+    archive_response = client.post(
+        "/api/archive/create",
+        data={
+            "archive_name": "scope-test",
+            "files": [
+                (io.BytesIO(data), "folder/report.docx"),
+            ],
+        },
+    )
+
+    archive_result = archive_response.get_json()
+
+    check(
+        "archive route rejects an out-of-scope DOCX member",
+        archive_response.status_code == 400
+        and archive_result.get("out_of_scope") is True,
+        archive_result,
+    )
+
 
 def main():
     app, appmod, dbpath = make_app()
@@ -3154,6 +3305,7 @@ def main():
         test_container_layer_introduces_no_codec()
         test_docx_member_inventory_and_exact_deflate_recipes()
         test_afc4_docx_exact_and_versioned(app)
+        test_docx_scope_cannot_be_bypassed_by_renaming(app, appmod)
         test_afc5_self_verifying_envelope()
         test_afc6_pdf_flate_exact_and_versioned()
         test_afc4_corrupt_input_is_safe()

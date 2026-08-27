@@ -32,6 +32,18 @@
     show(el, !!msg);
   }
 
+  function blockedWordExtension(file) {
+    var name = String(file && file.name || "").toLowerCase();
+
+    var blocked = CFG && CFG.blocked_compression_extensions
+      ? CFG.blocked_compression_extensions
+      : [".docx", ".docm", ".dotx", ".dotm"];
+
+    return blocked.some(function (extension) {
+      return name.endsWith(extension);
+    });
+  }
+
   fetch("/api/config").then(function (r) { return r.json(); }).then(function (c) {
     CFG = c;
     $("sLimit").textContent = "Up to " + human(c.max_file_size) + " per file";
@@ -89,8 +101,24 @@
 
   function pick(file) {
     if (!file) return;
+
     setErr("");
     show($("sResult"), false);
+
+    if (blockedWordExtension(file)) {
+      picked = null;
+      show($("sPicked"), false);
+      $("sRun").disabled = true;
+
+      setErr(
+        "Microsoft Word DOCX-family files are outside the declared "
+        + "scope of this study and cannot be compressed. PDF and the "
+        + "listed text, data, and source-code formats remain supported."
+      );
+
+      return;
+    }
+
     if (CFG) {
       if (file.size < CFG.min_file_size) {
         setErr("That file is " + human(file.size) + ", below the "
@@ -179,11 +207,85 @@
     });
   }
 
-  // ---- drop zone ----------------------------------------------------------
+  // ---- restricted file picker and drop zone ------------------------------
   var drop = $("sDrop"), input = $("sInput");
-  drop.addEventListener("click", function () { input.click(); });
-  drop.addEventListener("keydown", function (e) {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); }
+
+  async function openScopedFilePicker() {
+    /*
+     * Chrome and Edge support this stricter picker. Removing the
+     * "All files" option prevents DOCX-family files from appearing in
+     * the normal Compress file-selection window.
+     */
+    if ("showOpenFilePicker" in window) {
+      try {
+        var handles = await window.showOpenFilePicker({
+          multiple: false,
+          excludeAcceptAllOption: true,
+          types: [
+            {
+              description: "ByteSize in-scope files",
+              accept: {
+                "application/pdf": [
+                  ".pdf"
+                ],
+                "text/plain": [
+                  ".txt",
+                  ".csv",
+                  ".tsv",
+                  ".sql",
+                  ".xml",
+                  ".html",
+                  ".htm",
+                  ".log",
+                  ".py",
+                  ".js",
+                  ".c",
+                  ".cpp",
+                  ".h",
+                  ".hpp"
+                ],
+                "application/json": [
+                  ".json"
+                ]
+              }
+            }
+          ]
+        });
+
+        if (handles.length) {
+          var file = await handles[0].getFile();
+          pick(file);
+        }
+      } catch (error) {
+        // Closing the picker is not an application error.
+        if (error.name !== "AbortError") {
+          setErr(
+            "The restricted file picker could not be opened: "
+            + error.message
+          );
+        }
+      }
+
+      return;
+    }
+
+    /*
+     * Firefox and older browsers fall back to the normal HTML input.
+     * The accept attribute filters the default view, while the existing
+     * JavaScript and Flask validation still reject DOCX.
+     */
+    input.click();
+  }
+
+  drop.addEventListener("click", function () {
+    openScopedFilePicker();
+  });
+
+  drop.addEventListener("keydown", function (event) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openScopedFilePicker();
+    }
   });
   ["dragover", "dragenter"].forEach(function (ev) {
     drop.addEventListener(ev, function (e) {

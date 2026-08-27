@@ -50,16 +50,21 @@
         <span class="inline-block mt-2 px-4 py-2 rounded-md border border-line
                      dark:border-[#35322c] text-sm hover:border-maroon">Select File</span>
         <p class="font-data text-[11px] text-dim dark:text-[#9c968a] mt-4 max-w-md mx-auto">
-          Any file is accepted and restored exactly. Reduction is largest on
-          TXT, CSV, JSON, SQL, XML, HTML, LOG and source code. A PDF depends on
-          its contents — text streams reduce well, scanned images barely at
-          all.</p>
+          In-scope inputs include TXT, CSV, JSON, SQL, XML, HTML, LOG, source
+          code, and PDF. Accepted files are restored exactly. Microsoft Word
+           DOCX-family files are outside the declared study scope and are not
+          accepted for new compression.
+        </p>
         <p class="font-data text-[11px] text-dim dark:text-[#9c968a] mt-1" id="sLimit">…</p>
       </div>
-      <input type="file" id="sInput" class="hidden">
+      <input
+        type="file"
+        id="sInput"
+        class="hidden"
+        accept=".pdf,.txt,.csv,.tsv,.json,.sql,.xml,.html,.htm,.log,.py,.js,.c,.cpp,.h,.hpp">
 
-      <!-- selected file + detected type (container-aware formats are handled
-           automatically; the user never extracts PDF/DOCX internals by hand) -->
+      <!-- Selected file and detected type. In-scope PDF internals are handled
+           Automatically. DOCX-family uploads are rejected as out of scope.) -->
       <div id="sPicked" class="hidden mt-4 bg-white dark:bg-[#1c1b18] border border-line
                                dark:border-[#35322c] rounded-lg p-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
