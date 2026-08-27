@@ -304,6 +304,51 @@ def size_error(nbytes, total_batch=None):
                 % (human(total_batch), human(config.MAX_BATCH_SIZE)))
     return None
 
+class OutOfScopeFileError(ValueError):
+    """Raised when a new compression input is outside the study scope."""
+
+
+def compression_scope_error(filename, data=b""):
+    """Return an explanation when a new input is a Word OOXML document."""
+    name = (
+        str(filename or "")
+        .replace("\\", "/")
+        .rsplit("/", 1)[-1]
+        .lower()
+    )
+
+    if any(
+        name.endswith(extension)
+        for extension in config.BLOCKED_COMPRESSION_EXTENSIONS
+    ):
+        return (
+            "Microsoft Word OOXML files (.docx, .docm, .dotx, and .dotm) "
+            "are outside the declared scope of this study and cannot be "
+            "compressed. Please use an in-scope file such as PDF, TXT, CSV, "
+            "JSON, SQL, XML, HTML, LOG, or source code."
+        )
+
+    raw = bytes(data or b"")
+
+    is_zip_package = (
+        len(raw) >= 4
+        and raw[:2] == b"PK"
+        and raw[2:4] in (
+            b"\x03\x04",
+            b"\x05\x06",
+            b"\x07\x08",
+        )
+    )
+
+    if is_zip_package and b"word/document.xml" in raw:
+        return (
+            "This file contains a Microsoft Word OOXML document. "
+            "DOCX-family files are outside the declared scope of this study "
+            "and cannot be compressed."
+        )
+
+    return None
+
 
 def human(n):
     n = float(n)
@@ -434,6 +479,10 @@ def _process_one(data, filename, fmt, adaptive, batch_id=None,
     This is the single code path used by /api/compress and /api/batch so the
     two can never drift apart."""
     is_container = data[:4] in AFC_MAGICS
+    if not is_container:
+        scope_error = compression_scope_error(filename, data)
+        if scope_error:
+            raise OutOfScopeFileError(scope_error)
     t0 = time.perf_counter()
     if is_container:
         envelope = afc5.parse(data) if data[:4] == b"AFC5" else None
@@ -594,11 +643,21 @@ def api_compress():
                            stored_download=url_for(
                                "main.download_stored", row_id=history_id))
         result = _process_one(data, f.filename, fmt, adaptive, preset=preset)
+    except OutOfScopeFileError as exc:
+        return jsonify(
+            error=str(exc),
+            out_of_scope=True,
+        ), 400
     except StorageQuotaError as exc:
-        return jsonify(error=str(exc), quota_exceeded=True,
-                       files_url=url_for("main.files_page")), 507
-    except Exception as exc:                       # never 500 to the user
-        return jsonify(error="Processing failed: %s" % exc), 500
+        return jsonify(
+            error=str(exc),
+            quota_exceeded=True,
+            files_url=url_for("main.files_page"),
+        ), 507
+    except Exception as exc:
+        return jsonify(
+            error="Processing failed: %s" % exc
+        ), 500
 
     if result["kind"] == "compress":
         # single-file view also shows the baseline control for the byte ruler
@@ -637,9 +696,19 @@ def api_batch():
     try:
         return jsonify(**_process_one(data, f.filename, fmt, adaptive,
                                       batch_id=batch_id, preset=preset))
+    except OutOfScopeFileError as exc:
+        return jsonify(
+            error=str(exc),
+            name=f.filename,
+            out_of_scope=True,
+        ), 400
     except StorageQuotaError as exc:
-        return jsonify(error=str(exc), name=f.filename, quota_exceeded=True,
-                       files_url=url_for("main.files_page")), 507
+        return jsonify(
+            error=str(exc),
+            name=f.filename,
+            quota_exceeded=True,
+            files_url=url_for("main.files_page"),
+        ), 507
     except Exception as exc:
         return jsonify(error="Processing failed: %s" % exc,
                        name=f.filename), 500
@@ -850,13 +919,27 @@ def api_archive_create():
     total = 0
     for f in files:
         data = f.read()
+
+        # Skip empty files and browser-generated folder placeholders.
         if not data:
-            continue                                  # skip empty/folder stubs
+            continue
+
         total += len(data)
+
         err = size_error(len(data), total_batch=total)
         if err:
-            return jsonify(error="%s: %s" % (f.filename, err)), 400
-        # webkitdirectory sends the relative path in the filename field
+            return jsonify(
+                error="%s: %s" % (f.filename, err)
+            ), 400
+
+        scope_error = compression_scope_error(f.filename, data)
+        if scope_error:
+            return jsonify(
+                error="%s: %s" % (f.filename, scope_error),
+                out_of_scope=True,
+            ), 400
+
+        # webkitdirectory sends the relative path as the filename.
         payload.append((f.filename, data))
     if not payload:
         return jsonify(error="Every selected entry was empty."), 400
@@ -1027,10 +1110,21 @@ def api_entropy():
     if f is None or not f.filename:
         return jsonify(error="No file supplied."), 400
     data = f.read(config.ENTROPY_SAMPLE_BYTES)
+
     if not data:
         return jsonify(error="That file is empty."), 400
-    rep = analysis.entropy_report(data,
-                                  sample_limit=config.ENTROPY_SAMPLE_BYTES)
+
+    scope_error = compression_scope_error(f.filename, data)
+    if scope_error:
+        return jsonify(
+            error=scope_error,
+            out_of_scope=True,
+        ), 400
+
+    rep = analysis.entropy_report(
+        data,
+        sample_limit=config.ENTROPY_SAMPLE_BYTES,
+    )
     rep["filename"] = f.filename
     return jsonify(rep)
 
@@ -1043,12 +1137,20 @@ def api_preview():
     if f is None or not f.filename:
         return jsonify(error="No file supplied."), 400
     head = f.read(65536)
+
     if not head:
         return jsonify(error="That file is empty."), 400
-    # Automatic type detection, so the Compress page can name the file and
-    # flag packaged formats (PDF/DOCX/XLSX/PPTX/ODF) whose internals are
-    # handled for the user. Detection only labels — it never changes the
-    # pipeline the bytes go through.
+
+    scope_error = compression_scope_error(f.filename, head)
+    if scope_error:
+        return jsonify(
+            error=scope_error,
+            out_of_scope=True,
+        ), 400
+    # Automatic type detection allows the Compress page to name the input.
+    # PDF internals are handled automatically. Word OOXML is rejected above
+    # because it is outside the declared study scope. Detection only labels
+    # the input and does not change the compression pipeline.
     kind = filetypes.sniff(head)
     # binary if it has NULs or a high share of non-text bytes in the head
     sample = head[:4096]
