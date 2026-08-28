@@ -171,13 +171,16 @@ Each page refuses the other's input rather than silently switching operation: a
 `.afc` dropped on Compress, or a normal file dropped on Decompress, gets a
 message and a link to the correct page.
 
-**Restoring the original filename.** Current downloads use the AFC5
-self-verifying envelope, which stores a sanitized original basename together
-with payload lengths and SHA-256 digests. Bare legacy AFC1-AFC4/AFC6 containers
-do not carry a filename; for those, `filetypes.py` recovers a useful extension
-by sniffing the restored bytes. Packaged formats — PDF, DOCX, XLSX, PPTX, ODF
-— are handled whole and automatically; you never extract PDF page streams or
-DOCX package parts yourself.
+**Restoring the original filename.** Current downloads use the AFC5 
+self-verifying envelope, which stores a sanitized original basename 
+together with payload lengths and SHA-256 digests. Bare legacy AFC1
+-AFC4/AFC6 containers do not carry a filename; for those, `filetypes.py`
+recovers a useful extension by sniffing the restored bytes. Packaged 
+formats are identified as whole files during restoration. PDF remains 
+eligible for new compression. Microsoft Word OOXML files (`.docx`, `.docm`, `.dotx`, and `.dotm`) 
+are rejected for new compression by every web compression path, including when renamed,
+while existing AFC containers that restore DOCX remain decodable for backward compatibility.
+Users never extract package components by hand.
 
 > **This split is UI/UX only.** Both pages call the same
 > `afc2.compress_bytes` / `afc2.decompress_bytes` entry points the combined
@@ -293,35 +296,39 @@ each corpus run records the counts it used in its `*_backend.json` sidecar.
 > files x 3 presets). Wall-clock times are now directly comparable across
 > presets. See `CHANGES_v7.md` §1-3 for the root cause and the measurements.
 
-### PDF and DOCX component processing
+### PDF component processing and legacy DOCX compatibility
 
-The user uploads a normal `.pdf` or `.docx`; extraction and routing are fully
-automatic.
+The user may upload a normal `.pdf`; extraction and routing are automatic.
 
-* **PDF:** object/page-content inventory identifies stream payloads. PDF
-  syntax and suitable unfiltered content are pooled into one Hybrid-Huffman
-  call; JPEG/JPX and high-entropy payloads stay verbatim. Suitable textual
-  `/FlateDecode` page/content streams can be exposed as expanded source plus
-  an exact zlib/DEFLATE-token recipe in **AFC6**. No stream is re-deflated.
-  For large PDFs, a bounded early viability probe declines AFC6 when sampled
-  expanded source plus its exact recipe already exceeds the encoded streams
-  by more than 4x; the unchanged AFC3/plain candidates still process every
-  original byte. This prevents token analysis for a demonstrably losing
-  candidate without changing the codec.
-* **DOCX/OOXML:** the ZIP central directory identifies members by their real
-  names and methods, including `word/document.xml`. STORED XML is directly
-  pooled. For suitable method-8 XML, `deflate_tokens.py` parses the producer's
-  existing blocks/tokens into plain XML plus an exact reconstruction recipe;
-  both go through Hybrid-Huffman in **AFC4**. It does not search for DEFLATE
-  matches or build a second compressed stream.
-* **Global guard:** AFC3/AFC4/AFC6 is emitted only when the complete wrapper is
-  smaller than the unchanged whole-file AFC1/AFC2 result. Ordinary Word XML
-  is often already very compact, so it is correctly preserved when exposing
-  it would lose. This is a measured limitation, not hidden as an improvement.
+* **PDF:** object/page-content inventory identifies stream payloads.
+PDF syntax and suitable unfiltered content are pooled into one Hybrid-Huffman call;
+JPEG/JPX and high-entropy payloads stay verbatim.
+Suitable textual `/FlateDecode` page/content streams can be exposed 
+as expanded source plus an exact zlib/DEFLATE-token recipe in **AFC6**.
+No stream is re-deflated. For large PDFs, a bounded early viability probe declines 
+AFC6 when sampled expanded source plus its exact recipe already exceeds the encoded 
+streams by more than 4x; the unchanged AFC3/plain 
+candidates still process every original byte. This prevents token analysis for a 
+demonstrably losing candidate without changing the codec.
 
-All wrappers reconstruct the original PDF/DOCX bytes exactly; the suite and
-document benchmark compare bytes and SHA-256, including two-cycle tests and
-old AFC1/AFC2 decoding.
+* **Word OOXML scope:** new `.docx`, `.docm`, `.dotx`, and `.dotm` compression 
+uploads are outside the deployed study scope. The web application rejects them by 
+extension and detects renamed Word packages through `word/document.xml`. 
+Rejection applies to single-file, batch, archive, preview, and entropy/detection routes.
+
+* **Legacy compatibility:** AFC4, OOXML member inventory, and exact DEFLATE-token 
+recipes remain in the engine so existing AFC containers that restore DOCX can still 
+be decoded and direct engine fixtures can continue to verify byte-exact compatibility. 
+Their presence does not mean the current web application accepts new DOCX compression uploads.
+
+* **Global guard:** AFC3/AFC4/AFC6 is emitted only in direct engine paths where the 
+complete wrapper is smaller than the unchanged whole-file AFC1/AFC2 result. 
+The deployed PDF path uses the applicable PDF candidates; 
+retained DOCX behavior is limited to direct engine verification and legacy decoding.
+
+All supported and retained wrappers reconstruct the original bytes exactly. 
+The suite compares bytes and SHA-256, includes repeated-cycle and backward-compatibility tests, 
+and separately verifies that the deployed Word OOXML restriction cannot be bypassed by renaming a package.
 
 ### Light-first interface and dark mode
 
