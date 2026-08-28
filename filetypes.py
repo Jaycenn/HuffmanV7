@@ -5,15 +5,21 @@ Decompress pages.
 
 WHY THIS EXISTS
 ---------------
-The Compress page must accept a normal file (PDF, DOCX, TXT, CSV, JSON, SQL,
-source code, binary) and process it automatically — the user never extracts
-PDF page streams, DOCX XML or package components by hand.  The Decompress page
-must rebuild the original file and give it back under its real name.
+The Compress page accepts eligible ordinary files and processes 
+them automatically, while the Decompress page rebuilds an AFC 
+payload and returns it under a useful name. New Microsoft Word 
+OOXML compression uploads (`.docx`, `.docm`, `.dotx`, and 
+`.dotm`) are rejected elsewhere in the application by extension 
+or content marker. DOCX detection remains here because legacy AFC 
+containers may still restore DOCX bytes and therefore still need 
+the correct recovered extension.
 
-Because an AFC container stores only `magic | mode | original_length | payload`
-and nothing else, the original filename extension is NOT carried inside it.
-This module recovers it by sniffing the RESTORED BYTES, which is why
-`MyDocument.afc` can be handed back as `MyDocument.pdf`.
+Because a bare AFC container stores only `magic | mode | 
+original_length | payload` and nothing else, the original 
+filename extension is not carried inside it. This module recovers 
+it by sniffing the restored bytes, which is why a legacy 
+`MyDocument.afc` can be returned as `MyDocument.docx` when 
+appropriate.
 
 SCOPE — READ BEFORE EDITING
 ---------------------------
@@ -182,10 +188,11 @@ def _classify_text(head: bytes, sample: bytes) -> dict:
 def sniff(data: bytes) -> dict:
     """Identify a byte stream.
 
-    Returns {ext, label, family, mime, container_aware}. `container_aware` is
-    True for packaged formats (PDF, DOCX, XLSX, PPTX, ODF) whose internal
-    components the app handles automatically — the user supplies the whole
-    file and gets the whole file back.
+    Returns {ext, label, family, mime, container_aware}. `container_aware`
+    identifies packaged formats whose bytes may require whole-file naming or
+    retained component metadata. It is a detection result, not permission to
+    submit the format for new compression; the application enforces the
+    deployed Word OOXML restriction separately.
 
     Never raises: an unrecognised stream is reported as raw binary.
     """
