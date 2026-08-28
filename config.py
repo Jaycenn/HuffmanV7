@@ -217,6 +217,25 @@ ENTROPY_SAMPLE_BYTES = int(
 ARCHIVE_EXT = ".afcpak"
 ARCHIVE_MAGIC = b"AFCPAK01"
 
+ALLOWED_COMPRESSION_EXTENSIONS = (
+    ".pdf",
+    ".txt",
+    ".csv",
+    ".tsv",
+    ".json",
+    ".sql",
+    ".xml",
+    ".html",
+    ".htm",
+    ".log",
+    ".py",
+    ".js",
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+)
+
 # Microsoft Word OOXML files are outside the declared study scope.
 # Existing AFC containers that restore DOCX remain decodable.
 # This restriction applies only to new compression inputs.
@@ -249,6 +268,9 @@ def public_dict():
         "paper_tested_max_file": PAPER_TESTED_MAX_FILE,
         "paper_tested_max_batch": PAPER_TESTED_MAX_BATCH,
         "archive_ext": ARCHIVE_EXT,
+        "allowed_compression_extensions": list(
+            ALLOWED_COMPRESSION_EXTENSIONS
+        ),
         "blocked_compression_extensions": list(
             BLOCKED_COMPRESSION_EXTENSIONS
         ),

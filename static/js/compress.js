@@ -32,6 +32,12 @@
     show(el, !!msg);
   }
 
+  var FALLBACK_ALLOWED_EXTENSIONS = [
+    ".pdf", ".txt", ".csv", ".tsv", ".json", ".sql",
+    ".xml", ".html", ".htm", ".log", ".py", ".js",
+    ".c", ".cpp", ".h", ".hpp"
+  ];
+
   function blockedWordExtension(file) {
     var name = String(file && file.name || "").toLowerCase();
 
@@ -40,6 +46,17 @@
       : [".docx", ".docm", ".dotx", ".dotm"];
 
     return blocked.some(function (extension) {
+      return name.endsWith(extension);
+    });
+  }
+
+  function allowedCompressionFile(file) {
+    var name = String(file && file.name || "").toLowerCase();
+    var allowed = CFG && CFG.allowed_compression_extensions
+      ? CFG.allowed_compression_extensions
+      : FALLBACK_ALLOWED_EXTENSIONS;
+
+    return allowed.some(function (extension) {
       return name.endsWith(extension);
     });
   }
@@ -116,6 +133,19 @@
         + "listed text, data, and source-code formats remain supported."
       );
 
+      return;
+    }
+
+    if (!allowedCompressionFile(file)) {
+      picked = null;
+      show($("sPicked"), false);
+      show($("sPre"), false);
+      $("sRun").disabled = true;
+      setErr(
+        "The selected file type is outside the declared scope of this "
+        + "study. Only PDF, text, data, and supported source-code files "
+        + "may be compressed."
+      );
       return;
     }
 

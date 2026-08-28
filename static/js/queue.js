@@ -32,6 +32,23 @@
     el.classList.toggle("hidden", !msg);
   }
 
+  var FALLBACK_ALLOWED_EXTENSIONS = [
+    ".pdf", ".txt", ".csv", ".tsv", ".json", ".sql",
+    ".xml", ".html", ".htm", ".log", ".py", ".js",
+    ".c", ".cpp", ".h", ".hpp"
+  ];
+
+  function allowedCompressionFile(file) {
+    var name = String(file && file.name || "").toLowerCase();
+    var allowed = CFG && CFG.allowed_compression_extensions
+      ? CFG.allowed_compression_extensions
+      : FALLBACK_ALLOWED_EXTENSIONS;
+
+    return allowed.some(function (extension) {
+      return name.endsWith(extension);
+    });
+  }
+
   // ---- config -------------------------------------------------------------
   fetch("/api/config").then(function (r) { return r.json(); }).then(function (c) {
     CFG = c;
@@ -128,10 +145,28 @@
   }
 
   function addFiles(list) {
-    Array.prototype.forEach.call(list, function (f) {
-      queue.push({ file: f, status: "Queued", error: null });
+    var accepted = [];
+    var rejected = [];
+
+    Array.prototype.forEach.call(list, function (file) {
+      if (allowedCompressionFile(file)) accepted.push(file);
+      else rejected.push(file.name);
     });
-    setErr($("err"), "");
+
+    accepted.forEach(function (file) {
+      queue.push({ file: file, status: "Queued", error: null });
+    });
+
+    if (rejected.length) {
+      setErr(
+        $("err"),
+        "Rejected out-of-scope file(s): " + rejected.join(", ")
+        + ". Only PDF, text, data, and supported source-code files "
+        + "may be compressed."
+      );
+    } else {
+      setErr($("err"), "");
+    }
     renderQueue();
   }
 
@@ -303,15 +338,35 @@
   // ---- archive create -----------------------------------------------------
   var archFiles = [];
   function pickArchive(list) {
-    archFiles = Array.prototype.slice.call(list).filter(function (f) {
-      return f.size > 0;
+    var selected = Array.prototype.slice.call(list);
+    var rejected = [];
+
+    archFiles = selected.filter(function (file) {
+      if (file.size <= 0) return false;
+      if (!allowedCompressionFile(file)) {
+        rejected.push(file.webkitRelativePath || file.name);
+        return false;
+      }
+      return true;
     });
-    var total = archFiles.reduce(function (a, f) { return a + f.size; }, 0);
+
+    var total = archFiles.reduce(function (sum, file) {
+      return sum + file.size;
+    }, 0);
     $("archInfo").textContent = archFiles.length
-      ? archFiles.length + " file(s) selected · " + human(total)
-      : "No files selected.";
+      ? archFiles.length + " in-scope file(s) selected · " + human(total)
+      : "No in-scope files selected.";
     $("packBtn").disabled = archFiles.length === 0;
     setErr($("archErr"), "");
+
+    if (rejected.length) {
+      setErr(
+        $("archErr"),
+        "Rejected " + rejected.length + " out-of-scope file(s): "
+        + rejected.join(", ")
+      );
+    }
+
     if (CFG && total > CFG.max_batch_size) {
       setErr($("archErr"), "Selection is " + human(total) + ", over the "
         + human(CFG.max_batch_size) + " batch limit.");

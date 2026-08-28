@@ -163,6 +163,36 @@ def test_auth(app, appmod):
               row is not None and "correct-horse" not in row["password_hash"])
 
 
+def test_logout_back_navigation_is_not_authenticated(app):
+    """A signed-out browser must not reuse an authenticated workspace page."""
+    c = app.test_client()
+    login(c, "alice", "correct-horse")
+
+    dashboard = c.get("/dashboard")
+    cache_control = dashboard.headers.get("Cache-Control", "")
+    check("authenticated pages are marked no-store",
+          dashboard.status_code == 200
+          and "no-store" in cache_control
+          and "max-age=0" in cache_control
+          and "private" in cache_control,
+          cache_control)
+    check("authenticated pages carry legacy no-cache headers",
+          dashboard.headers.get("Pragma") == "no-cache"
+          and dashboard.headers.get("Expires") == "0",
+          dict(dashboard.headers))
+    check("authenticated shell handles browser back-forward restoration",
+          b'addEventListener("pageshow"' in dashboard.data
+          and b"event.persisted" in dashboard.data
+          and b"window.location.reload()" in dashboard.data)
+
+    c.post("/logout", follow_redirects=False)
+    protected = c.get("/dashboard", follow_redirects=False)
+    check("dashboard requires sign-in again after logout",
+          protected.status_code in (301, 302)
+          and "/login" in protected.headers.get("Location", ""),
+          protected.headers.get("Location"))
+
+
 def test_rate_limit(app):
     c = app.test_client()
     codes = []
@@ -252,7 +282,10 @@ def test_single_roundtrip(app):
     c = app.test_client()
     login(c, "alice", "correct-horse")
     ok = True
-    for path in corpus_files(4):
+    paths = [p for p in corpus_files(4)
+             if os.path.splitext(p)[1].lower()
+             in config.ALLOWED_COMPRESSION_EXTENSIONS]
+    for path in paths:
         data = open(path, "rb").read()
         name = os.path.basename(path)
         r = c.post("/api/compress",
@@ -271,7 +304,8 @@ def test_single_roundtrip(app):
         if hashlib.sha256(restored).digest() != hashlib.sha256(data).digest():
             ok = False
             print("   round trip mismatch:", name)
-    check("single-file SHA-256 round trip (all corpus files)", ok)
+    check("single-file SHA-256 round trip (in-scope corpus files)",
+          ok and bool(paths))
 
 
 def test_batch_roundtrip(app):
@@ -279,7 +313,10 @@ def test_batch_roundtrip(app):
     login(c, "alice", "correct-horse")
     ok = True
     batch = "testbatch1"
-    for path in corpus_files(3):
+    paths = [p for p in corpus_files(3)
+             if os.path.splitext(p)[1].lower()
+             in config.ALLOWED_COMPRESSION_EXTENSIONS]
+    for path in paths:
         data = open(path, "rb").read()
         r = c.post("/api/batch", data={
             "file": (io.BytesIO(data), os.path.basename(path)),
@@ -293,7 +330,7 @@ def test_batch_roundtrip(app):
         import afc2
         if afc2.decompress_bytes(blob) != data:
             ok = False
-    check("batch endpoint SHA-256 round trip", ok)
+    check("batch endpoint SHA-256 round trip", ok and bool(paths))
 
     r = c.get("/report.csv?batch_id=" + batch)
     check("batch CSV report exports",
@@ -304,7 +341,9 @@ def test_batch_roundtrip(app):
 def test_archive(app):
     c = app.test_client()
     login(c, "alice", "correct-horse")
-    files = corpus_files(4)
+    files = [p for p in corpus_files(4)
+             if os.path.splitext(p)[1].lower()
+             in config.ALLOWED_COMPRESSION_EXTENSIONS]
     payload = [("folder/sub/" + os.path.basename(p), open(p, "rb").read())
                for p in files]
 
@@ -1787,7 +1826,9 @@ def test_entropy_reflects_file_type(app):
                        ("random", "benchmarks/corpus/random.bin")):
         fp = os.path.join(ROOT, rel)
         r = c.post("/api/entropy", data={
-            "file": (io.BytesIO(open(fp, "rb").read()), os.path.basename(fp))})
+            "file": (io.BytesIO(open(fp, "rb").read()),
+                     "random.txt" if label == "random"
+                     else os.path.basename(fp))})
         j = r.get_json()
         got[label] = j
         check("entropy computed for %s" % label,
@@ -1861,7 +1902,7 @@ def test_tree_and_attribution(app):
     # near-random file must be reported as raw-stored, not faked
     fp = os.path.join(ROOT, "benchmarks/corpus/random.bin")
     j = c.post("/api/compress", data={
-        "file": (io.BytesIO(open(fp, "rb").read()), "random.bin")}).get_json()
+        "file": (io.BytesIO(open(fp, "rb").read()), "random.txt")}).get_json()
     t = c.get("/api/tree/" + j["token"]).get_json()
     check("near-random file reported as raw-stored, not a fabricated tree",
           t["tree"].get("raw") is True and "raw" in t["explain"].lower(),
@@ -1918,13 +1959,13 @@ def test_preset_recorded_and_used(app):
     sizes = {}
     for name in ("fast", "maximum"):
         j = c.post("/api/compress", data={
-            "file": (io.BytesIO(data), "grammar.lsp"), "preset": name}).get_json()
+            "file": (io.BytesIO(data), "grammar.txt"), "preset": name}).get_json()
         sizes[name] = j["compressed"]
         check("API records preset '%s'" % name, j.get("preset") == name, j.get("preset"))
         check("API returns an explainer for '%s'" % name,
               bool(j.get("explain")), j.get("explain"))
     rows = c.get("/api/history/search?per_page=100").get_json()["rows"]
-    presets_seen = {r["preset"] for r in rows if r["filename"] == "grammar.lsp"}
+    presets_seen = {r["preset"] for r in rows if r["filename"] == "grammar.txt"}
     check("preset persisted to compression_history",
           {"fast", "maximum"} <= presets_seen, presets_seen)
 
@@ -1963,7 +2004,7 @@ def test_status_and_preview(app):
           j["kind"] == "text" and len(j["lines"]) > 0, j.get("kind"))
     fp = os.path.join(ROOT, "benchmarks/corpus/random.bin")
     j = c.post("/api/preview", data={
-        "file": (io.BytesIO(open(fp, "rb").read()), "random.bin")}).get_json()
+        "file": (io.BytesIO(open(fp, "rb").read()), "random.txt")}).get_json()
     check("binary preview returns a hex view",
           j["kind"] == "hex" and len(j["lines"]) > 0, j.get("kind"))
 
@@ -1980,7 +2021,9 @@ def test_part1_still_works(app):
     check("CSV report still exports", r.status_code == 200
           and b"TOTAL" in r.data)
     # archive flow untouched
-    files = corpus_files(3)
+    files = [p for p in corpus_files(3)
+             if os.path.splitext(p)[1].lower()
+             in config.ALLOWED_COMPRESSION_EXTENSIONS]
     payload = [("f/" + os.path.basename(p), open(p, "rb").read()) for p in files]
     r = c.post("/api/archive/create", data={
         "files": [(io.BytesIO(d), n) for n, d in payload],
@@ -2034,7 +2077,10 @@ def test_decompress_endpoint_roundtrip(app):
     c = app.test_client()
     login(c, "alice", "correct-horse")
     ok = True
-    for path in corpus_files(4):
+    paths = [p for p in corpus_files(4)
+             if os.path.splitext(p)[1].lower()
+             in config.ALLOWED_COMPRESSION_EXTENSIONS]
+    for path in paths:
         data = open(path, "rb").read()
         name = os.path.basename(path)
         j = c.post("/api/compress",
@@ -2052,7 +2098,8 @@ def test_decompress_endpoint_roundtrip(app):
         if hashlib.sha256(restored).hexdigest() != hashlib.sha256(data).hexdigest():
             ok = False
             print("   decompress mismatch:", name)
-    check("/api/decompress SHA-256 round trip (corpus)", ok)
+    check("/api/decompress SHA-256 round trip (in-scope corpus)",
+          ok and bool(paths))
 
 
 def test_decompress_reports_verification(app):
@@ -3193,7 +3240,7 @@ def test_docx_scope_cannot_be_bypassed_by_renaming(app, appmod):
     check(
         "scope helper detects renamed Word OOXML content",
         appmod.compression_scope_error(
-            "report.bin",
+            "report.txt",
             data,
         ) is not None,
     )
@@ -3204,7 +3251,7 @@ def test_docx_scope_cannot_be_bypassed_by_renaming(app, appmod):
     batch_response = client.post(
         "/api/batch",
         data={
-            "file": (io.BytesIO(data), "renamed.bin"),
+            "file": (io.BytesIO(data), "renamed.txt"),
         },
     )
 
@@ -3222,7 +3269,7 @@ def test_docx_scope_cannot_be_bypassed_by_renaming(app, appmod):
         data={
             "archive_name": "scope-test",
             "files": [
-                (io.BytesIO(data), "folder/report.docx"),
+                (io.BytesIO(data), "folder/report.txt"),
             ],
         },
     )
@@ -3237,10 +3284,76 @@ def test_docx_scope_cannot_be_bypassed_by_renaming(app, appmod):
     )
 
 
+def test_image_scope_cannot_be_bypassed_by_renaming(app, appmod):
+    """Standalone images are rejected by name and by byte signature."""
+    jpeg = b"\xff\xd8\xff\xe0" + (b"\x00" * 512)
+
+    check(
+        "scope helper rejects JPEG by filename",
+        appmod.compression_scope_error("photo.jpg", jpeg) is not None,
+    )
+    check(
+        "scope helper detects JPEG renamed with an allowed extension",
+        appmod.compression_scope_error("photo.txt", jpeg) is not None,
+    )
+
+    client = app.test_client()
+    login(client, "alice", "correct-horse")
+    response = client.post(
+        "/api/compress",
+        data={"file": (io.BytesIO(jpeg), "renamed-image.txt")},
+    )
+    result = response.get_json()
+    check(
+        "web compression rejects a renamed standalone image",
+        response.status_code == 400
+        and result.get("out_of_scope") is True,
+        result,
+    )
+
+    batch_response = client.post(
+        "/api/batch",
+        data={"file": (io.BytesIO(jpeg), "renamed-batch-image.txt")},
+    )
+    batch_result = batch_response.get_json()
+    check(
+        "batch compression rejects a renamed standalone image",
+        batch_response.status_code == 400
+        and batch_result.get("out_of_scope") is True,
+        batch_result,
+    )
+
+    archive_response = client.post(
+        "/api/archive/create",
+        data={
+            "archive_name": "image-scope-test",
+            "files": [
+                (io.BytesIO(jpeg), "folder/renamed-archive-image.txt"),
+            ],
+        },
+    )
+    archive_result = archive_response.get_json()
+    check(
+        "archive creation rejects a renamed standalone image",
+        archive_response.status_code == 400
+        and archive_result.get("out_of_scope") is True,
+        archive_result,
+    )
+
+    page = client.get("/compress").data
+    check(
+        "compression page cache-busts the stricter queue scripts",
+        b"/static/js/queue.js?v=" in page
+        and b"/static/js/compress.js?v=" in page
+        and b"scope-filter" in page,
+    )
+
+
 def main():
     app, appmod, dbpath = make_app()
     try:
         test_auth(app, appmod)
+        test_logout_back_navigation_is_not_authenticated(app)
         test_rate_limit(app)
         test_forced_password_change(app)
         test_role_gate(app)
@@ -3306,6 +3419,7 @@ def main():
         test_docx_member_inventory_and_exact_deflate_recipes()
         test_afc4_docx_exact_and_versioned(app)
         test_docx_scope_cannot_be_bypassed_by_renaming(app, appmod)
+        test_image_scope_cannot_be_bypassed_by_renaming(app, appmod)
         test_afc5_self_verifying_envelope()
         test_afc6_pdf_flate_exact_and_versioned()
         test_afc4_corrupt_input_is_safe()

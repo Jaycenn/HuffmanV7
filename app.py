@@ -309,7 +309,7 @@ class OutOfScopeFileError(ValueError):
 
 
 def compression_scope_error(filename, data=b""):
-    """Return an explanation when a new input is a Word OOXML document."""
+    """Return an explanation when a new input is outside the study scope."""
     name = (
         str(filename or "")
         .replace("\\", "/")
@@ -328,7 +328,24 @@ def compression_scope_error(filename, data=b""):
             "JSON, SQL, XML, HTML, LOG, or source code."
         )
 
+    if not any(
+        name.endswith(extension)
+        for extension in config.ALLOWED_COMPRESSION_EXTENSIONS
+    ):
+        return (
+            "This file type is outside the declared scope of this study. "
+            "Only PDF, text, data, and supported source-code files may "
+            "be compressed."
+        )
+
     raw = bytes(data or b"")
+
+    if filetypes.sniff(raw).get("family") == filetypes.IMAGE:
+        return (
+            "Standalone image files are outside the declared scope of this "
+            "study and cannot be compressed. Images embedded inside an "
+            "in-scope PDF remain supported."
+        )
 
     is_zip_package = (
         len(raw) >= 4
@@ -1483,6 +1500,23 @@ def create_app(db_path=None, testing=False, storage_dir=None):
                        "main.api_config"}
             if request.endpoint not in allowed:
                 return redirect(url_for("auth.change_password"))
+
+    @app.after_request
+    def _prevent_authenticated_response_caching(response):
+        """Do not let browsers reuse protected content after sign-out.
+
+        The session is cleared by the logout route, but a browser can restore
+        the previous workspace from its history without contacting Flask.
+        These headers cover normal HTTP caching; the authenticated-shell
+        ``pageshow`` guard covers back-forward-cache restoration.
+        """
+        if g.get("user") is not None and request.endpoint != "static":
+            response.headers["Cache-Control"] = (
+                "no-store, no-cache, must-revalidate, max-age=0, private"
+            )
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
 
     @app.context_processor
     def _inject():
