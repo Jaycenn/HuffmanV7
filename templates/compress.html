@@ -216,7 +216,8 @@
     <p class="text-sm">Drop files here, or click to choose (multiple allowed)</p>
     <p class="font-data text-xs text-dim dark:text-[#9c968a] mt-1" id="limitHint">…</p>
   </div>
-  <input type="file" id="fileInput" class="hidden" multiple>
+  <input type="file" id="fileInput" class="hidden" multiple
+         accept=".pdf,.txt,.csv,.tsv,.json,.sql,.xml,.html,.htm,.log,.py,.js,.c,.cpp,.h,.hpp">
 
   <!-- Feature 6 + 11: pre-compression estimate and preview, shown the moment
        a file is selected and BEFORE any compression runs -->
@@ -350,10 +351,12 @@
       <label class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
                     hover:border-maroon cursor-pointer">
         Choose folder<input type="file" id="dirInput" webkitdirectory directory
-                            multiple class="hidden"></label>
+                            multiple class="hidden"
+                            accept=".pdf,.txt,.csv,.tsv,.json,.sql,.xml,.html,.htm,.log,.py,.js,.c,.cpp,.h,.hpp"></label>
       <label class="px-4 py-2 rounded-md border border-line dark:border-[#35322c] text-sm
                     hover:border-maroon cursor-pointer">
-        Choose files<input type="file" id="multiInput" multiple class="hidden"></label>
+        Choose files<input type="file" id="multiInput" multiple class="hidden"
+                           accept=".pdf,.txt,.csv,.tsv,.json,.sql,.xml,.html,.htm,.log,.py,.js,.c,.cpp,.h,.hpp"></label>
       <input id="archName" placeholder="archive name" value="archive"
              class="border border-line dark:border-[#35322c] rounded-md px-3 py-2 text-sm">
       <button id="packBtn" disabled
@@ -373,8 +376,12 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/queue.js') }}"></script>
-<script src="{{ url_for('static', filename='js/compress.js') }}"></script>
+{# The scope suffix gives browsers a new URL for the stricter picker/drop
+   validation instead of restoring an older cached JavaScript response. #}
+<script src="{{ url_for('static', filename='js/queue.js',
+                        v='scope-filter') }}"></script>
+<script src="{{ url_for('static', filename='js/compress.js',
+                        v='scope-filter') }}"></script>
 <script>
 // Baseline is the single-tier Huffman control kept for the method comparison,
 // not a setting anyone would pick to get a smaller file. The presets tune the
