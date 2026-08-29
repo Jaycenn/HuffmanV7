@@ -509,8 +509,11 @@ def _pats_blob(plist):
 def segment_ids(data: bytes, plist) -> array:
     outp, outn = ctypes.c_void_p(), ctypes.c_uint32()
     blob = _pats_blob(plist)
-    _LIB.segment_ids(data, len(data), blob, len(blob),
-                     ctypes.byref(outp), ctypes.byref(outn))
+    result = _LIB.segment_ids(data, len(data), blob, len(blob),
+                              ctypes.byref(outp), ctypes.byref(outn))
+    if result != 0:
+        raise ValueError("native segment_ids rejected the pattern buffer "
+                         "(error %d)" % result)
     raw = ctypes.string_at(outp, outn.value * 4)
     _LIB.afc_free(outp)
     a = array("I")

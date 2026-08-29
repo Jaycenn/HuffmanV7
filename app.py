@@ -74,6 +74,7 @@ DESIGN NOTES
 """
 import csv
 import hashlib
+import logging
 import sys
 import io
 import os
@@ -97,6 +98,8 @@ import config
 import db
 import filetypes   # content sniffing so restored files regain their real name
 import presets     # Part 2: Fast/Balanced/Maximum tunable presets
+
+_LOGGER = logging.getLogger(__name__)
 
 # Every container version the engine can read. AFC3 is direct component-aware
 # routing; AFC4 adds exact DOCX XML/token reconstruction; AFC6 adds exact PDF
@@ -169,7 +172,11 @@ def _persist_history_artifact(history_id, user_id, name, blob,
             try:
                 artifact_store.delete(key)
             except Exception:
-                pass
+                _LOGGER.exception(
+                    "Could not remove stored artifact %s while rolling back "
+                    "a failed persistence operation.",
+                    key,
+                )
         db.delete_history_group(history_id, user_id)
         raise
     return digest
@@ -836,7 +843,8 @@ def api_decompress():
             mode_name = ((mode_name + "; " + component_mode)
                          if mode_name else component_mode)
         except Exception:
-            pass
+            _LOGGER.debug("Unable to parse optional component metadata",
+                          exc_info=True)
     elif payload_container in ("AFC1", "AFC2"):
         try:
             meta = analysis.parse_container(inspected)
@@ -846,7 +854,8 @@ def api_decompress():
             mode_name = ((mode_name + "; " + payload_mode)
                          if mode_name else payload_mode)
         except Exception:
-            pass
+            _LOGGER.debug("Unable to parse optional AFC metadata",
+                          exc_info=True)
 
     t0 = time.perf_counter()
     try:

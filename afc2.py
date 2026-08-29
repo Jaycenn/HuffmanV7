@@ -34,6 +34,7 @@ integer-only and deterministic; the pure-Python path and the native path
 """
 
 import hashlib
+import logging
 import os
 import sys
 import time
@@ -44,6 +45,8 @@ import afc
 from afc import (MODE_ADAPTIVE, NOCODE_COST, est_code_len, huffman_lengths,
                  package_merge_lengths, canonical_codes, pack_ids,
                  finish_container, emit_raw)
+
+_LOGGER = logging.getLogger(__name__)
 
 try:
     import afc_native as _native
@@ -515,7 +518,11 @@ def compress_bytes(data: bytes, adaptive: bool = True,
             if blob is not None:
                 return blob
         except Exception:
-            pass          # any analysis problem falls back to the plain path
+            _LOGGER.warning(
+                "Container-aware analysis failed; falling back to the "
+                "plain compression path.",
+                exc_info=True,
+            )
 
     native_ok = (backend != "python" and NATIVE
                  and hasattr(_native, "compress")
@@ -685,7 +692,8 @@ def _cli():
                     t0 = time.perf_counter()
                     out = decompress_bytes(blob)
                     dt.append((time.perf_counter() - t0) * 1000)
-                assert out == data, f"round-trip failed on {path}"
+                if out != data:
+                    raise RuntimeError(f"round-trip failed on {path}")
                 ct.sort()
                 dt.sort()
                 print(f"{path},{label},{len(data)},{len(blob)},"
