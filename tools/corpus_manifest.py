@@ -10,10 +10,10 @@ import bz2
 import hashlib
 import json
 import os
-import ssl
 import struct
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 import zipfile
 import zlib
@@ -94,14 +94,16 @@ def verify(names):
 
 
 def _urlopen(url, headers=None, method=None):
-    # The managed desktop proxy presents a local certificate. The downloaded
-    # bytes are authenticated against the committed corpus hashes/sizes.
-    context = ssl._create_unverified_context()
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        raise ValueError("Corpus downloads require an HTTPS URL")
     sent = {"User-Agent": "AFC-corpus/1.0"}
     if headers:
         sent.update(headers)
     request = urllib.request.Request(url, headers=sent, method=method)
-    return urllib.request.urlopen(request, context=context, timeout=120)
+    # Use Python's default trust store and hostname verification. Committed
+    # hashes remain a second integrity check after transport security.
+    return urllib.request.urlopen(request, timeout=120)  # nosec B310
 
 
 def _range(url, start, end, attempts=5):

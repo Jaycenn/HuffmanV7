@@ -28,6 +28,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
+#include <numeric>
 #include <string>
 #include <string_view>
 #ifndef AFC_NO_THREADS
@@ -75,7 +77,12 @@ static const int DP_ROUNDS = 3;
 static const uint32_t TUNE_SMALL = 65536;
 
 static inline int bitlen_u32(uint32_t q) {
-  return q ? 32 - __builtin_clz(q) : 0;
+  int bits = 0;
+  while (q) {
+    ++bits;
+    q >>= 1;
+  }
+  return bits;
 }
 
 static inline int est_code_len(uint32_t f, uint32_t total) {
@@ -162,12 +169,15 @@ struct Codes {
     code.assign(max_id + 1, 0);
     len.assign(max_id + 1, 0);
     vector<pair<int, uint32_t>> syms;  // (len, id)
-    syms.reserve(lengths.size());
-    for (auto& kv : lengths) syms.push_back({kv.second, kv.first});
+    syms.resize(lengths.size());
+    transform(lengths.begin(), lengths.end(), syms.begin(),
+              [](const auto& kv) {
+                return make_pair(kv.second, kv.first);
+              });
     sort(syms.begin(), syms.end());
     uint32_t c = 0;
     int prev = syms.empty() ? 1 : syms[0].first;
-    for (auto& s : syms) {
+    for (const auto& s : syms) {
       c <<= (s.first - prev);
       prev = s.first;
       code[s.second] = c;
@@ -211,12 +221,12 @@ static string emit_afc1_c(int mode, uint64_t orig,
   out.push_back((char)mode);
   write_varint(out, orig);
   write_varint(out, patterns.size());
-  for (auto& p : patterns) {
+  for (const auto& p : patterns) {
     write_varint(out, p.size());
     out += p;
   }
   write_varint(out, lens_sorted.size());
-  for (auto& kv : lens_sorted) {
+  for (const auto& kv : lens_sorted) {
     write_varint(out, kv.first);
     out.push_back((char)kv.second);
   }
@@ -234,7 +244,7 @@ static string emit_afc2_c(int mode, uint64_t orig,
   size_t U = lens_sorted.size();
   write_varint(out, U);
   int64_t prev = -1;
-  for (auto& kv : lens_sorted) {
+  for (const auto& kv : lens_sorted) {
     write_varint(out, prev < 0 ? kv.first : kv.first - prev - 1);
     prev = kv.first;
   }
@@ -249,28 +259,30 @@ static string emit_afc2_c(int mode, uint64_t orig,
   if (!patterns.empty()) {
     bool can = true;
     size_t rawlen = 0;
-    for (auto& p : patterns) {
+    for (const auto& p : patterns) {
       rawlen += p.size();
-      for (unsigned char b : p)
-        if (codes.len[b] == 0) { can = false; break; }
+      if (any_of(p.begin(), p.end(),
+                 [&](unsigned char b) { return codes.len[b] == 0; })) {
+        can = false;
+      }
       if (!can) break;
     }
     string blob;
     if (can) {
       BitWriter bw;
-      for (auto& p : patterns)
+      for (const auto& p : patterns)
         for (unsigned char b : p) bw.put(codes.code[b], codes.len[b]);
       bw.finish();
       blob = move(bw.buf);
     }
     if (can && blob.size() < rawlen) {
       out.push_back((char)1);
-      for (auto& p : patterns) write_varint(out, p.size());
+      for (const auto& p : patterns) write_varint(out, p.size());
       out += blob;
     } else {
       out.push_back((char)0);
-      for (auto& p : patterns) write_varint(out, p.size());
-      for (auto& p : patterns) out += p;
+      for (const auto& p : patterns) write_varint(out, p.size());
+      for (const auto& p : patterns) out += p;
     }
   }
   out += bits;
@@ -292,8 +304,11 @@ static string finish_container_c(int mode, const uint8_t* data, uint32_t n,
                                  const Codes& codes, const string& bits,
                                  int fmt) {
   vector<pair<uint32_t, int>> lens_sorted;
-  lens_sorted.reserve(lengths.size());
-  for (auto& kv : lengths) lens_sorted.push_back({kv.first, kv.second});
+  lens_sorted.resize(lengths.size());
+  transform(lengths.begin(), lengths.end(), lens_sorted.begin(),
+            [](const auto& kv) {
+              return make_pair(kv.first, kv.second);
+            });
   sort(lens_sorted.begin(), lens_sorted.end());
   string blob;
   if (fmt == 1) {
@@ -302,9 +317,9 @@ static string finish_container_c(int mode, const uint8_t* data, uint32_t n,
     blob = emit_afc2_c(mode, n, patterns, lens_sorted, codes, bits);
   } else {
     blob = emit_afc1_c(mode, n, patterns, lens_sorted, bits);
-    bool le16 = true;
-    for (auto& kv : lens_sorted)
-      if (kv.second < 1 || kv.second > 16) { le16 = false; break; }
+    bool le16 = all_of(
+        lens_sorted.begin(), lens_sorted.end(),
+        [](const auto& kv) { return kv.second >= 1 && kv.second <= 16; });
     if (le16) {
       string b2 = emit_afc2_c(mode, n, patterns, lens_sorted, codes, bits);
       if (b2.size() < blob.size()) blob = move(b2);
@@ -326,7 +341,11 @@ static bool word_char(uint8_t c) {
 static int64_t bit_cost_gain(const string& pat, uint32_t f,
                              const int* lit_bits, int sym_bits) {
   int64_t spelled = 0;
-  for (unsigned char b : pat) spelled += lit_bits[b];
+  spelled = accumulate(
+      pat.begin(), pat.end(), int64_t{0},
+      [&](int64_t total, unsigned char b) {
+        return total + lit_bits[b];
+      });
   return (int64_t)f * (spelled - sym_bits) - 8 * ((int64_t)pat.size() + 3);
 }
 
@@ -477,7 +496,7 @@ static void select_candidates(const uint8_t* data, uint32_t n, int min_freq,
   unordered_map<string, uint32_t> cands;
   cands.reserve(maps[0].used + maps[1].used + 64);
   for (int L = NGRAM_MIN; L <= ngram_max; ++L) {
-    U64Counter& m = maps[L - NGRAM_MIN];
+    const U64Counter& m = maps[L - NGRAM_MIN];
     for (size_t slot = 0; slot < m.key.size(); ++slot) {
       if (m.key[slot] == 0 || m.cnt[slot] < (uint32_t)min_freq) continue;
       char buf[8];
@@ -505,7 +524,7 @@ static void select_candidates(const uint8_t* data, uint32_t n, int min_freq,
         ++i;
       }
     }
-    for (auto& kv : words)
+    for (const auto& kv : words)
       if (kv.second >= (uint32_t)min_freq &&
           cands.find(kv.first) == cands.end())
         cands[kv.first] = kv.second;
@@ -513,7 +532,7 @@ static void select_candidates(const uint8_t* data, uint32_t n, int min_freq,
   // Bit Cost Decision Engine gate + deterministic ranking
   vector<pair<int64_t, string>> scored;
   scored.reserve(cands.size());
-  for (auto& kv : cands) {
+  for (const auto& kv : cands) {
     int64_t gain = bit_cost_gain(kv.first, kv.second, lit_bits,
                                  est_code_len(kv.second, n));
     if (gain > 0) scored.push_back({gain, kv.first});
@@ -610,7 +629,11 @@ struct Automaton {
 
   void build(const vector<string>& patterns) {
     size_t edges = 1;
-    for (auto& p : patterns) edges += p.size();
+    edges = accumulate(
+        patterns.begin(), patterns.end(), edges,
+        [](size_t total, const string& p) {
+          return total + p.size();
+        });
     size_t cap = 16;
     while (cap < edges * 2) cap <<= 1;      // load factor <= 0.5
     gk.assign(cap, 0);
@@ -657,14 +680,14 @@ struct Automaton {
 
     vector<int32_t> queue;
     queue.reserve(fail.size());
-    for (auto& kv : kids[0]) {
+    for (const auto& kv : kids[0]) {
       fail[kv.second] = 0;
       out_link[kv.second] = 0;
       queue.push_back(kv.second);
     }
     for (size_t qi = 0; qi < queue.size(); ++qi) {
       int32_t u = queue[qi];
-      for (auto& kv : kids[u]) {
+      for (const auto& kv : kids[u]) {
         uint8_t c = kv.first;
         int32_t v = kv.second;
         int32_t f = fail[u];
@@ -833,8 +856,11 @@ static void grow_blocks(vector<uint32_t>& ids, vector<string>& patterns,
     }
     for (size_t k = 0; k < patterns.size(); ++k) {
       const string& p = patterns[k];
-      int64_t sp = 0;
-      for (unsigned char ch : p) sp += lit_bits[ch];
+      int64_t sp = accumulate(
+          p.begin(), p.end(), int64_t{0},
+          [&](int64_t total, unsigned char ch) {
+            return total + lit_bits[ch];
+          });
       spelled[256 + k] = sp;
       symlen[256 + k] = (uint32_t)p.size();
     }
@@ -938,7 +964,9 @@ static void final_audit(vector<uint32_t>& ids, vector<string>& patterns,
     for (uint32_t sid : ids) {
       if (sid >= 256 && drop[sid]) {
         if (counts[sid])
-          for (unsigned char c : patterns[sid - 256]) out.push_back(c);
+          transform(patterns[sid - 256].begin(),
+                    patterns[sid - 256].end(), back_inserter(out),
+                    [](unsigned char c) { return uint32_t{c}; });
         continue;
       }
       out.push_back(sid);
@@ -956,8 +984,10 @@ static void final_audit(vector<uint32_t>& ids, vector<string>& patterns,
     }
   }
   patterns = move(kept);
-  for (auto& sid : ids)
-    if (sid >= 256) sid = remap[sid];
+  transform(ids.begin(), ids.end(), ids.begin(),
+            [&](uint32_t sid) {
+              return sid >= 256 ? remap[sid] : sid;
+            });
 }
 
 static void build_lengths(const vector<uint32_t>& ids,
@@ -966,8 +996,11 @@ static void build_lengths(const vector<uint32_t>& ids,
   counts.reserve(1024);
   for (uint32_t sid : ids) ++counts[sid];
   vector<pair<uint32_t, uint32_t>> items;  // (freq, id)
-  items.reserve(counts.size());
-  for (auto& kv : counts) items.push_back({kv.second, kv.first});
+  items.resize(counts.size());
+  transform(counts.begin(), counts.end(), items.begin(),
+            [](const auto& kv) {
+              return make_pair(kv.second, kv.first);
+            });
   package_merge(move(items), MAX_CODE_LEN, lengths);
 }
 
@@ -1175,7 +1208,7 @@ struct DecTable {
                                        : a.first < b.first;
          });
     maxlen = 0;
-    for (auto& s : syms)
+    for (const auto& s : syms)
       if (s.second > maxlen) maxlen = s.second;
     if (maxlen == 0 || maxlen > 63 || syms.empty()) return false;
     if (maxlen <= 16) {
@@ -1185,7 +1218,7 @@ struct DecTable {
       adv.assign(size, 0);
       uint64_t code = 0;
       int prev = syms[0].second;
-      for (auto& s : syms) {
+      for (const auto& s : syms) {
         int L = s.second;
         code <<= (L - prev);
         prev = L;
@@ -1461,9 +1494,31 @@ AFC_API int count_ngrams(const uint8_t* data, uint32_t n, uint32_t window,
 // pats blob: [u32 count] then per entry: [u8 len][bytes]
 // out: u32 ids (literal byte value, or 256+pattern_index)
 AFC_API int segment_ids(const uint8_t* data, uint32_t n, const uint8_t* pats,
-                uint32_t /*patn*/, void** out, uint32_t* outn) {
-  uint32_t count;
-  memcpy(&count, pats, 4);
+                uint32_t patn, void** out, uint32_t* outn) {
+  if (!out || !outn) return -1;
+  *out = nullptr;
+  *outn = 0;
+  if ((n && !data) || !pats || patn < 4) return -1;
+
+  uint32_t count = (uint32_t)pats[0]
+                 | ((uint32_t)pats[1] << 8)
+                 | ((uint32_t)pats[2] << 16)
+                 | ((uint32_t)pats[3] << 24);
+
+  // Validate the complete length-prefixed pattern buffer before reading or
+  // allocating from values supplied by its header.
+  const uint8_t* scan = pats + 4;
+  uint32_t remaining = patn - 4;
+  for (uint32_t i = 0; i < count; ++i) {
+    if (remaining < 1) return -1;
+    uint32_t L = *scan++;
+    --remaining;
+    if (L == 0 || L > remaining) return -1;
+    scan += L;
+    remaining -= L;
+  }
+  if (remaining != 0) return -1;
+
   const uint8_t* p = pats + 4;
   vector<string> plist;
   plist.reserve(count);
@@ -1491,7 +1546,7 @@ AFC_API int segment_ids(const uint8_t* data, uint32_t n, const uint8_t* pats,
     uint8_t b = data[i];
     long midx = -1;
     uint32_t mlen = 0;
-    for (auto& pr : byfirst[b]) {
+    for (const auto& pr : byfirst[b]) {
       uint32_t L = (uint32_t)pr.first;
       if (i + L <= n) {
         key.assign((const char*)data + i, L);
@@ -1512,8 +1567,15 @@ AFC_API int segment_ids(const uint8_t* data, uint32_t n, const uint8_t* pats,
     }
   }
   *outn = (uint32_t)ids.size();
-  *out = malloc(ids.size() * 4);
-  memcpy(*out, ids.data(), ids.size() * 4);
+  size_t bytes = ids.size() * sizeof(uint32_t);
+  *out = malloc(bytes ? bytes : 1);
+  if (!*out) {
+    *outn = 0;
+    return -2;
+  }
+  if (bytes) {
+    copy(ids.begin(), ids.end(), static_cast<uint32_t*>(*out));
+  }
   return 0;
 }
 

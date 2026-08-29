@@ -14,9 +14,12 @@ without exposing the storage layout to routes, database rows, or users.
 """
 import hashlib
 import json
+import logging
 import re
 
 import config
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class StorageUnavailable(RuntimeError):
@@ -154,7 +157,11 @@ def put(key, blob):
             try:
                 bucket.remove(uploaded)
             except Exception:
-                pass
+                _LOGGER.exception(
+                    "Could not remove %d uploaded Supabase object(s) while "
+                    "rolling back a failed multipart upload.",
+                    len(uploaded),
+                )
         raise
 
 
